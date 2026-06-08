@@ -1,0 +1,28 @@
+# Dependencies — never commit these
+node_modules/
+
+# Sensitive local-dev files — contain API keys / secrets
+server.py
+generate-escrow.js
+LAUNCH.bat
+redeploy.ps1
+*.log
+
+# Private key / seed phrase / wallet files — NEVER commit these
+*.txt
+private*
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Vercel & Claude local config (machine-specific, not needed in repo)
+.vercel
+.claude

@@ -1,0 +1,5 @@
+{
+  "name": "pac-arena",
+  "main": "party/index.js",
+  "compatibilityDate": "2023-12-01"
+}

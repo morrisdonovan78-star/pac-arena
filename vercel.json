@@ -1,0 +1,30 @@
+{
+  "regions": ["iad1"],
+  "functions": {
+    "api/rpc.js":        { "regions": ["iad1"], "maxDuration": 15 },
+    "api/balance.js":    { "regions": ["iad1"], "maxDuration": 10 },
+    "api/settle.js":     { "regions": ["iad1"], "maxDuration": 60 },
+    "api/ably-token.js": { "regions": ["iad1"], "maxDuration": 5  },
+    "api/price.js":      { "regions": ["iad1"], "maxDuration": 10 },
+    "api/privy.js":      { "regions": ["iad1"], "maxDuration": 10 }
+  },
+  "rewrites": [
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Cache-Control",          "value": "no-cache, no-store, must-revalidate" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options",        "value": "SAMEORIGIN" }
+      ]
+    },
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+# Vercel deployment exclusions
+# These files are excluded from the Vercel build bundle
+
+# Local dev only — not needed on Vercel
+node_modules/
+server.py
+LAUNCH.bat
+partykit.json
+party/
+
+# Security — must never be deployed
+generate-escrow.js
