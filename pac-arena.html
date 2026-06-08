@@ -2774,7 +2774,11 @@ async function instantCashout(){
     if(!r.ok||d.error) throw new Error(d.error||'Server error');
     ST.hasEscrow=false;
     await refreshBal();
-    addToast('✅ +'+(d.playerCut/solanaWeb3.LAMPORTS_PER_SOL).toFixed(5)+' SOL received!','#39FF14');
+    if(d.confirmed===false){
+      addToast('⏳ TX sent — check wallet in ~30s for +SOL','#FFD700');
+    } else {
+      addToast('✅ +'+(d.playerCut/solanaWeb3.LAMPORTS_PER_SOL).toFixed(5)+' SOL received!','#39FF14');
+    }
   }catch(e){
     addToast('❌ Cashout error: '+e.message,'#FF4444');
   }
