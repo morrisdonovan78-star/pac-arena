@@ -9,6 +9,14 @@
     "api/privy.js":      { "regions": ["iad1"], "maxDuration": 10 },
     "api/wallet.js":     { "regions": ["iad1"], "maxDuration": 15 }
   },
+  "redirects": [
+    {
+      "source": "/",
+      "missing": [{ "type": "query", "key": "v" }],
+      "destination": "/?v=17",
+      "permanent": false
+    }
+  ],
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
@@ -16,9 +24,12 @@
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "Cache-Control",          "value": "no-cache, no-store, must-revalidate" },
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "X-Frame-Options",        "value": "SAMEORIGIN" }
+        { "key": "Cache-Control",             "value": "no-cache, no-store, max-age=0, must-revalidate" },
+        { "key": "Vercel-CDN-Cache-Control",  "value": "no-store" },
+        { "key": "Pragma",                    "value": "no-cache" },
+        { "key": "Expires",                   "value": "0" },
+        { "key": "X-Content-Type-Options",    "value": "nosniff" },
+        { "key": "X-Frame-Options",           "value": "SAMEORIGIN" }
       ]
     },
     {

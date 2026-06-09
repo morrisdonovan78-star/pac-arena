@@ -1,13 +1,16 @@
-<!-- PAC ARENA v11 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v17 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, max-age=0, must-revalidate"/>
+<meta http-equiv="Pragma" content="no-cache"/>
+<meta http-equiv="Expires" content="0"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <!-- AUTO CACHE-BUST: bumps version on every deploy → forces all players to fetch fresh page automatically -->
-<script>(function(){try{var v='v11',k='pa_build';if(localStorage.getItem(k)!==v){localStorage.setItem(k,v);location.replace(location.pathname+'?r='+Date.now());}else if(location.search)history.replaceState(null,'',location.pathname);}catch(e){}})();</script>
-<title>PAC MONEY</title>
+<!-- Also handles bfcache (back-forward cache) which bypasses HTTP headers entirely -->
+<script>(function(){try{var v='v17',k='pa_build';if(localStorage.getItem(k)!==v){localStorage.setItem(k,v);location.replace(location.pathname+'?r='+Date.now());}else if(location.search)history.replaceState(null,'',location.pathname);}catch(e){}window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});})();</script>
+<title>PAC MONEY v17</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
@@ -180,6 +183,7 @@ html,body{background:var(--dark);color:var(--txt);font-family:'Exo 2',sans-serif
 /* D-pad overlays — fixed at bottom corners */
 #dp1{position:fixed;bottom:8px;left:8px;z-index:100;}
 #pow-btns{position:fixed;bottom:8px;right:8px;z-index:100;}
+#cash-btn-wrap{position:fixed;top:70px;right:8px;z-index:100;}
 .otp-box{width:44px;height:52px;background:rgba(255,255,255,.04);border:2px solid var(--border);border-radius:8px;font-family:'Press Start 2P',monospace;font-size:20px;text-align:center;color:var(--y);outline:none;}
 .otp-box:focus{border-color:var(--y);box-shadow:0 0 0 3px rgba(255,215,0,.1);}
 .pvpb{font-family:'Press Start 2P',monospace;font-size:7px;color:var(--pk);text-align:center;background:rgba(255,105,180,.07);border:1px solid rgba(255,105,180,.2);border-radius:8px;padding:7px 14px;width:100%;max-width:700px;line-height:1.9;}
@@ -223,6 +227,7 @@ body{touch-action:manipulation;}
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
+    <div style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);margin-top:4px;letter-spacing:1px;">v17</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;">
     <div class="w-strip">
@@ -446,9 +451,12 @@ body{touch-action:manipulation;}
       </div>
     </div>
   </div>
-  <!-- Powerup use buttons + cashout — right corner -->
-  <div id="pow-btns" style="position:fixed;bottom:8px;right:8px;z-index:100;display:none;flex-direction:column;align-items:center;gap:6px;">
+  <!-- Cashout button — top-right, separated from powerup buttons to prevent accidental taps -->
+  <div id="cash-btn-wrap" style="position:fixed;top:70px;right:8px;z-index:100;display:none;">
     <button id="cash-use-btn" class="pow-use-btn" style="background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.65);color:#FFD700;font-size:6px;">💸<br>CASHOUT</button>
+  </div>
+  <!-- Powerup use buttons — bottom-right corner -->
+  <div id="pow-btns" style="position:fixed;bottom:8px;right:8px;z-index:100;display:none;flex-direction:column;align-items:center;gap:6px;">
     <button id="cherry-use-btn" class="pow-use-btn cherry-btn" style="opacity:0.35;">🍒<br>KILL</button>
     <button id="pepper-use-btn" class="pow-use-btn pepper-btn" style="opacity:0.35;">🌶<br>SPEED</button>
   </div>
@@ -1303,7 +1311,7 @@ async function pkConnect(roomId){
             id:d.id, num:G.players.size, color:colorFromId(d.id),
             x:sp.x, y:sp.y, dx:0, dy:0, nx:0, ny:0,
             prevX:sp.x, prevY:sp.y, renderX:sp.x, renderY:sp.y,
-            sc:0, lives:1, pow:false, pt:0, mc:0, pep:false, pet:0, held:null,
+            sc:0, lives:1, pow:false, pt:0, mc:0, pep:false, pet:0, held:[],
             name: d.name||'', sol: d.sol||0
           });
           updateScoreboard();
@@ -1328,8 +1336,8 @@ async function pkConnect(roomId){
     ablyChannel.subscribe('pow',(msg)=>{
       if(isHost&&G&&!G.over&&msg.data){
         const p=G.players.get(msg.clientId||msg.data.id);
-        if(p&&p.held===msg.data.type){
-          p.held=null;
+        if(p&&(p.held||[]).includes(msg.data.type)){
+          p.held=(p.held||[]).filter(h=>h!==msg.data.type);
           if(msg.data.type==='cherry'){ p.pow=true; p.pt=450; }
           else if(msg.data.type==='pepper'){ p.pep=true; p.pet=390; }
         }
@@ -1427,7 +1435,9 @@ function applyRemoteState(d){
   }
   let changed=false;
   d.ps.forEach(([id,x,y,dx,dy,sc,lives,pow,pt,pep,pet,heldN])=>{
-    const heldVal=heldN===1?'cherry':heldN===2?'pepper':null;
+    // Don't resurrect ourselves in the map after we cashed out / were eliminated
+    if(id===myPid && isSpectating) return;
+    const heldVal=[]; if(heldN&1) heldVal.push('cherry'); if(heldN&2) heldVal.push('pepper');
     let p=G.players.get(id);
     if(!p){
       G.players.set(id,{ id, num:G.players.size, color:colorFromId(id),
@@ -1489,10 +1499,12 @@ async function joinLobby(usd){
   // Paid lobby — lock wager in escrow
   await refreshBal();
   if(ST.balance<ST.wagerSol+0.001){
-    alert('Not enough SOL!\nBalance: '+ST.balance.toFixed(5)+'\nNeeded: '+(ST.wagerSol+0.001).toFixed(5)+'\n\nFund your wallet at a Solana exchange.');
+    addToast('❌ Not enough SOL! Need '+(ST.wagerSol+0.001).toFixed(4)+' (have '+ST.balance.toFixed(4)+')','#FF4444');
+    _joiningLobby=false;
     return;
   }
-  if(!confirm('Wager: '+ST.wagerSol+' SOL ($'+usd+')\nNetwork: MAINNET\n\n10% platform fee · 90% returned on cashout\n\nContinue?')) return;
+  // No confirm popup — just join immediately and show a toast
+  addToast('🎮 Joining $'+usd+' lobby — wagering '+ST.wagerSol.toFixed(4)+' SOL…','#FFD700');
 
   go('scr-mm');
   try{
@@ -1600,8 +1612,8 @@ function rndPowSpot(){
   return free[Math.floor(Math.random()*free.length)];
 }
 
-// rafDraw is global so closeGameCashout can restart it
-function rafDraw(){ if(G&&!G.over||isSpectating){ draw(); rafHandle=requestAnimationFrame(rafDraw); } }
+// rafDraw is global so instantCashout can restart it
+function rafDraw(){ if(G&&!G.over||isSpectating){ draw(); rafHandle=requestAnimationFrame(rafDraw); } else { rafHandle=null; } }
 let _rcMenu=null; // context-menu listener ref
 let ablyRt=null, ablyChannel=null, pkRoomId=null; // Ably real-time state
 let myPid=null, isHost=false;                     // N-player game identity
@@ -1908,8 +1920,8 @@ function playPepper(){
 function usePow(type){
   if(!G||G.over) return;
   const me=G.players.get(myPid);
-  if(!me||me.held!==type) return;
-  me.held=null;
+  if(!me||(me.held||[]).indexOf(type)===-1) return;
+  me.held=(me.held||[]).filter(h=>h!==type);
   if(type==='cherry'){ me.pow=true; me.pt=450; playCherry(); }
   else if(type==='pepper'){ me.pep=true; me.pet=390; playPepper(); }
   // Tell host if we're a guest
@@ -1931,6 +1943,7 @@ function freeLobbyCashout(){
   const mb=document.getElementById('mute-btn');
   if(mb){ mb.style.display='flex'; mb.textContent=_muted?'🔇':'🔊'; }
   const pb=document.getElementById('pow-btns'); if(pb) pb.style.display='none';
+  const cw=document.getElementById('cash-btn-wrap'); if(cw) cw.style.display='none';
 }
 
 // ── Pay-to-Rejoin flow ────────────────────────────────────────
@@ -1942,6 +1955,10 @@ function openRejoinOverlay(){
   go('scr-game');
   if(!rafHandle) rafHandle=requestAnimationFrame(rafDraw);
   playDeath(); // 🎵 death sound
+
+  // Hide cashout & powerup buttons — dead player can't cashout, only rejoin or give up
+  const _pb=document.getElementById('pow-btns'); if(_pb) _pb.style.display='none';
+  const _cw=document.getElementById('cash-btn-wrap'); if(_cw) _cw.style.display='none';
 
   // Show the overlay
   const ov=document.getElementById('rejoin-overlay');
@@ -2003,7 +2020,7 @@ async function doRejoin(){
       id:myPid, num:G.players.size, color:colorFromId(myPid),
       x:sp.x, y:sp.y, dx:0, dy:0, nx:0, ny:0,
       prevX:sp.x, prevY:sp.y, renderX:sp.x, renderY:sp.y,
-      sc:0, lives:1, pow:false, pt:0, mc:0, pep:false, pet:0, held:null,
+      sc:0, lives:1, pow:false, pt:0, mc:0, pep:false, pet:0, held:[],
       name:_rjName, sol:ST.wagerSol||0
     });
     isSpectating=false;
@@ -2033,6 +2050,7 @@ function declineRejoin(){
   isSpectating=true;
   stopPacManMusic();
   const pb=document.getElementById('pow-btns'); if(pb) pb.style.display='none';
+  const cw=document.getElementById('cash-btn-wrap'); if(cw) cw.style.display='none';
   if(ablyChannel) ablyChannel.publish('spectate',{id:myPid},()=>{});
   if(!rafHandle) rafHandle=requestAnimationFrame(rafDraw);
   const sp=document.getElementById('spectate-panel');
@@ -2097,9 +2115,11 @@ function launchGame(){
     btn.addEventListener('mousedown',()=>p1d(dx,dy)); // desktop fallback
   });
 
-  // ── Mobile powerup use buttons (right corner) ───────────────
+  // ── Mobile powerup use buttons (bottom-right) + cashout (top-right) ────
   const powPanel=document.getElementById('pow-btns');
   if(powPanel) powPanel.style.display='flex';
+  const cashWrap=document.getElementById('cash-btn-wrap');
+  if(cashWrap) cashWrap.style.display='block';
   const cBtn=document.getElementById('cherry-use-btn');
   const pBtn=document.getElementById('pepper-use-btn');
   if(cBtn){
@@ -2177,7 +2197,7 @@ function mkP(info){
     prevX:sp[0], prevY:sp[1],
     renderX:sp[0], renderY:sp[1], // smooth float position for 60fps draw
     sc:0, lives:2, pow:false, pt:0, mc:0,
-    pep:false, pet:0, held:null,
+    pep:false, pet:0, held:[],
     name: info.name||'', sol: info.sol||0
   };
 }
@@ -2217,7 +2237,7 @@ function respawnPlayer(p){
   p.x=sp.x; p.y=sp.y; p.prevX=sp.x; p.prevY=sp.y;
   p.renderX=sp.x; p.renderY=sp.y; // snap render position on respawn
   p.dx=0; p.dy=0; p.nx=0; p.ny=0; p.mc=0;
-  p.pow=false; p.pt=0; p.pep=false; p.pet=0; p.held=null; // lose all powerups on death
+  p.pow=false; p.pt=0; p.pep=false; p.pet=0; p.held=[]; // lose all powerups on death
 }
 
 function eliminatePlayer(id, killerId){
@@ -2284,8 +2304,8 @@ function onKey(e){
 function _updatePowBtns(p){
   const cBtn=document.getElementById('cherry-use-btn');
   const pBtn=document.getElementById('pepper-use-btn');
-  if(cBtn) cBtn.style.opacity=p.held==='cherry'?'1':'0.35';
-  if(pBtn) pBtn.style.opacity=p.held==='pepper'?'1':'0.35';
+  if(cBtn) cBtn.style.opacity=(p.held||[]).includes('cherry')?'1':'0.35';
+  if(pBtn) pBtn.style.opacity=(p.held||[]).includes('pepper')?'1':'0.35';
 }
 function isWall(x,y,dx,dy){ return G.maze[(y+dy+R)%R][(x+dx+C)%C]===1; }
 function moveP(p){
@@ -2309,7 +2329,7 @@ function eatCellP(p){
     G.maze[p.y][p.x]=0; _mazeDirty=true; G.eaten++;
     G.eatLog.push([p.y,p.x]);
     if(G.powRespawnQ) G.powRespawnQ.push({type:3, at:frm+450}); // respawn in 15s
-    p.held='cherry'; // store for activation with V
+    if(!(p.held||[]).includes('cherry')) p.held=[...(p.held||[]),'cherry']; // add to held array
     if(p.id===myPid){ playCherry(); _updatePowBtns(p); }
   }
   if(v===4){
@@ -2317,7 +2337,7 @@ function eatCellP(p){
     G.maze[p.y][p.x]=0; _mazeDirty=true; G.eaten++;
     G.eatLog.push([p.y,p.x]);
     if(G.powRespawnQ) G.powRespawnQ.push({type:4, at:frm+450}); // respawn in 15s
-    p.held='pepper'; // store for activation with C
+    if(!(p.held||[]).includes('pepper')) p.held=[...(p.held||[]),'pepper']; // add to held array
     if(p.id===myPid){ playPepper(); _updatePowBtns(p); }
   }
   if(p.pow){ p.pt--; if(p.pt<=0){ p.pow=false; p.pt=0; } }
@@ -2342,7 +2362,7 @@ function tick(){
     if(true){ // 30fps state sync — halves guest input-to-screen lag vs old 15fps
       const ps=[];
       G.players.forEach((p,id)=>{
-        const hN=p.held===null?0:p.held==='cherry'?1:2;
+        const hN=((p.held||[]).includes('cherry')?1:0)|((p.held||[]).includes('pepper')?2:0);
         ps.push([id,p.x,p.y,p.dx,p.dy,p.sc,p.lives,p.pow?1:0,p.pt,p.pep?1:0,p.pet||0,hN]);
       });
       const spec=G.spectators?G.spectators.size:0;
@@ -2512,11 +2532,12 @@ function draw(){
   const myName=(ST.email?ST.email.split('@')[0].slice(0,8).toUpperCase():'YOU');
   G.players.forEach(p=>{
     const isMe=p.id===myPid;
-    // Show active powerup badge OR held (ready-to-use) powerup above name
-    const badge=p.pep?'🌶 ':p.pow?'🍒 ':(p.held==='cherry'?'🍒 ':p.held==='pepper'?'🌶 ':'');
-    // Use stored name for remote players; fall back to P2/P3 if hello hasn't arrived yet
+    // LEFT of name = powerup being carried (held, ready to use)
+    // RIGHT of name = powerup currently active (in use right now)
     const displayName=isMe?myName:(p.name||('P'+(p.num+1)));
-    const label=badge+displayName;
+    const heldBadge=(p.held||[]).map(h=>h==='cherry'?'🍒':h==='pepper'?'🌶':'').join('');
+    const activeBadge=(p.pow?'🍒':'')+(p.pep?'🌶':'');
+    const label=(heldBadge?heldBadge+' ':'')+displayName+(activeBadge?' '+activeBadge:'');
     // Show wager in SOL above the name — same for all players in a paid lobby
     const solAmt=isMe?(ST.wagerSol||0):(p.sol||ST.wagerSol||0);
     const solLabel=solAmt>0?solAmt.toFixed(4)+'◎':'';
@@ -2544,8 +2565,9 @@ function draw(){
     const bx=T*0.4, by=R*T-T*0.75;
     const lfs=Math.max(5,Math.floor(T*0.26));
     // Held powerup display (bottom-left)
-    const holdLabel=me.held==='cherry'?'🍒 KILL MODE — press V (or tap 🍒)':me.held==='pepper'?'🌶 SPEED BOOST — press C (or tap 🌶)':'-- no powerup held --';
-    const holdCol=me.held==='cherry'?'#FF6347':me.held==='pepper'?'#39FF14':'rgba(255,255,255,0.25)';
+    const _hl=me.held||[];
+    const holdLabel=_hl.length===0?'-- no powerup held --':_hl.length===2?'🍒 V=KILL  🌶 C=SPEED':_hl[0]==='cherry'?'🍒 KILL MODE — press V (or tap 🍒)':'🌶 SPEED BOOST — press C (or tap 🌶)';
+    const holdCol=_hl.length===0?'rgba(255,255,255,0.25)':_hl.length===2?'#FFD700':_hl[0]==='cherry'?'#FF6347':'#39FF14';
     ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(bx-2,by-lfs-2,bw+4,lfs+6);
     ctx.fillStyle=holdCol; ctx.font='bold '+lfs+'px monospace'; ctx.textAlign='left';
     ctx.fillText(holdLabel,bx,by);
@@ -2612,6 +2634,7 @@ async function endGame(reason){
   if(_rcMenu) document.removeEventListener('contextmenu',_rcMenu);
   // Hide mobile controls + spectate panel when game ends
   const pb=document.getElementById('pow-btns'); if(pb) pb.style.display='none';
+  const cw=document.getElementById('cash-btn-wrap'); if(cw) cw.style.display='none';
   const _spe=document.getElementById('spectate-panel'); if(_spe) _spe.style.display='none';
   pkDisconnect();
 
@@ -2775,56 +2798,65 @@ function setMaxCashout(){
 }
 
 // ── Game cashout overlay (Space key) — 10% fee, no dest needed ──
+// ── Game cashout (Space key) — player leaves game, others keep playing ──
 async function instantCashout(){
   if(!ST.address) return;
-  if(isSpectating){ addToast('💸 Already cashed out this round','#FFD700'); return; }
+  if(isSpectating){
+    // Distinguish eliminated (rejoin overlay open) vs. already cashed out
+    const _rjOv=document.getElementById('rejoin-overlay');
+    if(_rjOv && _rjOv.style.display!=='none'){
+      addToast('💀 You\'re eliminated — rejoin or give up, can\'t cashout','#FF4444');
+    } else {
+      addToast('💸 Already cashed out — watching live game','#FFD700');
+    }
+    return;
+  }
 
-  // Stop the game immediately
-  if(G) G.over=true;
-  stopHostLoop();
+  // Stop music but do NOT stop the game — other players are still playing!
+  // Do NOT set G.over, do NOT stopHostLoop, do NOT publish gameover.
   stopPacManMusic();
-  if(isHost&&ablyChannel) ablyChannel.publish('gameover',{},()=>{});
 
-  // Free lobby — nothing to cashout
+  // Free lobby — nothing to cashout, just enter spectate
   if(ST.lobbyUsd===0){
     isSpectating=true;
     if(G&&myPid){ G.players.delete(myPid); updateScoreboard(); }
     if(ablyChannel) ablyChannel.publish('spectate',{id:myPid},()=>{});
-    if(!rafHandle) rafHandle=requestAnimationFrame(rafDraw);
+    // rafDraw already running; force-restart cleanly to be safe
+    if(rafHandle){ cancelAnimationFrame(rafHandle); rafHandle=null; }
+    rafHandle=requestAnimationFrame(rafDraw);
     const _sp=document.getElementById('spectate-panel'); if(_sp) _sp.style.display='flex';
     const _mb=document.getElementById('mute-btn'); if(_mb){ _mb.style.display='flex'; _mb.textContent=_muted?'🔇':'🔊'; }
     addToast('👾 Free lobby — no wager to cashout','#FFD700');
     return;
   }
 
+  // Send wagerLamports so server only pays back this player's wager, not the whole shared escrow
+  const wagerLamports=Math.floor((ST.wagerSol||0)*solanaWeb3.LAMPORTS_PER_SOL);
   const estSol=(ST.wagerSol>0)?'~'+(ST.wagerSol*0.9).toFixed(4)+' SOL':'';
   addToast('💸 Cashing out'+(estSol?' '+estSol:'')+'…','#FFD700');
   try{
     const r=await fetch('/api/settle',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action:'cashout',playerAddress:ST.address})
+      body:JSON.stringify({action:'cashout',playerAddress:ST.address,wagerLamports})
     });
     let d; try{ d=await r.json(); }catch(_){ throw new Error('Server error (not JSON) — try again'); }
     if(!r.ok||d.error) throw new Error(d.error||'Server error '+r.status);
-    // Success — transition to spectator and remove player body from canvas
+    // Success — enter spectate; game and host loop keep running for remaining players
     isSpectating=true;
-    if(G){ G.over=false; } // restore so rafDraw loop can run in spectate mode
     if(G&&myPid){ G.players.delete(myPid); updateScoreboard(); }
     if(ablyChannel) ablyChannel.publish('spectate',{id:myPid},()=>{});
-    // Force-restart rafDraw (old handle may be stale from when G.over=true paused it)
+    // rafDraw should already be running; force-restart to guarantee clean state
     if(rafHandle){ cancelAnimationFrame(rafHandle); rafHandle=null; }
     rafHandle=requestAnimationFrame(rafDraw);
     const _sp=document.getElementById('spectate-panel'); if(_sp) _sp.style.display='flex';
     const _mb=document.getElementById('mute-btn'); if(_mb){ _mb.style.display='flex'; _mb.textContent=_muted?'🔇':'🔊'; }
     const _pb=document.getElementById('pow-btns'); if(_pb) _pb.style.display='none';
+    const _cw=document.getElementById('cash-btn-wrap'); if(_cw) _cw.style.display='none';
     ST.hasEscrow=false;
     await refreshBal();
     addToast('💰 +'+(d.playerCut/solanaWeb3.LAMPORTS_PER_SOL).toFixed(4)+' SOL CASHED OUT!','#39FF14');
   }catch(e){
-    // Cashout failed — player is still in the game, can try again
-    if(G) G.over=false;
-    startHostLoop();
     addToast('❌ Cashout failed: '+e.message+' — press SPACE to retry','#FF4444');
   }
 }

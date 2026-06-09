@@ -211,12 +211,16 @@ module.exports = async function handler(req, res) {
       if (!blockhash)   { clearTimeout(guard); done = true; return res.status(500).json({ error: 'Could not get blockhash from RPC — try again' }); }
       const avail = bal - TX_FEE;
       if (avail <= 0) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'Escrow empty — no funds to cashout' }); }
-      const creatorCut = Math.floor(avail * CREATOR_FEE_PCT);
-      const playerCut  = avail - creatorCut;
-      console.log('[settle] cashout bal=' + bal + ' avail=' + avail + ' player=' + playerCut + ' creator=' + creatorCut);
+      // Only pay out the player's own wager — never drain the full shared escrow.
+      // Client sends wagerLamports; cap at avail so we never overdraft.
+      const wagerLamports = Number(body.wagerLamports) || 0;
+      const payout = wagerLamports > 0 ? Math.min(wagerLamports, avail) : avail;
+      const creatorCut = Math.floor(payout * CREATOR_FEE_PCT);
+      const playerCut  = payout - creatorCut;
+      console.log('[settle] cashout payout=' + payout + ' (wager=' + wagerLamports + ' avail=' + avail + ') player=' + playerCut + ' creator=' + creatorCut);
       const tx = buildTx(esc, blockhash, [
-        { to: playerPubkey,              lamports: playerCut  },
-        { to: b58Decode(CREATOR_WALLET), lamports: creatorCut },
+        { to: playerPubkey,              lamports: playerCut  },  // player's wager minus 10%
+        { to: b58Decode(CREATOR_WALLET), lamports: creatorCut },  // 10% fee
       ]);
       const sig = await sendAndConfirm(tx);
       clearTimeout(guard); done = true;
