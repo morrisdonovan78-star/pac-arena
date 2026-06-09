@@ -444,10 +444,11 @@ body{touch-action:manipulation;}
       </div>
     </div>
   </div>
-  <!-- Powerup use buttons — right corner -->
+  <!-- Powerup use buttons + cashout — right corner -->
   <div id="pow-btns" style="position:fixed;bottom:8px;right:8px;z-index:100;display:none;flex-direction:column;align-items:center;gap:6px;">
-    <button id="cherry-use-btn" class="pow-use-btn cherry-btn" style="opacity:0.35;">🍒<br>[V]</button>
-    <button id="pepper-use-btn" class="pow-use-btn pepper-btn" style="opacity:0.35;">🌶<br>[C]</button>
+    <button id="cash-use-btn" class="pow-use-btn" style="background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.65);color:#FFD700;font-size:6px;">💸<br>CASHOUT</button>
+    <button id="cherry-use-btn" class="pow-use-btn cherry-btn" style="opacity:0.35;">🍒<br>KILL</button>
+    <button id="pepper-use-btn" class="pow-use-btn pepper-btn" style="opacity:0.35;">🌶<br>SPEED</button>
   </div>
 </div>
 
@@ -1624,7 +1625,7 @@ async function claimKillReward(victimSol){
     let d; try{ d=await r.json(); }catch(_){ throw new Error('Server error (not JSON) — try again'); }
     if(!r.ok||d.error) throw new Error(d.error||'Server error '+r.status);
     await refreshBal();
-    addToast('💰 +'+(d.killerCut/solanaWeb3.LAMPORTS_PER_SOL).toFixed(4)+' SOL IN YOUR WALLET!','#00FF7F');
+    addToast('💰 +'+(d.amount/solanaWeb3.LAMPORTS_PER_SOL).toFixed(4)+' SOL IN YOUR WALLET!','#00FF7F');
   }catch(e){
     addToast('Kill reward error: '+e.message,'#FF4444');
     console.error('[claimKillReward]',e);
@@ -1918,12 +1919,12 @@ function usePow(type){
 // ── Free lobby: press Space just enters spectate, no escrow overlay ──
 function freeLobbyCashout(){
   if(!G||G.over) return;
-  G.over=true;
   stopPacManMusic();
   if(G&&myPid){ G.players.delete(myPid); updateScoreboard(); }
   if(ablyChannel) ablyChannel.publish('spectate',{id:myPid},()=>{});
   isSpectating=true;
-  if(!rafHandle) rafHandle=requestAnimationFrame(rafDraw);
+  if(rafHandle){ cancelAnimationFrame(rafHandle); rafHandle=null; }
+  rafHandle=requestAnimationFrame(rafDraw);
   const sp=document.getElementById('spectate-panel'); if(sp) sp.style.display='flex';
   const mb=document.getElementById('mute-btn');
   if(mb){ mb.style.display='flex'; mb.textContent=_muted?'🔇':'🔊'; }
@@ -2108,6 +2109,12 @@ function launchGame(){
     const doPepper=e=>{ e.preventDefault(); usePow('pepper'); };
     pBtn.addEventListener('touchstart',doPepper,{passive:false});
     pBtn.addEventListener('mousedown',()=>usePow('pepper'));
+  }
+  const caBtn=document.getElementById('cash-use-btn');
+  if(caBtn){
+    const doCash=e=>{ e.preventDefault(); instantCashout(); };
+    caBtn.addEventListener('touchstart',doCash,{passive:false});
+    caBtn.addEventListener('mousedown',()=>instantCashout());
   }
 
   // ── Swipe the canvas to change direction (natural mobile input) ─
@@ -2503,7 +2510,8 @@ function draw(){
   const myName=(ST.email?ST.email.split('@')[0].slice(0,8).toUpperCase():'YOU');
   G.players.forEach(p=>{
     const isMe=p.id===myPid;
-    const badge=p.pep?'🌶':p.pow?'🍒':'';
+    // Show active powerup badge OR held (ready-to-use) powerup above name
+    const badge=p.pep?'🌶 ':p.pow?'🍒 ':(p.held==='cherry'?'🍒 ':p.held==='pepper'?'🌶 ':'');
     // Use stored name for remote players; fall back to P2/P3 if hello hasn't arrived yet
     const displayName=isMe?myName:(p.name||('P'+(p.num+1)));
     const label=badge+displayName;
@@ -2534,7 +2542,7 @@ function draw(){
     const bx=T*0.4, by=R*T-T*0.75;
     const lfs=Math.max(5,Math.floor(T*0.26));
     // Held powerup display (bottom-left)
-    const holdLabel=me.held==='cherry'?'🍒 [V] READY':me.held==='pepper'?'🌶 [C] READY':'-- EMPTY --';
+    const holdLabel=me.held==='cherry'?'🍒 KILL MODE — press V (or tap 🍒)':me.held==='pepper'?'🌶 SPEED BOOST — press C (or tap 🌶)':'-- no powerup held --';
     const holdCol=me.held==='cherry'?'#FF6347':me.held==='pepper'?'#39FF14':'rgba(255,255,255,0.25)';
     ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(bx-2,by-lfs-2,bw+4,lfs+6);
     ctx.fillStyle=holdCol; ctx.font='bold '+lfs+'px monospace'; ctx.textAlign='left';
@@ -2787,7 +2795,8 @@ async function instantCashout(){
     return;
   }
 
-  addToast('💸 Cashing out…','#FFD700');
+  const estSol=(ST.wagerSol>0)?'~'+(ST.wagerSol*0.9).toFixed(4)+' SOL':'';
+  addToast('💸 Cashing out'+(estSol?' '+estSol:'')+'…','#FFD700');
   try{
     const r=await fetch('/api/settle',{
       method:'POST',
@@ -2796,16 +2805,20 @@ async function instantCashout(){
     });
     let d; try{ d=await r.json(); }catch(_){ throw new Error('Server error (not JSON) — try again'); }
     if(!r.ok||d.error) throw new Error(d.error||'Server error '+r.status);
-    // Success — NOW transition to spectator
+    // Success — transition to spectator and remove player body from canvas
     isSpectating=true;
+    if(G){ G.over=false; } // restore so rafDraw loop can run in spectate mode
     if(G&&myPid){ G.players.delete(myPid); updateScoreboard(); }
     if(ablyChannel) ablyChannel.publish('spectate',{id:myPid},()=>{});
-    if(!rafHandle) rafHandle=requestAnimationFrame(rafDraw);
+    // Force-restart rafDraw (old handle may be stale from when G.over=true paused it)
+    if(rafHandle){ cancelAnimationFrame(rafHandle); rafHandle=null; }
+    rafHandle=requestAnimationFrame(rafDraw);
     const _sp=document.getElementById('spectate-panel'); if(_sp) _sp.style.display='flex';
     const _mb=document.getElementById('mute-btn'); if(_mb){ _mb.style.display='flex'; _mb.textContent=_muted?'🔇':'🔊'; }
+    const _pb=document.getElementById('pow-btns'); if(_pb) _pb.style.display='none';
     ST.hasEscrow=false;
     await refreshBal();
-    addToast('✅ +'+(d.playerCut/solanaWeb3.LAMPORTS_PER_SOL).toFixed(5)+' SOL received!','#39FF14');
+    addToast('💰 +'+(d.playerCut/solanaWeb3.LAMPORTS_PER_SOL).toFixed(4)+' SOL CASHED OUT!','#39FF14');
   }catch(e){
     // Cashout failed — player is still in the game, can try again
     if(G) G.over=false;
