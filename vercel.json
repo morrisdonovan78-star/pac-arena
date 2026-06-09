@@ -6,7 +6,8 @@
     "api/settle.js":     { "regions": ["iad1"], "maxDuration": 60 },
     "api/ably-token.js": { "regions": ["iad1"], "maxDuration": 5  },
     "api/price.js":      { "regions": ["iad1"], "maxDuration": 10 },
-    "api/privy.js":      { "regions": ["iad1"], "maxDuration": 10 }
+    "api/privy.js":      { "regions": ["iad1"], "maxDuration": 10 },
+    "api/wallet.js":     { "regions": ["iad1"], "maxDuration": 15 }
   },
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }

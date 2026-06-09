@@ -19,6 +19,7 @@ module.exports = async function handler(req, res) {
     'Content-Type':  'application/json',
     'privy-app-id':  PRIVY_APP_ID,
     'privy-client':  'react-auth:1.92.3',
+    'origin':        'https://pac-arena.vercel.app',
   };
   if (req.headers['authorization']) {
     headers['Authorization'] = req.headers['authorization'];

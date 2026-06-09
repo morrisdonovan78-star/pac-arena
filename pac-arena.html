@@ -1,4 +1,4 @@
-<!-- PAC ARENA v8 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v10 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -451,24 +451,6 @@ body{touch-action:manipulation;}
   </div>
 </div>
 
-<!-- GAME CASHOUT OVERLAY — shown over game when Space is pressed, 10% fee -->
-<div id="game-cashout-overlay" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.82);z-index:500;align-items:center;justify-content:center;">
-  <div class="card" style="max-width:400px;width:90%;text-align:center;padding:2rem 1.75rem;">
-    <div style="font-family:'Press Start 2P',monospace;font-size:14px;color:var(--g);margin-bottom:1rem;">💸 GAME CASHOUT</div>
-    <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:var(--muted);margin-bottom:4px;">WALLET BALANCE</div>
-    <div style="font-family:'Press Start 2P',monospace;font-size:20px;color:var(--y);margin-bottom:3px;" id="gco-bal">-- SOL</div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:1.25rem;" id="gco-usd">≈ $--</div>
-    <div id="gco-fee-info" style="background:rgba(57,255,20,.06);border:1px solid rgba(57,255,20,.2);border-radius:10px;padding:10px 14px;margin-bottom:1.1rem;font-size:11px;color:var(--muted);line-height:1.8;text-align:left;"></div>
-    <div id="gco-result" style="display:none;margin-bottom:.75rem;padding:10px;border-radius:8px;font-family:'Press Start 2P',monospace;font-size:7px;line-height:2;"></div>
-    <button class="btn btn-g" id="gco-confirm-btn" onclick="doGameCashout()" style="margin-bottom:.6rem;width:100%;">💸 CONFIRM CASHOUT</button>
-    <button class="btn btn-c btn-sm" id="gco-cancel-btn" onclick="closeGameCashout()" style="margin:0 auto;width:auto;">✕ CANCEL</button>
-    <div id="gco-nav" style="display:none;flex-direction:column;gap:.6rem;align-items:center;width:100%;margin-top:.75rem;">
-      <button class="btn btn-y" style="width:100%;" onclick="enterSpectateMode()">👁 SPECTATE</button>
-      <button class="btn btn-c btn-sm" onclick="closeGameCashout();go('scr-home');" style="margin:0 auto;width:auto;">← HOME</button>
-    </div>
-  </div>
-</div>
-
 <!-- REJOIN OVERLAY — shown when local player is eliminated; pay original wager to respawn -->
 <div id="rejoin-overlay" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.88);z-index:500;align-items:center;justify-content:center;flex-direction:column;">
   <div class="card" style="max-width:380px;width:90%;text-align:center;padding:2rem 1.75rem;">
@@ -902,10 +884,30 @@ async function setupWallet(){
       }
     }
 
-    // No wallet found — show choice, never silently generate
+    // Try loading from server — cross-device wallet sync via Privy metadata
+    if(_jwt){
+      try{
+        setWalletStatus('SYNCING WALLET…');
+        const r=await fetch('/api/wallet',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({action:'load',email:ST.email,jwt:_jwt}),signal:AbortSignal.timeout(9000)});
+        if(r.ok){
+          const d=await r.json();
+          if(d.secretKeyB64){
+            const bytes=Uint8Array.from(atob(d.secretKeyB64),c=>c.charCodeAt(0));
+            const kp=solanaWeb3.Keypair.fromSecretKey(bytes);
+            localStorage.setItem('pa_kp_'+ST.email,JSON.stringify({sk:d.secretKeyB64,v:1}));
+            setWalletStatus('WALLET SYNCED ✓');
+            await finishLogin(kp);
+            return;
+          }
+        }
+      }catch(e){ console.warn('[wallet] server sync failed:',e.message); }
+    }
+
+    // No wallet found anywhere — show creation screen
     document.getElementById('wallet-checking').style.display='none';
     document.getElementById('wallet-choice').style.display='block';
-    scanAndShowWallets(); // show any other wallets stored in this browser
+    scanAndShowWallets();
 
   }catch(e){
     showStep('email');
@@ -952,6 +954,13 @@ async function confirmBackupAndContinue(){
   setWalletStatus('ENTERING GAME…');
   const kp = _pendingBackupKp;
   _pendingBackupKp = null;
+  // Save to server for cross-device sync (fire-and-forget — localStorage already set in createNewWallet)
+  if(_jwt){
+    const sk=btoa(String.fromCharCode(...kp.secretKey));
+    fetch('/api/wallet',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'save',email:ST.email,jwt:_jwt,secretKeyB64:sk})})
+      .catch(e=>console.warn('[wallet] server save:',e.message));
+  }
   await finishLogin(kp);
 }
 
@@ -974,27 +983,36 @@ async function doImportWallet(){
     document.getElementById('wallet-import').style.display='none';
     document.getElementById('wallet-checking').style.display='block';
     setWalletStatus('WALLET RECOVERED ✓');
+    // Save to server for cross-device sync
+    if(_jwt){
+      fetch('/api/wallet',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'save',email:ST.email,jwt:_jwt,secretKeyB64:sk})})
+        .catch(e=>console.warn('[wallet] server save:',e.message));
+    }
     await finishLogin(kp);
   }catch(e){
     alert('Invalid private key — check you copied it fully.\n\n'+e.message);
   }
 }
 
-// Scan localStorage for every pa_kp_ wallet on this device and show with live balance
+// Scan localStorage for pa_kp_ wallets — only show current account's wallet.
+// Other-account wallets are hidden to prevent cross-account linking confusion.
+// Cross-device sync is now handled server-side via /api/wallet.
 async function scanAndShowWallets(){
   const section=document.getElementById('found-wallets-section');
   const list=document.getElementById('found-wallets-list');
   if(!section||!list) return;
   list.innerHTML='';
   const wallets=[];
-  for(let i=0;i<localStorage.length;i++){
-    const key=localStorage.key(i);
-    if(!key||!key.startsWith('pa_kp_')) continue;
+  // Only include the wallet keyed to the current email
+  const ownKey = 'pa_kp_'+ST.email;
+  const ownData = localStorage.getItem(ownKey);
+  if(ownData){
     try{
-      const data=JSON.parse(localStorage.getItem(key));
+      const data=JSON.parse(ownData);
       const bytes=Uint8Array.from(atob(data.sk),c=>c.charCodeAt(0));
       const kp=solanaWeb3.Keypair.fromSecretKey(bytes);
-      wallets.push({key,addr:kp.publicKey.toString(),kp});
+      wallets.push({key:ownKey,addr:kp.publicKey.toString(),kp});
     }catch(e){}
   }
   if(wallets.length===0){ section.style.display='none'; return; }
@@ -1595,18 +1613,18 @@ async function claimKillReward(victimSol){
   if(!rewardSol) return;
   playKillSfx(); // 🎵 ghost-eaten ascending blip
   try{
-    // Victim deposited 90% of their wager to escrow — claim that amount
-    const wagerLamports=Math.floor(rewardSol*(1-CREATOR_FEE_PCT)*solanaWeb3.LAMPORTS_PER_SOL);
+    // Send full wager to settle.js — server handles 90/10 split (killer/creator)
+    const wagerLamports=Math.floor(rewardSol*solanaWeb3.LAMPORTS_PER_SOL);
     addToast('💰 KILL! Claiming +'+rewardSol.toFixed(4)+' SOL…','#00FF7F');
     const r=await fetch('/api/settle',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({action:'kill',playerAddress:ST.address,wagerLamports})
     });
-    const d=await r.json();
-    if(!r.ok||d.error) throw new Error(d.error||'Server error');
+    let d; try{ d=await r.json(); }catch(_){ throw new Error('Server error (not JSON) — try again'); }
+    if(!r.ok||d.error) throw new Error(d.error||'Server error '+r.status);
     await refreshBal();
-    addToast('💰 +'+(d.amount/solanaWeb3.LAMPORTS_PER_SOL).toFixed(4)+' SOL IN YOUR WALLET!','#00FF7F');
+    addToast('💰 +'+(d.killerCut/solanaWeb3.LAMPORTS_PER_SOL).toFixed(4)+' SOL IN YOUR WALLET!','#00FF7F');
   }catch(e){
     addToast('Kill reward error: '+e.message,'#FF4444');
     console.error('[claimKillReward]',e);
@@ -2025,7 +2043,6 @@ function enterSpectateMode(){
   isSpectating=true;
   if(ablyChannel) ablyChannel.publish('spectate',{id:myPid},()=>{});
   if(G&&myPid){ G.players.delete(myPid); updateScoreboard(); }
-  document.getElementById('game-cashout-overlay').style.display='none';
   stopPacManMusic(); // spectators don't need the in-game music
   go('scr-game');
   if(!rafHandle) rafHandle=requestAnimationFrame(rafDraw);
@@ -2797,119 +2814,7 @@ async function instantCashout(){
   }
 }
 
-function openGameCashout(){
-  // Redirect to instant cashout — no overlay needed
-  instantCashout();
-  return;
-  // (legacy overlay code below — kept for reference but never reached)
-  stopHostLoop();
-  document.getElementById('game-cashout-overlay').style.display='flex';
-  // Reset state
-  const res=document.getElementById('gco-result');
-  if(res){ res.style.display='none'; res.innerHTML=''; }
-  const btn=document.getElementById('gco-confirm-btn');
-  btn.style.display=''; btn.disabled=false; btn.textContent='💸 CONFIRM CASHOUT';
-  const cxl=document.getElementById('gco-cancel-btn');
-  if(cxl) cxl.style.display='';
-  const nav=document.getElementById('gco-nav');
-  if(nav) nav.style.display='none';
-  // Fee info — only paid lobbies have a fee; free lobbies have no escrow
-  const isFree=ST.lobbyUsd===0;
-  document.getElementById('gco-fee-info').innerHTML=isFree
-    ?'<span style="color:var(--g);font-weight:700;">No fee</span> — free lobby has no wager.<br><span style="font-size:9px;opacity:.7;">Nothing to cashout in a free game.</span>'
-    :'<span style="color:var(--g);font-weight:700;">90%</span> of wager → your wallet &nbsp;·&nbsp;<span style="color:var(--y);font-weight:700;">10%</span> platform fee<br><span style="font-size:9px;opacity:.7;">Your wager is transferred from escrow immediately.</span>';
-  document.getElementById('gco-bal').textContent=ST.balance.toFixed(6)+' SOL';
-  document.getElementById('gco-usd').textContent='≈ $'+(ST.balance*ST.solPrice).toFixed(2);
-  refreshBal().then(()=>{
-    document.getElementById('gco-bal').textContent=ST.balance.toFixed(6)+' SOL';
-    document.getElementById('gco-usd').textContent='≈ $'+(ST.balance*ST.solPrice).toFixed(2);
-  }).catch(()=>{});
-}
-
-function closeGameCashout(){
-  document.getElementById('game-cashout-overlay').style.display='none';
-  // Resume game if not over; only host runs the tick loop
-  if(G&&!G.over&&!_hostRaf&&isHost){
-    startHostLoop();
-    if(!rafHandle) rafHandle=requestAnimationFrame(rafDraw);
-  }
-}
-
-async function doGameCashout(){
-  const btn=document.getElementById('gco-confirm-btn');
-  const cxl=document.getElementById('gco-cancel-btn');
-  const nav=document.getElementById('gco-nav');
-  const res=document.getElementById('gco-result');
-  function showRes(msg,ok){
-    res.style.display='block';
-    res.style.background=ok?'rgba(57,255,20,.08)':'rgba(255,51,51,.08)';
-    res.style.border='1px solid '+(ok?'rgba(57,255,20,.3)':'rgba(255,51,51,.3)');
-    res.style.color=ok?'var(--g)':'var(--r)';
-    res.innerHTML=msg;
-  }
-  function showNav(){
-    if(G) G.over=true; // stop host tick loop
-    stopPacManMusic();
-    if(isHost&&ablyChannel) ablyChannel.publish('gameover',{},()=>{});
-    // Remove player body from map immediately — they become a spectator right now
-    isSpectating=true;
-    if(G&&myPid){ G.players.delete(myPid); updateScoreboard(); }
-    if(ablyChannel) ablyChannel.publish('spectate',{id:myPid},()=>{});
-    if(!rafHandle) rafHandle=requestAnimationFrame(rafDraw); // keep game rendering
-    btn.style.display='none';
-    if(cxl) cxl.style.display='none';
-    const _pb=document.getElementById('pow-btns'); if(_pb) _pb.style.display='none';
-    if(nav){
-      nav.innerHTML=
-        '<div style="font-family:\'Press Start 2P\',monospace;font-size:7px;color:rgba(255,255,255,0.45);margin-bottom:.75rem;letter-spacing:1px;">👁 SPECTATING LIVE</div>'+
-        '<button class="btn btn-c btn-sm" onclick="leaveSpectate();" style="margin:0 auto;width:auto;">← HOME</button>';
-      nav.style.display='flex';
-    }
-    // Auto-dismiss overlay after 2.5 s → game canvas visible live with spectate panel
-    setTimeout(()=>{
-      const ov=document.getElementById('game-cashout-overlay');
-      if(ov&&ov.style.display!=='none'){
-        ov.style.display='none';
-        const sp=document.getElementById('spectate-panel'); if(sp) sp.style.display='flex';
-        const mb=document.getElementById('mute-btn');
-        if(mb){ mb.style.display='flex'; mb.textContent=_muted?'🔇':'🔊'; }
-      }
-    },2500);
-  }
-  btn.disabled=true; btn.textContent='PROCESSING…';
-  try{
-    // Free lobby — no wager in escrow, nothing to transfer
-    if(ST.lobbyUsd===0){
-      if(G) G.over=true;
-      showRes('✓ FREE LOBBY<br><br>No wager placed — nothing to cashout.',true);
-      showNav(); return;
-    }
-    // Paid lobby — creator fee already sent at join; return full escrow to player
-    const r=await fetch('/api/settle',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action:'cashout',playerAddress:ST.address})
-    });
-    let d; try{ d=await r.json(); }catch(_){ throw new Error('Server error — try again'); }
-    if(!r.ok||d.error) throw new Error(d.error||'Server error');
-    await refreshBal();
-    if(G) G.p1CashedOut=true;
-    ST.hasEscrow=false;
-    document.getElementById('gco-bal').textContent=ST.balance.toFixed(6)+' SOL';
-    document.getElementById('gco-usd').textContent='≈ $'+(ST.balance*ST.solPrice).toFixed(2);
-    showRes(
-      '✓ CASHED OUT<br><br>'+
-      (d.playerCut/solanaWeb3.LAMPORTS_PER_SOL).toFixed(6)+' SOL → your wallet<br>'+
-      '(10% platform fee was sent at join)<br><br>'+
-      '<a href="https://explorer.solana.com/tx/'+d.sig+'" target="_blank" style="color:var(--c);font-size:8px;word-break:break-all;">VIEW ON EXPLORER ↗</a>',
-      true
-    );
-    showNav();
-  }catch(e){
-    showRes('Error: '+e.message,false);
-    btn.disabled=false; btn.textContent='💸 CONFIRM CASHOUT';
-  }
-}
+// openGameCashout / closeGameCashout / doGameCashout removed — SPACE calls instantCashout() directly
 
 async function doCashout(){
   const amt=parseFloat(document.getElementById('co-amt').value);

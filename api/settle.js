@@ -71,6 +71,15 @@ async function rpc(method, params) {
 
 // ── Build & sign a Solana legacy transaction (escrow signs) ──────────────────
 function buildTx(esc, blockhash, transfers) {
+  // Validate inputs before doing anything
+  if (!blockhash || typeof blockhash !== 'string') throw new Error('buildTx: missing blockhash');
+  for (const t of transfers) {
+    if (!t.to || t.to.length !== 32) throw new Error('buildTx: recipient must be 32 bytes, got ' + (t.to && t.to.length));
+    const lamps = Math.round(Number(t.lamports));
+    if (!Number.isFinite(lamps) || lamps <= 0) throw new Error('buildTx: invalid lamports=' + t.lamports);
+    t.lamports = lamps; // normalise to integer
+  }
+
   // Account list: escrow, ...recipients, system_program
   const SYS = new Uint8Array(32); // system program = all zeros
   const accts = [esc.publicKey];
@@ -89,11 +98,13 @@ function buildTx(esc, blockhash, transfers) {
 
   // Recent blockhash (32 bytes decoded from base58)
   const bh = b58Decode(blockhash);
+  if (bh.length !== 32) throw new Error('buildTx: blockhash decoded to ' + bh.length + ' bytes (expected 32)');
 
   // Instructions: compact-u16 count, then each instruction
   const ixs = [transfers.length]; // compact-u16 count (always < 128)
   for (const t of transfers) {
     const toIdx = accts.findIndex(a => a.every((v, i) => v === t.to[i]));
+    if (toIdx < 0) throw new Error('buildTx: recipient not found in account list');
     // Bincode-encoded SystemProgram::Transfer { lamports }
     // discriminant u32-LE = 2, then lamports u64-LE
     const data = new Uint8Array(12);
@@ -185,18 +196,26 @@ module.exports = async function handler(req, res) {
     // ── cashout / win ─────────────────────────────────────────────────────────
     if (action === 'cashout' || action === 'win') {
       if (!playerAddress) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'playerAddress required' }); }
+      // Validate player address length before trying to use it
+      const playerPubkey = b58Decode(playerAddress);
+      if (playerPubkey.length !== 32) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'playerAddress must be a 32-byte Solana address' }); }
       const [balRes, bhRes] = await Promise.all([
         rpc('getBalance',         [esc.pubkeyB58, { commitment: 'confirmed' }]),
         rpc('getLatestBlockhash', [{ commitment: 'confirmed' }]),
       ]);
-      const bal   = balRes.value;
+      // Null-safe extraction — some RPC nodes return {context,value} some return value directly
+      const bal   = (balRes && typeof balRes.value === 'number') ? balRes.value : (typeof balRes === 'number' ? balRes : null);
+      const blockhash = (bhRes && bhRes.value && bhRes.value.blockhash) ? bhRes.value.blockhash : (bhRes && bhRes.blockhash ? bhRes.blockhash : null);
+      console.log('[settle] cashout bal=' + bal + ' blockhash=' + (blockhash ? blockhash.slice(0,8)+'…' : 'NULL') + ' player=' + playerAddress.slice(0,8)+'…');
+      if (bal === null) { clearTimeout(guard); done = true; return res.status(500).json({ error: 'Could not read escrow balance from RPC — try again' }); }
+      if (!blockhash)   { clearTimeout(guard); done = true; return res.status(500).json({ error: 'Could not get blockhash from RPC — try again' }); }
       const avail = bal - TX_FEE;
       if (avail <= 0) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'Escrow empty — no funds to cashout' }); }
       const creatorCut = Math.floor(avail * CREATOR_FEE_PCT);
       const playerCut  = avail - creatorCut;
       console.log('[settle] cashout bal=' + bal + ' avail=' + avail + ' player=' + playerCut + ' creator=' + creatorCut);
-      const tx = buildTx(esc, bhRes.value.blockhash, [
-        { to: b58Decode(playerAddress),  lamports: playerCut  },
+      const tx = buildTx(esc, blockhash, [
+        { to: playerPubkey,              lamports: playerCut  },
         { to: b58Decode(CREATOR_WALLET), lamports: creatorCut },
       ]);
       const sig = await sendAndConfirm(tx);
@@ -207,17 +226,31 @@ module.exports = async function handler(req, res) {
     // ── kill ──────────────────────────────────────────────────────────────────
     if (action === 'kill') {
       if (!playerAddress || !body.wagerLamports) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'playerAddress + wagerLamports required' }); }
+      const killPubkey = b58Decode(playerAddress);
+      if (killPubkey.length !== 32) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'playerAddress must be 32 bytes' }); }
       const [balRes, bhRes] = await Promise.all([
         rpc('getBalance',         [esc.pubkeyB58, { commitment: 'confirmed' }]),
         rpc('getLatestBlockhash', [{ commitment: 'confirmed' }]),
       ]);
-      const avail = balRes.value - TX_FEE;
+      // Null-safe extraction — use null (not 0) so we can distinguish "failed read" vs "truly empty"
+      const killBal  = (balRes && typeof balRes.value === 'number') ? balRes.value : (typeof balRes === 'number' ? balRes : null);
+      const killHash = (bhRes && bhRes.value && bhRes.value.blockhash) ? bhRes.value.blockhash : (bhRes && bhRes.blockhash ? bhRes.blockhash : null);
+      console.log('[settle] kill bal=' + killBal + ' blockhash=' + (killHash ? killHash.slice(0,8)+'...' : 'NULL') + ' killer=' + playerAddress.slice(0,8)+'... wager=' + body.wagerLamports);
+      if (killBal === null) { clearTimeout(guard); done = true; return res.status(500).json({ error: 'Could not read escrow balance — try again' }); }
+      if (!killHash) { clearTimeout(guard); done = true; return res.status(500).json({ error: 'Could not get blockhash — try again' }); }
+      const avail = killBal - TX_FEE;
       if (avail <= 0) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'Escrow empty' }); }
-      const amount = Math.min(Number(body.wagerLamports), avail);
-      const tx = buildTx(esc, bhRes.value.blockhash, [{ to: b58Decode(playerAddress), lamports: amount }]);
+      // Split victim's wager 90% to killer, 10% to creator (same as cashout)
+      const wager = Math.min(Number(body.wagerLamports), avail);
+      const killerCut  = Math.floor(wager * (1 - CREATOR_FEE_PCT));
+      const creatorCut = wager - killerCut;
+      console.log('[settle] kill wager=' + wager + ' killerCut=' + killerCut + ' creatorCut=' + creatorCut);
+      const transfers = [{ to: killPubkey, lamports: killerCut }];
+      if (creatorCut > 0) transfers.push({ to: b58Decode(CREATOR_WALLET), lamports: creatorCut });
+      const tx = buildTx(esc, killHash, transfers);
       const sig = await sendAndConfirm(tx);
       clearTimeout(guard); done = true;
-      return res.status(200).json({ sig, amount, confirmed: true });
+      return res.status(200).json({ sig, killerCut, creatorCut, confirmed: true });
     }
 
     // ── lose ──────────────────────────────────────────────────────────────────
@@ -226,9 +259,12 @@ module.exports = async function handler(req, res) {
         rpc('getBalance',         [esc.pubkeyB58, { commitment: 'confirmed' }]),
         rpc('getLatestBlockhash', [{ commitment: 'confirmed' }]),
       ]);
-      const avail = balRes.value - TX_FEE;
+      const loseBal  = (balRes && typeof balRes.value === 'number') ? balRes.value : (typeof balRes === 'number' ? balRes : 0);
+      const loseHash = (bhRes && bhRes.value && bhRes.value.blockhash) || (bhRes && bhRes.blockhash);
+      if (!loseHash) { clearTimeout(guard); done = true; return res.status(500).json({ error: 'Could not get blockhash — try again' }); }
+      const avail = loseBal - TX_FEE;
       if (avail <= 0) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'Escrow empty' }); }
-      const tx = buildTx(esc, bhRes.value.blockhash, [{ to: b58Decode(CREATOR_WALLET), lamports: avail }]);
+      const tx = buildTx(esc, loseHash, [{ to: b58Decode(CREATOR_WALLET), lamports: avail }]);
       const sig = await sendAndConfirm(tx);
       clearTimeout(guard); done = true;
       return res.status(200).json({ sig, amount: avail, confirmed: true });
@@ -238,7 +274,8 @@ module.exports = async function handler(req, res) {
     return res.status(400).json({ error: 'Unknown action: ' + action });
 
   } catch (e) {
-    console.error('[settle] error:', e && e.message);
+    // Log full stack so we can diagnose crashes (not just the message)
+    console.error('[settle] CRASH:', e && (e.stack || e.message) || String(e));
     if (!done) { done = true; clearTimeout(guard); try { res.status(500).json({ error: e && e.message || String(e) }); } catch (_) {} }
   }
 };
