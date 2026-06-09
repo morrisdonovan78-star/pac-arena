@@ -1,4 +1,4 @@
-<!-- PAC ARENA v8 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v9 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1385,6 +1385,7 @@ function pkDisconnect(){
   if(ablyChannel){ try{ ablyChannel.presence.leave(); }catch(_){} ablyChannel=null; }
   if(ablyRt){ try{ ablyRt.close(); }catch(_){} ablyRt=null; }
   myPid=null; isHost=false; isSpectating=false; pkRoomId=null; _pkTick=0; _myHelloTs=0;
+  _joiningLobby=false; // release join lock when disconnecting
   stopPacManMusic();
 }
 
@@ -1445,8 +1446,11 @@ function applyRemoteState(d){
 // ═══════════════════════════════════════════════════════════
 // JOIN LOBBY
 // ═══════════════════════════════════════════════════════════
+let _joiningLobby=false;
 async function joinLobby(usd){
   if(!ST.address){ alert('Log in first'); return; }
+  if(_joiningLobby){ return; } // prevent double-tap / double-click
+  _joiningLobby=true;
   ST.lobbyUsd=usd;
   ST.wagerSol=usd>0?usdToSol(usd):0;
   document.getElementById('mm-log').innerHTML='';
@@ -1496,12 +1500,15 @@ async function joinLobby(usd){
     const roomId=usd===1?'gold-lobby':'diamond-lobby';
     pkConnect(roomId);
     // Ably presence triggers initGame + launchGame immediately
+    // (lock stays active — released when leaving game or on error)
   }catch(e){
+    _joiningLobby=false; // release lock on error so player can retry
     lg('mm-log','Error: '+e.message,'lerr');
     await new Promise(r=>setTimeout(r,3000));
     go('scr-lobby');
   }
 }
+function resetJoinLock(){ _joiningLobby=false; }
 
 // ═══════════════════════════════════════════════════════════
 // PAC-MAN PVP ENGINE
@@ -2745,24 +2752,27 @@ function setMaxCashout(){
 
 // ── Game cashout overlay (Space key) — 10% fee, no dest needed ──
 async function instantCashout(){
-  if(!ST.address||isSpectating) return;
-  // Transition to spectator immediately — no confirm needed
+  if(!ST.address) return;
+  if(isSpectating){ addToast('💸 Already cashed out this round','#FFD700'); return; }
+
+  // Stop the game immediately
   if(G) G.over=true;
   stopHostLoop();
   stopPacManMusic();
   if(isHost&&ablyChannel) ablyChannel.publish('gameover',{},()=>{});
-  isSpectating=true;
-  if(G&&myPid){ G.players.delete(myPid); updateScoreboard(); }
-  if(ablyChannel) ablyChannel.publish('spectate',{id:myPid},()=>{});
-  if(!rafHandle) rafHandle=requestAnimationFrame(rafDraw);
-  // Show spectate panel so player can keep watching or leave
-  const _sp=document.getElementById('spectate-panel'); if(_sp) _sp.style.display='flex';
-  const _mb=document.getElementById('mute-btn'); if(_mb){ _mb.style.display='flex'; _mb.textContent=_muted?'🔇':'🔊'; }
 
+  // Free lobby — nothing to cashout
   if(ST.lobbyUsd===0){
+    isSpectating=true;
+    if(G&&myPid){ G.players.delete(myPid); updateScoreboard(); }
+    if(ablyChannel) ablyChannel.publish('spectate',{id:myPid},()=>{});
+    if(!rafHandle) rafHandle=requestAnimationFrame(rafDraw);
+    const _sp=document.getElementById('spectate-panel'); if(_sp) _sp.style.display='flex';
+    const _mb=document.getElementById('mute-btn'); if(_mb){ _mb.style.display='flex'; _mb.textContent=_muted?'🔇':'🔊'; }
     addToast('👾 Free lobby — no wager to cashout','#FFD700');
     return;
   }
+
   addToast('💸 Cashing out…','#FFD700');
   try{
     const r=await fetch('/api/settle',{
@@ -2770,17 +2780,23 @@ async function instantCashout(){
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({action:'cashout',playerAddress:ST.address})
     });
-    let d; try{ d=await r.json(); }catch(_){ throw new Error('Server error — try again'); }
-    if(!r.ok||d.error) throw new Error(d.error||'Server error');
+    let d; try{ d=await r.json(); }catch(_){ throw new Error('Server error (not JSON) — try again'); }
+    if(!r.ok||d.error) throw new Error(d.error||'Server error '+r.status);
+    // Success — NOW transition to spectator
+    isSpectating=true;
+    if(G&&myPid){ G.players.delete(myPid); updateScoreboard(); }
+    if(ablyChannel) ablyChannel.publish('spectate',{id:myPid},()=>{});
+    if(!rafHandle) rafHandle=requestAnimationFrame(rafDraw);
+    const _sp=document.getElementById('spectate-panel'); if(_sp) _sp.style.display='flex';
+    const _mb=document.getElementById('mute-btn'); if(_mb){ _mb.style.display='flex'; _mb.textContent=_muted?'🔇':'🔊'; }
     ST.hasEscrow=false;
     await refreshBal();
-    if(d.confirmed===false){
-      addToast('⏳ TX sent — check wallet in ~30s for +SOL','#FFD700');
-    } else {
-      addToast('✅ +'+(d.playerCut/solanaWeb3.LAMPORTS_PER_SOL).toFixed(5)+' SOL received!','#39FF14');
-    }
+    addToast('✅ +'+(d.playerCut/solanaWeb3.LAMPORTS_PER_SOL).toFixed(5)+' SOL received!','#39FF14');
   }catch(e){
-    addToast('❌ Cashout error: '+e.message,'#FF4444');
+    // Cashout failed — player is still in the game, can try again
+    if(G) G.over=false;
+    startHostLoop();
+    addToast('❌ Cashout failed: '+e.message+' — press SPACE to retry','#FF4444');
   }
 }
 
