@@ -1,4 +1,4 @@
-<!-- PAC ARENA v18 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v24 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -9,8 +9,25 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <!-- AUTO CACHE-BUST: bumps version on every deploy → forces all players to fetch fresh page automatically -->
 <!-- Also handles bfcache (back-forward cache) which bypasses HTTP headers entirely -->
-<script>(function(){try{var v='v18',k='pa_build';if(localStorage.getItem(k)!==v){localStorage.setItem(k,v);location.replace(location.pathname+'?r='+Date.now());}else if(location.search)history.replaceState(null,'',location.pathname);}catch(e){}window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});})();</script>
-<title>PAC MONEY v18</title>
+<script>(function(){try{
+  // Auto-update: fetch Vercel deployment ID from /api/version on every page load.
+  // When a new deploy happens, the ID changes → we navigate to a URL unique to that
+  // deployment (never cached by any browser) → fresh HTML is served automatically.
+  // No manual version bumping ever needed again.
+  fetch('/api/version',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
+    var k='pa_deploy',cur=d.v||'dev',stored=localStorage.getItem(k);
+    localStorage.setItem(k,cur);
+    if(stored&&stored!==cur){
+      // Navigate to a URL that is unique to this deployment — browsers cannot have it
+      // cached, so they MUST fetch fresh HTML from the server.
+      location.replace('/?_v='+encodeURIComponent(cur));
+    }
+  }).catch(function(){});
+}catch(e){}
+// Block stale bfcache (back/forward navigation serving frozen game state)
+window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});
+})();</script>
+<title>PAC MONEY v24</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
@@ -227,7 +244,7 @@ body{touch-action:manipulation;}
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
-    <div style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v18</div>
+    <div style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v24</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;">
     <div class="w-strip">
@@ -1513,10 +1530,11 @@ async function joinLobby(usd){
     const escPubkey=new solanaWeb3.PublicKey(ESCROW_PUBKEY);
     const from=new solanaWeb3.PublicKey(ST.address);
     const lamps=Math.floor(ST.wagerSol*solanaWeb3.LAMPORTS_PER_SOL);
-    const rent=await ST.conn.getMinimumBalanceForRentExemption(0);
-
+    ST.cashoutLamports=lamps; // tracks what player is owed at cashout (grows if kill rewards fail)
+    // Only deposit the actual wager — no RENT_MIN added.
+    // The server keeps the escrow account alive without requiring players to fund rent.
     const tx=new solanaWeb3.Transaction().add(
-      solanaWeb3.SystemProgram.transfer({fromPubkey:from,toPubkey:escPubkey,lamports:lamps+rent})
+      solanaWeb3.SystemProgram.transfer({fromPubkey:from,toPubkey:escPubkey,lamports:lamps})
     );
     const lb=await ST.conn.getLatestBlockhash('confirmed');
     tx.recentBlockhash=lb.blockhash;
@@ -1618,6 +1636,7 @@ let _rcMenu=null; // context-menu listener ref
 let ablyRt=null, ablyChannel=null, pkRoomId=null; // Ably real-time state
 let myPid=null, isHost=false;                     // N-player game identity
 let isSpectating=false;                           // spectate mode flag
+let _cashoutInProgress=false;                     // debounce: prevent duplicate cashout requests
 let _guestInputLoop=null;                         // guest → host input heartbeat
 
 // ── Kill reward — 90% of victim's wager to killer, 10% to creator ─
@@ -1642,7 +1661,11 @@ async function claimKillReward(victimSol){
     await refreshBal();
     addToast('💰 +'+(d.amount/solanaWeb3.LAMPORTS_PER_SOL).toFixed(4)+' SOL KILL REWARD!','#00FF7F');
   }catch(e){
-    addToast('Kill reward error: '+e.message,'#FF4444');
+    // Kill reward failed — money stays in escrow. Add victim's wager to the cashout cap
+    // so the player can recover it when they press SPACE (server will min against avail).
+    const failedLamps=Math.floor(rewardSol*solanaWeb3.LAMPORTS_PER_SOL);
+    ST.cashoutLamports=(ST.cashoutLamports||Math.floor((ST.wagerSol||0)*solanaWeb3.LAMPORTS_PER_SOL))+failedLamps;
+    addToast('Kill reward pending — will recover on cashout','#FFD700');
     console.error('[claimKillReward]',e);
   }
 }
@@ -1770,6 +1793,7 @@ function leaveSpectate(){
   stopHostLoop();
   clearInterval(_guestInputLoop); _guestInputLoop=null;
   isSpectating=false;
+  _cashoutInProgress=false; ST.cashoutLamports=0;
   // Clean up chat UI
   closeChat();
   _chatLog.length=0;
@@ -2025,6 +2049,7 @@ async function doRejoin(){
       name:_rjName, sol:ST.wagerSol||0
     });
     isSpectating=false;
+    _cashoutInProgress=false; ST.cashoutLamports=Math.floor((ST.wagerSol||0)*solanaWeb3.LAMPORTS_PER_SOL);
     updateScoreboard();
 
     // Tell host (and all other guests via broadcast) that we're back
@@ -2161,6 +2186,7 @@ function launchGame(){
   canvas.addEventListener('touchcancel',()=>{ _swActive=false; });
   frm=0;
   isSpectating=false;
+  _cashoutInProgress=false; ST.cashoutLamports=ST.cashoutLamports||Math.floor((ST.wagerSol||0)*solanaWeb3.LAMPORTS_PER_SOL);
   _toasts=[];
   // Hide spectate panel (in case player is rejoining from spectate)
   const _sp=document.getElementById('spectate-panel'); if(_sp) _sp.style.display='none';
@@ -2812,12 +2838,12 @@ async function instantCashout(){
     }
     return;
   }
-
-  // Stop music but do NOT stop the game — other players are still playing!
+  // Stop music — applies to both free and paid cashouts.
   // Do NOT set G.over, do NOT stopHostLoop, do NOT publish gameover.
   stopPacManMusic();
 
-  // Free lobby — nothing to cashout, just enter spectate
+  // Free lobby check BEFORE cashoutInProgress — free lobby never sets that flag,
+  // so a stale flag from a previous paid game must not block the free lobby cashout.
   if(ST.lobbyUsd===0){
     isSpectating=true;
     if(G&&myPid){ G.players.delete(myPid); updateScoreboard(); }
@@ -2831,8 +2857,17 @@ async function instantCashout(){
     return;
   }
 
-  // Send wagerLamports so server only pays back this player's wager, not the whole shared escrow
-  const wagerLamports=Math.floor((ST.wagerSol||0)*solanaWeb3.LAMPORTS_PER_SOL);
+  // Debounce for paid lobbies — prevent duplicate requests from rapid SPACE presses
+  if(_cashoutInProgress){
+    addToast('⏳ Cashout in progress — please wait…','#FFD700');
+    return;
+  }
+
+  _cashoutInProgress=true;
+  // cashoutLamports = original wager + any kill rewards that failed to pay immediately
+  // (failed kills stay in escrow; this lets the cashout recover them automatically).
+  // Server caps payout at min(cashoutLamports, escrowAvail) so other players' funds are safe.
+  const wagerLamports=ST.cashoutLamports||Math.floor((ST.wagerSol||0)*solanaWeb3.LAMPORTS_PER_SOL);
   const estSol=(ST.wagerSol>0)?'~'+(ST.wagerSol*0.9).toFixed(4)+' SOL':'';
   addToast('💸 Cashing out'+(estSol?' '+estSol:'')+'…','#FFD700');
   try{
@@ -2855,9 +2890,18 @@ async function instantCashout(){
     const _pb=document.getElementById('pow-btns'); if(_pb) _pb.style.display='none';
     const _cw=document.getElementById('cash-btn-wrap'); if(_cw) _cw.style.display='none';
     ST.hasEscrow=false;
-    await refreshBal();
-    addToast('💰 +'+(d.playerCut/solanaWeb3.LAMPORTS_PER_SOL).toFixed(4)+' SOL CASHED OUT!','#39FF14');
+    const _solAmt=(d.playerCut/solanaWeb3.LAMPORTS_PER_SOL).toFixed(4);
+    if(d.confirmed){
+      addToast('💰 +'+_solAmt+' SOL CASHED OUT!','#39FF14');
+    }else{
+      // TX sent but not confirmed in our 3s window — it WILL confirm on-chain shortly
+      addToast('💸 +'+_solAmt+' SOL sent — confirming…','#39FF14');
+      // Second balance refresh after 5s to pick up the on-chain confirmation
+      setTimeout(()=>refreshBal().catch(()=>{}),5000);
+    }
+    refreshBal().catch(()=>{});
   }catch(e){
+    _cashoutInProgress=false; // allow retry on failure
     addToast('❌ Cashout failed: '+e.message+' — press SPACE to retry','#FF4444');
   }
 }

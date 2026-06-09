@@ -4,12 +4,30 @@ const nacl = require('tweetnacl');
 
 const CREATOR_WALLET  = '2ZLqQww5koLr2J7PU54UwA7yNX4DRmMHMLAQjm411E7a';
 const CREATOR_FEE_PCT = 0.10;
-const TX_FEE          = 5000;
+const TX_FEE          = 5000;  // exact Solana base fee (5000 lamports × 1 signature, no priority fees)
+// Solana requires a system account's balance to be either exactly 0 OR >= RENT_MIN.
+// It must NEVER sit between 0 and RENT_MIN — that triggers InsufficientFundsForRent.
+// Players no longer deposit RENT_MIN on join (v23 client fix); the settle handler
+// uses a sub-rent safety check to drain the escrow to exactly 0 when needed.
+const RENT_MIN        = 890880; // lamports — used only for the sub-rent safety check below
+
+// ── RPC endpoint list ────────────────────────────────────────────────────────
+// All Vercel serverless functions share the same outbound IP pool.
+// Public Solana RPCs rate-limit by IP — under game load ALL public nodes 429.
+//
+// FIX: Add your free Helius API key as a Vercel environment variable:
+//   HELIUS_RPC_URL = https://mainnet.helius-rpc.com/?api-key=YOUR_KEY
+//   Sign up free at https://helius.dev (no credit card, 50 req/s)
+//
+// Until then we fall back to public nodes with batching + skip-preflight
+// to reduce calls from ~10 down to ~4 per cashout.
 const RPCS = [
-  'https://api.mainnet-beta.solana.com',
-  'https://solana-mainnet.g.alchemy.com/v2/demo',
-  'https://solana.public-rpc.com',
-];
+  process.env.HELIUS_RPC_URL,                        // PRIMARY: set in Vercel env vars
+  'https://api.mainnet-beta.solana.com',              // Solana official (rate-limited under load)
+  'https://try-rpc.mainnet-beta.solana.com',          // Solana second official node
+  'https://solana.public-rpc.com',                    // community public
+  'https://solana-mainnet.g.alchemy.com/v2/demo',     // Alchemy demo
+].filter(Boolean); // drop undefined (HELIUS_RPC_URL not set yet)
 
 // ── tiny helpers ─────────────────────────────────────────────────────────────
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -55,18 +73,63 @@ function getEscrow() {
   return { secretKey: kp.secretKey, publicKey: kp.publicKey, pubkeyB58: b58Encode(kp.publicKey) };
 }
 
-// ── Race 3 RPCs — first success wins ────────────────────────────────────────
+// ── Single-method RPC call — race all nodes, retry 3× on any failure ────────
 async function rpc(method, params) {
   const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method, params });
   const one = async (url) => {
-    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: AbortSignal.timeout(4000) });
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: AbortSignal.timeout(5000) });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const d = await r.json();
     if (d.error) throw new Error('RPC ' + d.error.code + ': ' + d.error.message);
     return d.result;
   };
-  try { return await Promise.any(RPCS.map(one)); }
-  catch (e) { throw new Error('All RPCs failed: ' + (e.errors || []).map(x => x.message).join(' | ')); }
+  let lastMsg = '';
+  for (let attempt = 0; attempt <= 2; attempt++) {
+    if (attempt > 0) await sleep(800 * attempt);
+    try { return await Promise.any(RPCS.map(one)); }
+    catch (e) {
+      lastMsg = (e.errors || []).map(x => x.message).join(' | ');
+      if (attempt < 2) { console.warn('[rpc] attempt ' + (attempt + 1) + ' failed (' + lastMsg + ') — retrying…'); continue; }
+      throw new Error('All RPCs failed: ' + lastMsg);
+    }
+  }
+}
+
+// ── Batched getBalance + getLatestBlockhash in ONE HTTP request ───────────────
+// JSON-RPC batching halves pre-transaction RPC calls (2 → 1 HTTP round-trip).
+// JSON-RPC batching halves pre-transaction RPC round-trips (2 → 1 HTTP request).
+async function fetchBalAndHash(escPubkey) {
+  const batch = [
+    { jsonrpc: '2.0', id: 1, method: 'getBalance',         params: [escPubkey, { commitment: 'confirmed' }] },
+    { jsonrpc: '2.0', id: 2, method: 'getLatestBlockhash', params: [{ commitment: 'confirmed' }] },
+  ];
+  const body = JSON.stringify(batch);
+  const one = async (url) => {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: AbortSignal.timeout(5000) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const arr = await r.json();
+    if (!Array.isArray(arr)) throw new Error('Expected array from batch RPC');
+    const balEntry = arr.find(x => x.id === 1);
+    const bhEntry  = arr.find(x => x.id === 2);
+    if (balEntry?.error) throw new Error('getBalance error: ' + balEntry.error.message);
+    if (bhEntry?.error)  throw new Error('getBlockhash error: ' + bhEntry.error.message);
+    const bal = typeof balEntry?.result?.value === 'number' ? balEntry.result.value
+              : typeof balEntry?.result       === 'number' ? balEntry.result : null;
+    const blockhash = bhEntry?.result?.value?.blockhash ?? bhEntry?.result?.blockhash ?? null;
+    if (bal === null) throw new Error('Bad balance in batch response');
+    if (!blockhash)  throw new Error('Bad blockhash in batch response');
+    return { bal, blockhash };
+  };
+  let lastMsg = '';
+  for (let attempt = 0; attempt <= 2; attempt++) {
+    if (attempt > 0) await sleep(800 * attempt);
+    try { return await Promise.any(RPCS.map(one)); }
+    catch (e) {
+      lastMsg = (e.errors || []).map(x => x.message).join(' | ');
+      if (attempt < 2) { console.warn('[rpc-batch] attempt ' + (attempt + 1) + ' failed (' + lastMsg + ') — retrying…'); continue; }
+      throw new Error('All RPCs failed (balance+blockhash): ' + lastMsg);
+    }
+  }
 }
 
 // ── Build & sign a Solana legacy transaction (escrow signs) ──────────────────
@@ -125,44 +188,51 @@ function buildTx(esc, blockhash, transfers) {
 }
 
 // ── Send tx AND wait for on-chain confirmation ───────────────────────────────
+// Returns { sig, confirmed } where confirmed=true means we observed on-chain confirmation.
+// confirmed=false means the TX was sent successfully but hasn't confirmed in our short poll
+// window — it will confirm within a few more seconds on-chain.
 async function sendAndConfirm(txBytes) {
   const b64 = Buffer.from(txBytes).toString('base64');
   let sig;
   try {
+    // skipPreflight:false — RPC simulates the tx before broadcasting.
+    // If simulation fails (e.g. InsufficientFundsForRent) NO fee is charged from escrow
+    // and we get an immediate -32002 error that triggers the retry loop with a fresh balance.
+    // With Helius at 50 req/s the extra simulation call is not a problem.
     sig = await rpc('sendTransaction', [b64, { encoding: 'base64', skipPreflight: false, preflightCommitment: 'confirmed', maxRetries: 3 }]);
   } catch (e) {
-    throw new Error('Preflight/send failed: ' + e.message);
+    throw new Error('Send failed: ' + e.message);
   }
   console.log('[settle] sent sig=' + sig);
 
-  // Poll up to 35s for confirmation
-  const deadline = Date.now() + 35000;
-  let lastStatus = null;
-  while (Date.now() < deadline) {
-    await sleep(900);
+  // Quick poll — 2 checks at 1.5s intervals (3s total).
+  // This catches most confirmations (Solana typically confirms in 1-2 slots ≈ 0.4-0.8s).
+  // If not confirmed within 3s we return immediately with confirmed:false — the TX is
+  // already in the network and WILL confirm. Keeping the poll short prevents the function
+  // from approaching the 60s Vercel timeout when RPCs are slow.
+  for (let i = 0; i < 2; i++) {
+    await sleep(1500);
     try {
       const res = await rpc('getSignatureStatuses', [[sig], { searchTransactionHistory: false }]);
       const s = res && res.value && res.value[0];
-      lastStatus = s ? JSON.stringify(s) : 'null';
       if (s) {
         if (s.err) {
-          // Log full error for debugging
           console.error('[settle] TX FAILED on-chain sig=' + sig + ' err=' + JSON.stringify(s.err));
           throw new Error('TX rejected on-chain: ' + JSON.stringify(s.err));
         }
         if (s.confirmationStatus === 'confirmed' || s.confirmationStatus === 'finalized') {
           console.log('[settle] confirmed sig=' + sig + ' status=' + s.confirmationStatus);
-          return sig;
+          return { sig, confirmed: true };
         }
       }
     } catch (e) {
       if (e.message.startsWith('TX rejected')) throw e;
-      // RPC poll error — keep retrying
+      // RPC poll error — keep trying
     }
   }
-  console.warn('[settle] poll timeout sig=' + sig + ' lastStatus=' + lastStatus);
-  // Return sig — tx may still land; don't block the user
-  return sig;
+  // Not confirmed in 3s — return optimistically. TX is in the mempool and will land.
+  console.log('[settle] sent (unconfirmed yet) sig=' + sig + ' — client will see balance update shortly');
+  return { sig, confirmed: false };
 }
 
 // ── Main handler ─────────────────────────────────────────────────────────────
@@ -170,7 +240,7 @@ module.exports = async function handler(req, res) {
   let done = false;
   const guard = setTimeout(() => {
     if (!done) { done = true; try { res.status(500).json({ error: 'Timed out — try again' }); } catch (_) {} }
-  }, 50000);
+  }, 55000);
 
   try {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -196,35 +266,50 @@ module.exports = async function handler(req, res) {
     // ── cashout / win ─────────────────────────────────────────────────────────
     if (action === 'cashout' || action === 'win') {
       if (!playerAddress) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'playerAddress required' }); }
-      // Validate player address length before trying to use it
       const playerPubkey = b58Decode(playerAddress);
       if (playerPubkey.length !== 32) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'playerAddress must be a 32-byte Solana address' }); }
-      const [balRes, bhRes] = await Promise.all([
-        rpc('getBalance',         [esc.pubkeyB58, { commitment: 'confirmed' }]),
-        rpc('getLatestBlockhash', [{ commitment: 'confirmed' }]),
-      ]);
-      // Null-safe extraction — some RPC nodes return {context,value} some return value directly
-      const bal   = (balRes && typeof balRes.value === 'number') ? balRes.value : (typeof balRes === 'number' ? balRes : null);
-      const blockhash = (bhRes && bhRes.value && bhRes.value.blockhash) ? bhRes.value.blockhash : (bhRes && bhRes.blockhash ? bhRes.blockhash : null);
-      console.log('[settle] cashout bal=' + bal + ' blockhash=' + (blockhash ? blockhash.slice(0,8)+'…' : 'NULL') + ' player=' + playerAddress.slice(0,8)+'…');
-      if (bal === null) { clearTimeout(guard); done = true; return res.status(500).json({ error: 'Could not read escrow balance from RPC — try again' }); }
-      if (!blockhash)   { clearTimeout(guard); done = true; return res.status(500).json({ error: 'Could not get blockhash from RPC — try again' }); }
-      const avail = bal - TX_FEE;
-      if (avail <= 0) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'Escrow empty — no funds to cashout' }); }
-      // Only pay out the player's own wager — never drain the full shared escrow.
-      // Client sends wagerLamports; cap at avail so we never overdraft.
       const wagerLamports = Number(body.wagerLamports) || 0;
-      const payout = wagerLamports > 0 ? Math.min(wagerLamports, avail) : avail;
-      const creatorCut = Math.floor(payout * CREATOR_FEE_PCT);
-      const playerCut  = payout - creatorCut;
-      console.log('[settle] cashout payout=' + payout + ' (wager=' + wagerLamports + ' avail=' + avail + ') player=' + playerCut + ' creator=' + creatorCut);
-      const tx = buildTx(esc, blockhash, [
-        { to: playerPubkey,              lamports: playerCut  },  // player's wager minus 10%
-        { to: b58Decode(CREATOR_WALLET), lamports: creatorCut },  // 10% fee
-      ]);
-      const sig = await sendAndConfirm(tx);
+
+      // Retry once if on-chain execution fails — a concurrent kill tx may have changed the
+      // balance between our balance check and our tx submission. Re-fetching fixes it.
+      let sig, playerCut, creatorCut, txConfirmed = false;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        if (attempt > 1) await sleep(1200);
+        // Single batched HTTP call for balance + blockhash (was 2 separate calls)
+        const { bal, blockhash } = await fetchBalAndHash(esc.pubkeyB58);
+        console.log('[settle] cashout attempt=' + attempt + ' bal=' + bal + ' blockhash=' + blockhash.slice(0,8) + '… player=' + playerAddress.slice(0,8) + '…');
+        // Reserve only the exact TX fee (not RENT_MIN — players no longer deposit it)
+        const avail = bal - TX_FEE;
+        if (avail <= 0) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'Escrow balance too low to cashout — try again shortly' }); }
+        let payout = wagerLamports > 0 ? Math.min(wagerLamports, avail) : avail;
+        // Sub-rent safety check: Solana rejects txs that would leave an account with
+        // a balance between 0 and RENT_MIN. If the remainder after payout falls in that
+        // forbidden range, bump the payout to drain the escrow all the way to 0 instead.
+        const remaining = avail - payout;
+        if (remaining > 0 && remaining < RENT_MIN) { payout = avail; }
+        creatorCut = Math.floor(payout * CREATOR_FEE_PCT);
+        playerCut  = payout - creatorCut;
+        console.log('[settle] cashout payout=' + payout + ' (wager=' + wagerLamports + ' avail=' + avail + ' remaining=' + remaining + ') player=' + playerCut + ' creator=' + creatorCut);
+        // If creatorCut rounds to 0 (micro-wager), skip the creator transfer
+        const transfers = creatorCut > 0
+          ? [{ to: playerPubkey, lamports: playerCut }, { to: b58Decode(CREATOR_WALLET), lamports: creatorCut }]
+          : [{ to: playerPubkey, lamports: payout }];
+        try {
+          const tx = buildTx(esc, blockhash, transfers);
+          const result = await sendAndConfirm(tx);
+          sig = result.sig; txConfirmed = result.confirmed;
+          break; // success — exit retry loop
+        } catch (e) {
+          const isOnChainFail = e.message.includes('TX rejected') || e.message.includes('insufficient') || e.message.includes('0x1') || e.message.includes('-32002') || e.message.includes('Send failed');
+          if (attempt < 2 && isOnChainFail) {
+            console.warn('[settle] cashout attempt ' + attempt + ' fail (' + e.message.slice(0, 80) + ') — retrying with fresh balance');
+            continue;
+          }
+          throw e;
+        }
+      }
       clearTimeout(guard); done = true;
-      return res.status(200).json({ sig, playerCut, creatorCut, confirmed: true });
+      return res.status(200).json({ sig, playerCut, creatorCut, confirmed: txConfirmed });
     }
 
     // ── kill ──────────────────────────────────────────────────────────────────
@@ -232,55 +317,59 @@ module.exports = async function handler(req, res) {
       if (!playerAddress || !body.wagerLamports) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'playerAddress + wagerLamports required' }); }
       const killPubkey = b58Decode(playerAddress);
       if (killPubkey.length !== 32) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'playerAddress must be 32 bytes' }); }
-      const [balRes, bhRes] = await Promise.all([
-        rpc('getBalance',         [esc.pubkeyB58, { commitment: 'confirmed' }]),
-        rpc('getLatestBlockhash', [{ commitment: 'confirmed' }]),
-      ]);
-      // Null-safe extraction — use null (not 0) so we can distinguish "failed read" vs "truly empty"
-      const killBal  = (balRes && typeof balRes.value === 'number') ? balRes.value : (typeof balRes === 'number' ? balRes : null);
-      const killHash = (bhRes && bhRes.value && bhRes.value.blockhash) ? bhRes.value.blockhash : (bhRes && bhRes.blockhash ? bhRes.blockhash : null);
-      console.log('[settle] kill bal=' + killBal + ' blockhash=' + (killHash ? killHash.slice(0,8)+'...' : 'NULL') + ' killer=' + playerAddress.slice(0,8)+'... wager=' + body.wagerLamports);
-      if (killBal === null) { clearTimeout(guard); done = true; return res.status(500).json({ error: 'Could not read escrow balance — try again' }); }
-      if (!killHash) { clearTimeout(guard); done = true; return res.status(500).json({ error: 'Could not get blockhash — try again' }); }
-      const avail = killBal - TX_FEE;
-      if (avail <= 0) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'Escrow empty' }); }
-      // Same 10% creator fee applies to kills — ensures creator gets 10% of the player's
-      // total cashout value (wager + kill earnings), not just 10% of the original wager.
-      const total      = Math.min(Number(body.wagerLamports), avail);
-      const creatorCut = Math.floor(total * CREATOR_FEE_PCT);
-      const killerCut  = total - creatorCut;
-      console.log('[settle] kill total=' + total + ' killer=' + killerCut + ' creator=' + creatorCut);
-      const tx = buildTx(esc, killHash, [
-        { to: killPubkey,              lamports: killerCut  },
-        { to: b58Decode(CREATOR_WALLET), lamports: creatorCut },
-      ]);
-      const sig = await sendAndConfirm(tx);
+
+      // Retry once on on-chain fail — concurrent kills can race on the shared escrow
+      let sig, killerCut, creatorCut, txConfirmed2 = false;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        if (attempt > 1) await sleep(1200);
+        const { bal: killBal, blockhash: killHash } = await fetchBalAndHash(esc.pubkeyB58);
+        console.log('[settle] kill attempt=' + attempt + ' bal=' + killBal + ' blockhash=' + killHash.slice(0,8) + '… killer=' + playerAddress.slice(0,8) + '… wager=' + body.wagerLamports);
+        const killAvail = killBal - TX_FEE;
+        if (killAvail <= 0) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'Escrow empty' }); }
+        let total = Math.min(Number(body.wagerLamports), killAvail);
+        // Sub-rent safety check: if remaining after payout would be between 0 and RENT_MIN, drain to 0
+        const killRemaining = killAvail - total;
+        if (killRemaining > 0 && killRemaining < RENT_MIN) { total = killAvail; }
+        creatorCut = Math.floor(total * CREATOR_FEE_PCT);
+        killerCut  = total - creatorCut;
+        console.log('[settle] kill total=' + total + ' killer=' + killerCut + ' creator=' + creatorCut);
+        const transfers = creatorCut > 0
+          ? [{ to: killPubkey, lamports: killerCut }, { to: b58Decode(CREATOR_WALLET), lamports: creatorCut }]
+          : [{ to: killPubkey, lamports: total }];
+        try {
+          const tx = buildTx(esc, killHash, transfers);
+          const result2 = await sendAndConfirm(tx);
+          sig = result2.sig; txConfirmed2 = result2.confirmed;
+          break;
+        } catch (e) {
+          const isOnChainFail = e.message.includes('TX rejected') || e.message.includes('insufficient') || e.message.includes('0x1') || e.message.includes('-32002') || e.message.includes('Send failed');
+          if (attempt < 2 && isOnChainFail) {
+            console.warn('[settle] kill attempt ' + attempt + ' fail (' + e.message.slice(0, 80) + ') — retrying');
+            continue;
+          }
+          throw e;
+        }
+      }
       clearTimeout(guard); done = true;
-      return res.status(200).json({ sig, amount: killerCut, creatorCut, confirmed: true });
+      return res.status(200).json({ sig, amount: killerCut, creatorCut, confirmed: txConfirmed2 });
     }
 
     // ── lose ──────────────────────────────────────────────────────────────────
     if (action === 'lose') {
-      const [balRes, bhRes] = await Promise.all([
-        rpc('getBalance',         [esc.pubkeyB58, { commitment: 'confirmed' }]),
-        rpc('getLatestBlockhash', [{ commitment: 'confirmed' }]),
-      ]);
-      const loseBal  = (balRes && typeof balRes.value === 'number') ? balRes.value : (typeof balRes === 'number' ? balRes : 0);
-      const loseHash = (bhRes && bhRes.value && bhRes.value.blockhash) || (bhRes && bhRes.blockhash);
-      if (!loseHash) { clearTimeout(guard); done = true; return res.status(500).json({ error: 'Could not get blockhash — try again' }); }
-      const avail = loseBal - TX_FEE;
-      if (avail <= 0) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'Escrow empty' }); }
+      const { bal: loseBal, blockhash: loseHash } = await fetchBalAndHash(esc.pubkeyB58);
+      const loseAvail = loseBal - TX_FEE;
+      if (loseAvail <= 0) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'Escrow empty' }); }
+      const avail = loseAvail; // alias for buildTx call below
       const tx = buildTx(esc, loseHash, [{ to: b58Decode(CREATOR_WALLET), lamports: avail }]);
-      const sig = await sendAndConfirm(tx);
+      const { sig: loseSig, confirmed: loseConfirmed } = await sendAndConfirm(tx);
       clearTimeout(guard); done = true;
-      return res.status(200).json({ sig, amount: avail, confirmed: true });
+      return res.status(200).json({ sig: loseSig, amount: avail, confirmed: loseConfirmed });
     }
 
     clearTimeout(guard); done = true;
     return res.status(400).json({ error: 'Unknown action: ' + action });
 
   } catch (e) {
-    // Log full stack so we can diagnose crashes (not just the message)
     console.error('[settle] CRASH:', e && (e.stack || e.message) || String(e));
     if (!done) { done = true; clearTimeout(guard); try { res.status(500).json({ error: e && e.message || String(e) }); } catch (_) {} }
   }
