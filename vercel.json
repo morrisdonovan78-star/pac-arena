@@ -13,7 +13,7 @@
     {
       "source": "/",
       "missing": [{ "type": "query", "key": "v" }],
-      "destination": "/?v=17",
+      "destination": "/?v=18",
       "permanent": false
     }
   ],

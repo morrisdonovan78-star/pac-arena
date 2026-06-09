@@ -244,14 +244,19 @@ module.exports = async function handler(req, res) {
       if (!killHash) { clearTimeout(guard); done = true; return res.status(500).json({ error: 'Could not get blockhash — try again' }); }
       const avail = killBal - TX_FEE;
       if (avail <= 0) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'Escrow empty' }); }
-      // Killer gets 100% of victim's wager — no creator cut on kills
-      // Creator only takes 10% when a player presses SPACE to cashout their own wager
-      const amount = Math.min(Number(body.wagerLamports), avail);
-      console.log('[settle] kill amount=' + amount + ' to killer');
-      const tx = buildTx(esc, killHash, [{ to: killPubkey, lamports: amount }]);
+      // Same 10% creator fee applies to kills — ensures creator gets 10% of the player's
+      // total cashout value (wager + kill earnings), not just 10% of the original wager.
+      const total      = Math.min(Number(body.wagerLamports), avail);
+      const creatorCut = Math.floor(total * CREATOR_FEE_PCT);
+      const killerCut  = total - creatorCut;
+      console.log('[settle] kill total=' + total + ' killer=' + killerCut + ' creator=' + creatorCut);
+      const tx = buildTx(esc, killHash, [
+        { to: killPubkey,              lamports: killerCut  },
+        { to: b58Decode(CREATOR_WALLET), lamports: creatorCut },
+      ]);
       const sig = await sendAndConfirm(tx);
       clearTimeout(guard); done = true;
-      return res.status(200).json({ sig, amount, confirmed: true });
+      return res.status(200).json({ sig, amount: killerCut, creatorCut, confirmed: true });
     }
 
     // ── lose ──────────────────────────────────────────────────────────────────

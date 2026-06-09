@@ -1,4 +1,4 @@
-<!-- PAC ARENA v17 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v18 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -9,8 +9,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <!-- AUTO CACHE-BUST: bumps version on every deploy → forces all players to fetch fresh page automatically -->
 <!-- Also handles bfcache (back-forward cache) which bypasses HTTP headers entirely -->
-<script>(function(){try{var v='v17',k='pa_build';if(localStorage.getItem(k)!==v){localStorage.setItem(k,v);location.replace(location.pathname+'?r='+Date.now());}else if(location.search)history.replaceState(null,'',location.pathname);}catch(e){}window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});})();</script>
-<title>PAC MONEY v17</title>
+<script>(function(){try{var v='v18',k='pa_build';if(localStorage.getItem(k)!==v){localStorage.setItem(k,v);location.replace(location.pathname+'?r='+Date.now());}else if(location.search)history.replaceState(null,'',location.pathname);}catch(e){}window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});})();</script>
+<title>PAC MONEY v18</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
@@ -227,7 +227,7 @@ body{touch-action:manipulation;}
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
-    <div style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);margin-top:4px;letter-spacing:1px;">v17</div>
+    <div style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v18</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;">
     <div class="w-strip">
@@ -1620,7 +1620,7 @@ let myPid=null, isHost=false;                     // N-player game identity
 let isSpectating=false;                           // spectate mode flag
 let _guestInputLoop=null;                         // guest → host input heartbeat
 
-// ── Kill reward — instantly transfer victim's wager to killer ─
+// ── Kill reward — 90% of victim's wager to killer, 10% to creator ─
 async function claimKillReward(victimSol){
   if(!ST.address) return;
   // Use the victim's actual wager; fall back to this player's wager if unavailable
@@ -1628,9 +1628,10 @@ async function claimKillReward(victimSol){
   if(!rewardSol) return;
   playKillSfx(); // 🎵 ghost-eaten ascending blip
   try{
-    // Send full wager to settle.js — server handles 90/10 split (killer/creator)
+    // Server applies same 10% creator fee as cashout — killer gets 90% of victim's wager
     const wagerLamports=Math.floor(rewardSol*solanaWeb3.LAMPORTS_PER_SOL);
-    addToast('💰 KILL! Claiming +'+rewardSol.toFixed(4)+' SOL…','#00FF7F');
+    const estKill=(rewardSol*0.9).toFixed(4);
+    addToast('⚔️ KILL! +~'+estKill+' SOL incoming…','#00FF7F');
     const r=await fetch('/api/settle',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -1639,7 +1640,7 @@ async function claimKillReward(victimSol){
     let d; try{ d=await r.json(); }catch(_){ throw new Error('Server error (not JSON) — try again'); }
     if(!r.ok||d.error) throw new Error(d.error||'Server error '+r.status);
     await refreshBal();
-    addToast('💰 +'+(d.amount/solanaWeb3.LAMPORTS_PER_SOL).toFixed(4)+' SOL IN YOUR WALLET!','#00FF7F');
+    addToast('💰 +'+(d.amount/solanaWeb3.LAMPORTS_PER_SOL).toFixed(4)+' SOL KILL REWARD!','#00FF7F');
   }catch(e){
     addToast('Kill reward error: '+e.message,'#FF4444');
     console.error('[claimKillReward]',e);
