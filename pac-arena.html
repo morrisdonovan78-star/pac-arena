@@ -765,6 +765,7 @@ function updateUI(){
   ['h-usd','n-usd'].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent='≈ $'+(ST.balance*ST.solPrice).toFixed(2);});
   const af=document.getElementById('h-addr-full'); if(af) af.textContent=a||'--';
   const em=document.getElementById('h-email'); if(em) em.textContent=ST.email;
+  _cachedMyName=ST.email?ST.email.split('@')[0].slice(0,8).toUpperCase():'YOU';
   updateExplorerLink();
   updateCashoutBal();
 }
@@ -1681,6 +1682,7 @@ function addToast(msg,color='#FFD700'){
 let _audioCtx=null, _musicStop=false;
 let _lastDrawTs=0; // used by draw() for frame-delta interpolation
 let _lastSbSig='';  // scoreboard change-detection — skip DOM rebuild when nothing changed
+let _cachedMyName='YOU'; // cached once — avoids string ops inside 60fps draw loop
 let _chatTyping=false, _chatFadeTimer=null; // chat input state
 const _chatLog=[];                          // recent chat messages (max 8)
 let _visHandler=null; // tab-visibility handler ref (so we can removeEventListener cleanly)
@@ -2526,9 +2528,9 @@ function draw(){
     ctx.save(); ctx.translate(px+T/2,py+T/2); ctx.rotate(rot);
     const activeCol=p.pow?'#00FF7F':p.pep?'#39FF14':col;
     ctx.fillStyle=activeCol;
-    // shadowBlur only for powered/peppered players (most expensive canvas op)
-    if(p.pow){ ctx.shadowColor='#00FF7F'; ctx.shadowBlur=14+Math.sin(now/80)*6; }
-    else if(p.pep){ ctx.shadowColor='#39FF14'; ctx.shadowBlur=8+Math.sin(now/60)*4; }
+    // Static shadowBlur — animated blur values force GPU re-composite every frame
+    if(p.pow){ ctx.shadowColor='#00FF7F'; ctx.shadowBlur=14; }
+    else if(p.pep){ ctx.shadowColor='#39FF14'; ctx.shadowBlur=8; }
     ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0,0,T/2-1,a*Math.PI,(2-a)*Math.PI); ctx.closePath(); ctx.fill();
     ctx.shadowBlur=0; ctx.restore();
     // Name label + SOL wager above the player
@@ -2557,7 +2559,7 @@ function draw(){
   }
 
   // ── Draw all players ────────────────────────────────────────
-  const myName=(ST.email?ST.email.split('@')[0].slice(0,8).toUpperCase():'YOU');
+  const myName=_cachedMyName;
   G.players.forEach(p=>{
     const isMe=p.id===myPid;
     // LEFT of name = powerup being carried (held, ready to use)
@@ -2603,9 +2605,8 @@ function draw(){
     if(me.pow&&me.pt>0){
       const cy=by+T*0.45;
       const cpct=me.pt/450;
-      const pulse=0.7+Math.sin(now/120)*0.3;
       ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(bx-1,cy-1,bw+2,bh+2);
-      ctx.shadowColor='#FF4500'; ctx.shadowBlur=8*pulse;
+      ctx.shadowColor='#FF4500'; ctx.shadowBlur=6;
       ctx.fillStyle='#FF6347'; ctx.fillRect(bx,cy,bw*cpct,bh);
       ctx.shadowBlur=0;
       ctx.strokeStyle='rgba(255,100,50,0.4)'; ctx.lineWidth=1; ctx.strokeRect(bx,cy,bw,bh);
@@ -2616,9 +2617,8 @@ function draw(){
     if(me.pep&&me.pet>0){
       const cx=C*T-bw-T*0.4, cy=by+T*0.45;
       const ppct=me.pet/390;
-      const pulse=0.7+Math.sin(now/100)*0.3;
       ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(cx-1,cy-1,bw+2,bh+2);
-      ctx.shadowColor='#39FF14'; ctx.shadowBlur=8*pulse;
+      ctx.shadowColor='#39FF14'; ctx.shadowBlur=6;
       ctx.fillStyle='#39FF14'; ctx.fillRect(cx,cy,bw*ppct,bh);
       ctx.shadowBlur=0;
       ctx.strokeStyle='rgba(57,255,20,0.4)'; ctx.strokeRect(cx,cy,bw,bh);
@@ -2628,7 +2628,7 @@ function draw(){
   }
 
   // ── Toast notifications (kill rewards, etc.) ──────────────────
-  _toasts=_toasts.filter(t=>t.ttl-- >0);
+  for(let i=_toasts.length-1;i>=0;i--){ if(--_toasts[i].ttl<=0) _toasts.splice(i,1); }
   _toasts.forEach((t,i)=>{
     const alpha=Math.min(1,t.ttl/25);
     const fs=Math.floor(T*0.52);
