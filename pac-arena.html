@@ -17,9 +17,10 @@
   fetch('/api/version',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
     var k='pa_deploy',cur=d.v||'dev',stored=localStorage.getItem(k);
     localStorage.setItem(k,cur);
-    if(stored&&stored!==cur){
-      // Navigate to a URL that is unique to this deployment — browsers cannot have it
-      // cached, so they MUST fetch fresh HTML from the server.
+    // Redirect on first-ever visit (!stored) OR new deployment (stored!==cur).
+    // First-visit case handles players who had old v21 HTML cached in their browser —
+    // they get pushed to a fresh versioned URL that has never been cached.
+    if(!stored||stored!==cur){
       location.replace('/?_v='+encodeURIComponent(cur));
     }
   }).catch(function(){});
