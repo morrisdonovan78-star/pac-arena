@@ -2,7 +2,7 @@
 'use strict';
 const nacl = require('tweetnacl');
 
-const CREATOR_WALLET  = '2ZLqQww5koLr2J7PU54UwA7yNX4DRmMHMLAQjm411E7a';
+const CREATOR_WALLET  = 'BV3D3RKCYhLAMpyGQipKSD4BiSUbBFkRXySXTfMPuTsC';
 const CREATOR_FEE_PCT = 0.10;
 const TX_FEE          = 5000;  // exact Solana base fee (5000 lamports × 1 signature, no priority fees)
 // Solana requires a system account's balance to be either exactly 0 OR >= RENT_MIN.
