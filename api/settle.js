@@ -7,7 +7,7 @@ const crypto  = require('crypto');
 // Tokens are issued by /api/settle-auth and must be passed as x-settle-token header.
 // Each token is bound to (action, playerAddress, wagerLamports, 2-min window).
 // We accept the current window and the previous one to handle clock drift / slow clients.
-const MAX_WAGER_LAMPORTS = 500_000; // must match settle-auth.js
+const MAX_WAGER_LAMPORTS = 300_000; // must match settle-auth.js
 
 function validateToken(token, action, playerAddress, wagerLamports) {
   const secret = process.env.SETTLE_SECRET || '';

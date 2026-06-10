@@ -5,7 +5,7 @@
 
 const crypto = require('crypto');
 
-const MAX_WAGER_LAMPORTS = 500_000; // 0.5 SOL hard cap per settle call
+const MAX_WAGER_LAMPORTS = 300_000; // 0.3 SOL — covers max $10 lobby + kill rewards at $150/SOL
 
 function makeToken(action, playerAddress, wagerLamports) {
   const secret = process.env.SETTLE_SECRET || '';
