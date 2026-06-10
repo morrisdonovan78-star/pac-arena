@@ -7,8 +7,6 @@ const crypto  = require('crypto');
 // Tokens are issued by /api/settle-auth and must be passed as x-settle-token header.
 // Each token is bound to (action, playerAddress, wagerLamports, 2-min window).
 // We accept the current window and the previous one to handle clock drift / slow clients.
-const MAX_WAGER_LAMPORTS = 300_000; // must match settle-auth.js
-
 function validateToken(token, action, playerAddress, wagerLamports) {
   const secret = process.env.SETTLE_SECRET || '';
   if (!secret) {
@@ -283,10 +281,6 @@ module.exports = async function handler(req, res) {
     // ── Token auth — required for all fund-moving actions ────────────────────
     if (action !== 'balance') {
       const token = req.headers['x-settle-token'] || '';
-      if (wagerLamportsRaw > MAX_WAGER_LAMPORTS) {
-        clearTimeout(guard); done = true;
-        return res.status(400).json({ error: 'wagerLamports exceeds maximum' });
-      }
       if (!validateToken(token, action, playerAddress || '', wagerLamportsRaw)) {
         clearTimeout(guard); done = true;
         return res.status(403).json({ error: 'Invalid or missing settle token — request one from /api/settle-auth' });

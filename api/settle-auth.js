@@ -5,8 +5,6 @@
 
 const crypto = require('crypto');
 
-const MAX_WAGER_LAMPORTS = 300_000; // 0.3 SOL — covers max $10 lobby + kill rewards at $150/SOL
-
 function makeToken(action, playerAddress, wagerLamports) {
   const secret = process.env.SETTLE_SECRET || '';
   if (!secret) throw new Error('SETTLE_SECRET not configured');
@@ -30,10 +28,7 @@ module.exports = function handler(req, res) {
     const { action, playerAddress, wagerLamports } = body;
     if (!action) return res.status(400).json({ error: 'action required' });
 
-    // Hard cap — prevents an abuser calling this endpoint to get a token for huge amounts
     const lamps = Number(wagerLamports) || 0;
-    if (lamps > MAX_WAGER_LAMPORTS) return res.status(400).json({ error: 'wagerLamports exceeds maximum' });
-
     const token = makeToken(action, playerAddress || '', lamps);
     return res.status(200).json({ token, expiresIn: 120 });
   } catch (e) {
