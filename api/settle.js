@@ -1,7 +1,7 @@
 // api/settle.js — tweetnacl only, no @solana/web3.js (ESM/runtime issues)
 'use strict';
 const nacl = require('tweetnacl');
-const { kvGet, kvDel, kvSetPerm, kvZadd } = require('../lib/kv');
+const { kvGet, kvSet, kvDel, kvSetPerm, kvZadd } = require('../lib/kv');
 
 // ── Ed25519 wallet signature verification ─────────────────────────────────────
 // The client signs: "pac-arena:{action}:{playerAddress}:{wagerLamports}:{unixTs}"
@@ -340,6 +340,8 @@ module.exports = async function handler(req, res) {
           const result = await sendAndConfirm(tx);
           sig = result.sig; txConfirmed = result.confirmed;
           await kvDel('pw:' + playerAddress); // wager claimed — remove so it can't be replayed
+          // Clear kill rate-limit and count so a new session starts clean
+          (async()=>{ try{ await kvDel('krl:'+playerAddress); await kvDel('kc:'+playerAddress); }catch(_){} })();
           // Fire-and-forget leaderboard stat update (never block cashout on this)
           (async()=>{
             try{
@@ -374,6 +376,25 @@ module.exports = async function handler(req, res) {
       const killPubkey = b58Decode(playerAddress);
       if (killPubkey.length !== 32) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'playerAddress must be 32 bytes' }); }
 
+      // ── Anti-replay layer 1: per-address rate limiter (30 s) ─────────────────
+      // Prevents rapid-fire kill calls from console draining escrow.
+      const rlKey = 'krl:' + playerAddress;
+      const isRateLimited = await kvGet(rlKey);
+      if (isRateLimited) {
+        clearTimeout(guard); done = true;
+        return res.status(429).json({ error: 'Kill reward already claimed recently — wait before claiming again' });
+      }
+
+      // ── Anti-replay layer 2: per-session kill count cap ───────────────────────
+      // A player can kill at most 8 opponents per session regardless of lobby size.
+      // This caps the maximum escrow exposure even if the rate limiter is somehow bypassed.
+      const killCountKey = 'kc:' + playerAddress;
+      const killCount = Number(await kvGet(killCountKey)) || 0;
+      if (killCount >= 8) {
+        clearTimeout(guard); done = true;
+        return res.status(429).json({ error: 'Maximum kill rewards reached for this session' });
+      }
+
       // Retry once on on-chain fail — concurrent kills can race on the shared escrow
       let sig, killerCut, creatorCut, txConfirmed2 = false;
       for (let attempt = 1; attempt <= 2; attempt++) {
@@ -395,7 +416,7 @@ module.exports = async function handler(req, res) {
         if (killRemaining > 0 && killRemaining < RENT_MIN) { total = killAvail; }
         creatorCut = Math.floor(total * CREATOR_FEE_PCT);
         killerCut  = total - creatorCut;
-        console.log('[settle] kill total=' + total + ' killer=' + killerCut + ' creator=' + creatorCut);
+        console.log('[settle] kill total=' + total + ' killer=' + killerCut + ' creator=' + creatorCut + ' killCount=' + killCount);
         const transfers = creatorCut > 0
           ? [{ to: killPubkey, lamports: killerCut }, { to: b58Decode(CREATOR_WALLET), lamports: creatorCut }]
           : [{ to: killPubkey, lamports: total }];
@@ -403,6 +424,9 @@ module.exports = async function handler(req, res) {
           const tx = buildTx(esc, killHash, transfers);
           const result2 = await sendAndConfirm(tx);
           sig = result2.sig; txConfirmed2 = result2.confirmed;
+          // Set rate-limit key (30 s) and increment kill counter (4 h TTL)
+          await kvSet(rlKey, '1', 30);
+          await kvSet(killCountKey, killCount + 1, 14400);
           break;
         } catch (e) {
           const isOnChainFail = e.message.includes('TX rejected') || e.message.includes('insufficient') || e.message.includes('0x1') || e.message.includes('-32002') || e.message.includes('Send failed');
@@ -434,6 +458,8 @@ module.exports = async function handler(req, res) {
       const tx = buildTx(esc, loseHash, [{ to: b58Decode(CREATOR_WALLET), lamports: finalAmt }]);
       const { sig: loseSig, confirmed: loseConfirmed } = await sendAndConfirm(tx);
       await kvDel('pw:' + playerAddress);
+      // Clear kill rate-limit and count so a new session starts clean
+      (async()=>{ try{ await kvDel('krl:'+playerAddress); await kvDel('kc:'+playerAddress); }catch(_){} })();
       clearTimeout(guard); done = true;
       return res.status(200).json({ sig: loseSig, amount: finalAmt, confirmed: loseConfirmed });
     }
