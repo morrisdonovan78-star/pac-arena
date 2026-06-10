@@ -1,6 +1,30 @@
 // api/settle.js — tweetnacl only, no @solana/web3.js (ESM/runtime issues)
 'use strict';
-const nacl = require('tweetnacl');
+const nacl    = require('tweetnacl');
+const crypto  = require('crypto');
+
+// ── HMAC token validation ─────────────────────────────────────────────────────
+// Tokens are issued by /api/settle-auth and must be passed as x-settle-token header.
+// Each token is bound to (action, playerAddress, wagerLamports, 2-min window).
+// We accept the current window and the previous one to handle clock drift / slow clients.
+const MAX_WAGER_LAMPORTS = 500_000; // must match settle-auth.js
+
+function validateToken(token, action, playerAddress, wagerLamports) {
+  const secret = process.env.SETTLE_SECRET || '';
+  if (!secret) {
+    // If SETTLE_SECRET isn't set yet, allow through so deploys aren't broken mid-setup.
+    console.warn('[settle] SETTLE_SECRET not configured — token validation skipped');
+    return true;
+  }
+  if (!token) return false;
+  const now = Math.floor(Date.now() / 120_000);
+  for (const w of [now, now - 1]) {
+    const payload  = action + ':' + (playerAddress || '') + ':' + wagerLamports + ':' + w;
+    const expected = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+    if (crypto.timingSafeEqual(Buffer.from(token, 'hex'), Buffer.from(expected, 'hex'))) return true;
+  }
+  return false;
+}
 
 const CREATOR_WALLET  = '2ZLqQww5koLr2J7PU54UwA7yNX4DRmMHMLAQjm411E7a';
 const CREATOR_FEE_PCT = 0.10;
@@ -245,7 +269,7 @@ module.exports = async function handler(req, res) {
   try {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-settle-token');
     if (req.method === 'OPTIONS') { clearTimeout(guard); done = true; return res.status(200).end(); }
     if (req.method !== 'POST')   { clearTimeout(guard); done = true; return res.status(405).end(); }
 
@@ -254,6 +278,21 @@ module.exports = async function handler(req, res) {
     body = body || {};
 
     const { action, playerAddress } = body;
+    const wagerLamportsRaw = Number(body.wagerLamports) || 0;
+
+    // ── Token auth — required for all fund-moving actions ────────────────────
+    if (action !== 'balance') {
+      const token = req.headers['x-settle-token'] || '';
+      if (wagerLamportsRaw > MAX_WAGER_LAMPORTS) {
+        clearTimeout(guard); done = true;
+        return res.status(400).json({ error: 'wagerLamports exceeds maximum' });
+      }
+      if (!validateToken(token, action, playerAddress || '', wagerLamportsRaw)) {
+        clearTimeout(guard); done = true;
+        return res.status(403).json({ error: 'Invalid or missing settle token — request one from /api/settle-auth' });
+      }
+    }
+
     const esc = getEscrow();
 
     // ── balance ───────────────────────────────────────────────────────────────

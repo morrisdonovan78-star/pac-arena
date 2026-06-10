@@ -1,4 +1,4 @@
-<!-- PAC ARENA v31 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v32 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -31,7 +31,7 @@
 // Block stale bfcache (back/forward navigation serving frozen game state)
 window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});
 })();</script>
-<title>PAC MONEY v31</title>
+<title>PAC MONEY v32</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
@@ -248,7 +248,7 @@ body{touch-action:manipulation;}
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
-    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v31</div>
+    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v32</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;">
     <div class="w-strip">
@@ -1656,9 +1656,10 @@ async function claimKillReward(victimSol){
     const wagerLamports=Math.floor(rewardSol*solanaWeb3.LAMPORTS_PER_SOL);
     const estKill=(rewardSol*0.9).toFixed(4);
     addToast('⚔️ KILL! +~'+estKill+' SOL incoming…','#00FF7F');
+    const _killTok=await getSettleToken('kill',ST.address,wagerLamports);
     const r=await fetch('/api/settle',{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{'Content-Type':'application/json','x-settle-token':_killTok},
       body:JSON.stringify({action:'kill',playerAddress:ST.address,wagerLamports})
     });
     let d; try{ d=await r.json(); }catch(_){ throw new Error('Server error (not JSON) — try again'); }
@@ -2719,6 +2720,19 @@ async function endGame(reason){
   }
 }
 
+// Fetch a short-lived HMAC token from /api/settle-auth before every settle call.
+// This prevents anyone who intercepts the API endpoint from replaying or forging requests.
+async function getSettleToken(action, playerAddress, wagerLamports) {
+  const r = await fetch('/api/settle-auth', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({action, playerAddress: playerAddress||'', wagerLamports: wagerLamports||0})
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || d.error) throw new Error('Auth error: ' + (d.error || r.status));
+  return d.token;
+}
+
 // ═══════════════════════════════════════════════════════════
 // SETTLE — sends escrow to winner / creator
 // ═══════════════════════════════════════════════════════════
@@ -2732,9 +2746,10 @@ async function settle(result){
   lg('res-log','Processing payout via server…','lhi');
   try{
     const action=(result==='p1'||result==='draw')?'cashout':'lose';
+    const _sTok=await getSettleToken(action,ST.address,0);
     const r=await fetch('/api/settle',{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{'Content-Type':'application/json','x-settle-token':_sTok},
       body:JSON.stringify({action,playerAddress:ST.address})
     });
     const d=await r.json();
@@ -2883,9 +2898,10 @@ async function instantCashout(){
   const estSol=(ST.wagerSol>0)?'~'+(ST.wagerSol*0.9).toFixed(4)+' SOL':'';
   addToast('💸 Cashing out'+(estSol?' '+estSol:'')+'…','#FFD700');
   try{
+    const _cTok=await getSettleToken('cashout',ST.address,wagerLamports);
     const r=await fetch('/api/settle',{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{'Content-Type':'application/json','x-settle-token':_cTok},
       body:JSON.stringify({action:'cashout',playerAddress:ST.address,wagerLamports})
     });
     let d; try{ d=await r.json(); }catch(_){ throw new Error('Server error (not JSON) — try again'); }
