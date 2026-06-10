@@ -1,4 +1,4 @@
-<!-- PAC ARENA v47 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v48 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -36,7 +36,7 @@
 // Block stale bfcache (back/forward navigation serving frozen game state)
 window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});
 })();</script>
-<title>PAC MONEY v47</title>
+<title>PAC MONEY v48</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
@@ -254,7 +254,7 @@ body{touch-action:manipulation;}
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
-    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v47</div>
+    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v48</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;">
     <div class="w-strip">
@@ -538,9 +538,9 @@ body{touch-action:manipulation;}
       <input id="co-dest" type="text" placeholder="Paste Phantom / external wallet address" style="width:100%;box-sizing:border-box;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-family:'Exo 2',sans-serif;font-size:13px;color:var(--txt);outline:none;"/>
     </div>
     <div style="margin-bottom:.5rem;text-align:left;">
-      <label style="display:block;font-family:'Press Start 2P',monospace;font-size:7px;color:var(--muted);margin-bottom:6px;">AMOUNT (SOL)</label>
+      <label style="display:block;font-family:'Press Start 2P',monospace;font-size:7px;color:var(--muted);margin-bottom:6px;">AMOUNT ($USD)</label>
       <div style="display:flex;gap:8px;">
-        <input id="co-amt" type="number" placeholder="0.000000" min="0.000001" step="0.000001" style="flex:1;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-family:'Exo 2',sans-serif;font-size:15px;color:var(--txt);outline:none;" oninput="onCashoutAmtChange()"/>
+        <input id="co-amt" type="number" placeholder="0.00" min="0.01" step="0.01" style="flex:1;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-family:'Exo 2',sans-serif;font-size:15px;color:var(--txt);outline:none;" oninput="onCashoutAmtChange()"/>
         <button class="copy-btn" onclick="setMaxCashout()" style="padding:0 16px;">MAX</button>
       </div>
     </div>
@@ -2733,7 +2733,7 @@ function draw(){
         ctx.fillText(solLabel,px+T/2,sly);
       }
       // ── Username line (bottom of the label group) ──
-      ctx.font='bold '+fs+'px monospace';
+      ctx.font='bold '+fs+'px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",monospace';
       ctx.lineWidth=3; ctx.strokeStyle='rgba(0,0,0,0.95)';
       ctx.strokeText(label,px+T/2,py-T*0.9);
       ctx.fillStyle=col;
@@ -2749,8 +2749,8 @@ function draw(){
     // LEFT of name = powerup being carried (held, ready to use)
     // RIGHT of name = powerup currently active (in use right now)
     const displayName=isMe?myName:(p.name||('P'+(p.num+1)));
-    const heldBadge=(p.held||[]).map(h=>h==='cherry'?'🍒':h==='pepper'?'[S]':'').join('');
-    const activeBadge=(p.pow?'🍒':'')+(p.pep?'[S!]':'');
+    const heldBadge=(p.held||[]).map(h=>h==='cherry'?'🍒':h==='pepper'?'🌶️':'').join('');
+    const activeBadge=(p.pow?'🍒':'')+(p.pep?'🌶️':'');
     const label=(heldBadge?heldBadge+' ':'')+displayName+(activeBadge?' '+activeBadge:'');
     // Show wager in SOL above the name — same for all players in a paid lobby
     const solAmt=isMe?(ST.wagerSol||0):(p.sol||ST.wagerSol||0);
@@ -2780,10 +2780,10 @@ function draw(){
     const lfs=Math.max(5,Math.floor(T*0.26));
     // Held powerup display (bottom-left)
     const _hl=me.held||[];
-    const holdLabel=_hl.length===0?'-- no powerup held --':_hl.length===2?'🍒 V=KILL  [S] C=SPEED':_hl[0]==='cherry'?'🍒 KILL MODE — press V (or tap 🍒)':'[S] SPEED BOOST — press C (or tap button)';
+    const holdLabel=_hl.length===0?'-- no powerup held --':_hl.length===2?'🍒 V=KILL  🌶️ C=SPEED':_hl[0]==='cherry'?'🍒 KILL MODE — press V (or tap 🍒)':'🌶️ SPEED BOOST — press C (or tap button)';
     const holdCol=_hl.length===0?'rgba(255,255,255,0.25)':_hl.length===2?'#FFD700':_hl[0]==='cherry'?'#FF6347':'#39FF14';
     ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(bx-2,by-lfs-2,bw+4,lfs+6);
-    ctx.fillStyle=holdCol; ctx.font='bold '+lfs+'px monospace'; ctx.textAlign='left';
+    ctx.fillStyle=holdCol; ctx.font='bold '+lfs+'px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",monospace'; ctx.textAlign='left';
     ctx.fillText(holdLabel,bx,by);
     // Cherry kill timer bar (bottom-left below held display)
     if(me.pow&&me.pt>0){
@@ -2806,8 +2806,8 @@ function draw(){
       ctx.fillStyle='#39FF14'; ctx.fillRect(cx,cy,bw*ppct,bh);
       ctx.shadowBlur=0;
       ctx.strokeStyle='rgba(57,255,20,0.4)'; ctx.strokeRect(cx,cy,bw,bh);
-      ctx.fillStyle='#39FF14'; ctx.font='bold '+lfs+'px monospace'; ctx.textAlign='left';
-      ctx.fillText('SPEED '+Math.ceil(me.pet/30)+'s',cx,cy-2);
+      ctx.fillStyle='#39FF14'; ctx.font='bold '+lfs+'px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",monospace'; ctx.textAlign='left';
+      ctx.fillText('🌶️ SPEED '+Math.ceil(me.pet/30)+'s',cx,cy-2);
     }
   }
 
@@ -2819,7 +2819,7 @@ function draw(){
     const ty=R*T*0.22+i*T*1.4;
     ctx.save();
     ctx.globalAlpha=alpha;
-    ctx.font='bold '+fs+'px monospace';
+    ctx.font='bold '+fs+'px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",monospace';
     ctx.textAlign='center'; ctx.textBaseline='middle';
     // Shadow
     ctx.fillStyle='rgba(0,0,0,0.85)';
@@ -3030,12 +3030,15 @@ function openCashout(){
 function onCashoutAmtChange(){
   const amt=parseFloat(document.getElementById('co-amt').value)||0;
   if(!amt){ document.getElementById('co-usd-amt').textContent='enter amount above'; return; }
-  document.getElementById('co-usd-amt').textContent='≈ $'+(amt*ST.solPrice).toFixed(2)+' · no fee';
+  if(!ST.solPrice||ST.solPrice<=0){ document.getElementById('co-usd-amt').textContent='≈ -- SOL · no fee'; return; }
+  const sol=amt/ST.solPrice;
+  document.getElementById('co-usd-amt').textContent='≈ '+sol.toFixed(6)+' SOL · no fee';
 }
 
 function setMaxCashout(){
-  const max=Math.max(0,ST.balance-0.000006); // reserve for tx fee
-  document.getElementById('co-amt').value=max.toFixed(6);
+  const maxSol=Math.max(0,ST.balance-0.000006); // reserve for tx fee
+  const maxUsd=maxSol*(ST.solPrice||0);
+  document.getElementById('co-amt').value=maxUsd.toFixed(2);
   onCashoutAmtChange();
 }
 
@@ -3148,10 +3151,12 @@ async function doCashout(){
 
   const txFee=5000;
   await doRefreshBal();
-  const totalLamps=Math.floor(amt*solanaWeb3.LAMPORTS_PER_SOL);
+  const solFromUsd=(ST.solPrice&&ST.solPrice>0)?(amt/ST.solPrice):0;
+  const totalLamps=Math.floor(solFromUsd*solanaWeb3.LAMPORTS_PER_SOL);
   const available=Math.floor(ST.balance*solanaWeb3.LAMPORTS_PER_SOL)-txFee;
   if(totalLamps>available){
-    showRes('Amount exceeds balance.<br>Max: '+(available/solanaWeb3.LAMPORTS_PER_SOL).toFixed(6)+' SOL',false);
+    const maxUsd=((available/solanaWeb3.LAMPORTS_PER_SOL)*(ST.solPrice||0)).toFixed(2);
+    showRes('Amount exceeds balance.<br>Max: $'+maxUsd+' USD',false);
     return;
   }
 
