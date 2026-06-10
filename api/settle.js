@@ -300,11 +300,16 @@ module.exports = async function handler(req, res) {
       if (!playerAddress) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'playerAddress required' }); }
       const playerPubkey = b58Decode(playerAddress);
       if (playerPubkey.length !== 32) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'playerAddress must be a 32-byte Solana address' }); }
-      // Use KV-recorded wager if available — prevents player from inflating their cashout amount.
-      // Falls back to client's value when KV is not configured or player is in a free lobby.
+      // Cashout requires a KV-recorded wager — no fallback to client-supplied value.
+      // Without this, anyone who enters the lobby without paying (JS console bypass) could
+      // claim any amount they sign and drain the escrow.
       const kvWager = Number(await kvGet('pw:' + playerAddress)) || 0;
-      const wagerLamports = kvWager > 0 ? kvWager : (Number(body.wagerLamports) || 0);
-      console.log('[settle] cashout kv=' + kvWager + ' client=' + (Number(body.wagerLamports)||0) + ' using=' + wagerLamports);
+      if (kvWager <= 0) {
+        clearTimeout(guard); done = true;
+        return res.status(403).json({ error: 'No wager on record — deposit via the game client before cashing out' });
+      }
+      const wagerLamports = kvWager;
+      console.log('[settle] cashout kv=' + kvWager + ' using=' + wagerLamports);
 
       // Retry once if on-chain execution fails — a concurrent kill tx may have changed the
       // balance between our balance check and our tx submission. Re-fetching fixes it.
