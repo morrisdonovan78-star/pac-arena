@@ -2219,6 +2219,14 @@ async function doRejoin(){
     const escPubkey=new solanaWeb3.PublicKey(ESCROW_PUBKEY);
     const from=new solanaWeb3.PublicKey(ST.address);
     const lamps=Math.floor(ST.wagerSol*solanaWeb3.LAMPORTS_PER_SOL);
+    // Guard: wagerSol must be positive — catches console tampering
+    if(lamps<=0){
+      resEl.style.background='rgba(255,68,68,.08)'; resEl.style.color='#FF4444';
+      resEl.innerHTML='Invalid wager amount. Reload the page and rejoin.';
+      resEl.style.display='block';
+      payBtn.disabled=false; payBtn.textContent='💰 TRY AGAIN'; giveBtn.disabled=false;
+      return;
+    }
     const tx=new solanaWeb3.Transaction().add(
       solanaWeb3.SystemProgram.transfer({fromPubkey:from,toPubkey:escPubkey,lamports:lamps})
     );
