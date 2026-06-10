@@ -1,7 +1,7 @@
 // api/settle.js — tweetnacl only, no @solana/web3.js (ESM/runtime issues)
 'use strict';
 const nacl = require('tweetnacl');
-const { kvGet, kvDel } = require('../lib/kv');
+const { kvGet, kvDel, kvSetPerm, kvZadd } = require('../lib/kv');
 
 // ── Ed25519 wallet signature verification ─────────────────────────────────────
 // The client signs: "pac-arena:{action}:{playerAddress}:{wagerLamports}:{unixTs}"
@@ -340,6 +340,20 @@ module.exports = async function handler(req, res) {
           const result = await sendAndConfirm(tx);
           sig = result.sig; txConfirmed = result.confirmed;
           await kvDel('pw:' + playerAddress); // wager claimed — remove so it can't be replayed
+          // Fire-and-forget leaderboard stat update (never block cashout on this)
+          (async()=>{
+            try{
+              const raw=await kvGet('plb:'+playerAddress);
+              const s=raw?{...{name:'',earned:0,wagered:0,games:0,kills:0},...JSON.parse(raw)}:{name:'',earned:0,wagered:0,games:0,kills:0};
+              s.earned+=playerCut;
+              await kvSetPerm('plb:'+playerAddress,JSON.stringify(s));
+              await kvZadd('lb:earned',s.earned,playerAddress);
+              const gRaw=await kvGet('plb:global');
+              const gd=gRaw?{...{totalEarned:0,totalWagered:0,gamesPlayed:0},...JSON.parse(gRaw)}:{totalEarned:0,totalWagered:0,gamesPlayed:0};
+              gd.totalEarned+=playerCut;
+              await kvSetPerm('plb:global',JSON.stringify(gd));
+            }catch(_){}
+          })();
           break; // success — exit retry loop
         } catch (e) {
           const isOnChainFail = e.message.includes('TX rejected') || e.message.includes('insufficient') || e.message.includes('0x1') || e.message.includes('-32002') || e.message.includes('Send failed');

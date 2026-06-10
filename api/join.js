@@ -6,7 +6,7 @@
 
 const nacl   = require('tweetnacl');
 const crypto = require('crypto');
-const { kvGet, kvSet } = require('../lib/kv');
+const { kvGet, kvSet, kvSetPerm, kvZadd } = require('../lib/kv');
 
 // Signed entry token — proves this wallet went through join.js with a real deposit.
 // Token is HMAC(SETTLE_SECRET, "entry:{address}:{lobby}:{10-min-window}").
@@ -173,6 +173,21 @@ module.exports = async function handler(req, res) {
     await kvSet(txKey, '1', 86400);
     // Store for 4 hours — more than enough for any game session
     await kvSet('pw:' + walletAddress, lamps, 14400);
+
+    // Fire-and-forget leaderboard join stat (wagered + games count)
+    (async()=>{
+      try{
+        const raw=await kvGet('plb:'+walletAddress);
+        const s=raw?{...{name:'',earned:0,wagered:0,games:0,kills:0},...JSON.parse(raw)}:{name:'',earned:0,wagered:0,games:0,kills:0};
+        s.wagered+=lamps; s.games+=1;
+        await kvSetPerm('plb:'+walletAddress,JSON.stringify(s));
+        await kvZadd('lb:earned',s.earned,walletAddress);
+        const gRaw=await kvGet('plb:global');
+        const gd=gRaw?{...{totalEarned:0,totalWagered:0,gamesPlayed:0},...JSON.parse(gRaw)}:{totalEarned:0,totalWagered:0,gamesPlayed:0};
+        gd.totalWagered+=lamps; gd.gamesPlayed+=1;
+        await kvSetPerm('plb:global',JSON.stringify(gd));
+      }catch(_){}
+    })();
 
     // Issue a lobby-specific Ably token — capability restricted to just this paid channel.
     // The client uses this to connect to the lobby instead of the default free-only token.
