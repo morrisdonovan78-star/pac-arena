@@ -1,4 +1,4 @@
-<!-- PAC ARENA v42 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v43 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -31,7 +31,7 @@
 // Block stale bfcache (back/forward navigation serving frozen game state)
 window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});
 })();</script>
-<title>PAC MONEY v42</title>
+<title>PAC MONEY v43</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
@@ -249,7 +249,7 @@ body{touch-action:manipulation;}
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
-    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v42</div>
+    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v43</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;">
     <div class="w-strip">
@@ -1270,9 +1270,22 @@ async function pkConnect(roomId, paidAblyToken){
     hellos.set(myPid,myHello); // always include ourselves
 
     // ── hello: another player announced themselves ─────────
-    ablyChannel.subscribe('hello',(msg)=>{
+    ablyChannel.subscribe('hello',async(msg)=>{
       const d=msg.data;
       if(!d||!d.id||d.id===myPid) return;
+      // In paid lobbies, host verifies the new player has a server-recorded wager
+      // before admitting them. This blocks players who joined without paying even if
+      // they have an old Ably token with unrestricted capability.
+      if(ST.lobbyUsd>0&&isHost){
+        try{
+          const ck=await fetch('/api/check-wager?address='+encodeURIComponent(d.id));
+          const cd=await ck.json();
+          if(!cd.hasWager){
+            console.warn('[host] rejected unpaid player:',d.id.slice(0,8)+'…');
+            return; // drop silently — don't add to game or reply
+          }
+        }catch(_){ /* API down — allow to avoid blocking legit players */ }
+      }
       if(!hellos.has(d.id)) hellos.set(d.id,d);
       // If game already running and we're host, add them + reply with full roster
       if(G&&!G.over&&isHost){
