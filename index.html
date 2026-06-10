@@ -1452,6 +1452,10 @@ async function pkConnect(roomId, paidAblyToken){
       if(isHost&&G&&!G.over){
         const d=msg.data;
         if(!G.players.has(d.id)){
+          // Paid lobby: only admit rejoin if the player sent a non-zero sol amount.
+          // A free-rejoining attacker sends sol:0 — host silently drops the event.
+          // This is the server-side enforcement; guests cannot tamper with the host's check.
+          if(ST.lobbyUsd>0 && !(Number(d.sol)>0)) return;
           const sp=rndSpawn();
           G.players.set(d.id,{
             id:d.id, num:G.players.size, color:d.color||colorFromId(d.id), hat:d.hat||'none',
@@ -1562,7 +1566,7 @@ function pkDisconnect(){
   if(ablyChannel){ try{ ablyChannel.presence.leave(); }catch(_){} ablyChannel=null; }
   if(ablyRt){ try{ ablyRt.close(); }catch(_){} ablyRt=null; }
   myPid=null; isHost=false; isSpectating=false; pkRoomId=null; _pkTick=0; _myHelloTs=0;
-  _joiningLobby=false;
+  _joiningLobby=false; _lobbyIsPaid=false;
   stopPacManMusic();
 }
 
@@ -1628,12 +1632,15 @@ function applyRemoteState(d){
 // JOIN LOBBY
 // ═══════════════════════════════════════════════════════════
 let _joiningLobby=false;
+// Frozen at join time — never changed mid-session so console tricks can't flip it
+let _lobbyIsPaid=false;
 async function joinLobby(usd){
   if(!ST.address){ alert('Log in first'); return; }
   if(_joiningLobby){ return; }
   _joiningLobby=true;
   ST.lobbyUsd=usd;
   ST.wagerSol=usd>0?usdToSol(usd):0;
+  _lobbyIsPaid=(usd>0);
   document.getElementById('mm-log').innerHTML='';
   ST.hasEscrow=false;
 
@@ -1942,7 +1949,7 @@ function hideSpectatePanel(){
 
 function spectateRejoin(){
   if(!G||G.over) return;
-  if(!ST.wagerSol||ST.wagerSol===0){ _doFreeRejoin(); return; }
+  if(!_lobbyIsPaid){ _doFreeRejoin(); return; }
   openRejoinOverlay();
 }
 
@@ -2172,6 +2179,8 @@ function openRejoinOverlay(){
 }
 
 function _doFreeRejoin(){
+  // Hard guard — never allow free rejoin in a paid lobby regardless of ST.wagerSol value
+  if(_lobbyIsPaid){ addToast('❌ Paid lobby — use the REJOIN button to pay','#FF4444'); return; }
   if(_rejoinCountdown){ clearInterval(_rejoinCountdown); _rejoinCountdown=null; }
   const sp=rndSpawn();
   const rjName=ST.email?ST.email.split('@')[0].slice(0,8).toUpperCase():'';
@@ -2196,7 +2205,7 @@ function _doFreeRejoin(){
 async function doRejoin(){
   if(!ST.address){ declineRejoin(); return; }
   // Free lobby — skip payment, just respawn
-  if(!ST.wagerSol||ST.wagerSol===0){ _doFreeRejoin(); return; }
+  if(!_lobbyIsPaid){ _doFreeRejoin(); return; }
   const payBtn=document.getElementById('rjo-pay-btn');
   const giveBtn=document.getElementById('rjo-give-btn');
   const resEl=document.getElementById('rjo-result');
