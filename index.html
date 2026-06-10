@@ -1,4 +1,4 @@
-<!-- PAC ARENA v48 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v49 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -36,7 +36,7 @@
 // Block stale bfcache (back/forward navigation serving frozen game state)
 window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});
 })();</script>
-<title>PAC MONEY v48</title>
+<title>PAC MONEY v49</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
@@ -254,7 +254,7 @@ body{touch-action:manipulation;}
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
-    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v48</div>
+    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v49</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;">
     <div class="w-strip">
@@ -288,7 +288,13 @@ body{touch-action:manipulation;}
       <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:6px;">BODY COLOR</div>
       <div id="cust-colors" style="display:flex;gap:7px;flex-wrap:wrap;justify-content:center;margin-bottom:10px;"></div>
       <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:6px;">HAT</div>
-      <div id="cust-hats" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;"></div>
+      <div id="cust-hats" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:10px;"></div>
+      <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:6px;">TRAIL</div>
+      <div id="cust-trails" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:10px;"></div>
+      <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:6px;">EYES</div>
+      <div id="cust-eyes" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:10px;"></div>
+      <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:6px;">AURA</div>
+      <div id="cust-aura" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;"></div>
     </div>
     <button class="btn btn-r btn-sm" onclick="doLogout()" style="margin:0 auto;">LOG OUT</button>
   </div>
@@ -654,12 +660,18 @@ const ST = { email:'', address:'', balance:0, solPrice:0, lobbyUsd:0, wagerSol:0
 // ── Pac-Man skin customization ───────────────────────────────────────────────
 const _SKIN_COLORS=['#FFD700','#FF69B4','#00FFFF','#FF4500','#39FF14','#CC44FF','#FFFFFF','#FF2222'];
 const _SKIN_HATS  =['none','crown','bow','party','halo'];
-let _mySkin={color:'#FFD700',hat:'none'};
+const _SKIN_TRAILS=['none','fire','ice','rainbow','ghost'];
+const _SKIN_EYES  =['dot','shades','star','alien'];
+const _SKIN_AURAS =['none','white','fire','ice','rainbow'];
+let _mySkin={color:'#FFD700',hat:'none',trail:'none',eyes:'dot',aura:'none'};
 (function(){
   try{
     const s=JSON.parse(localStorage.getItem('pac_skin')||'{}');
     if(s.color&&_SKIN_COLORS.includes(s.color)) _mySkin.color=s.color;
     if(s.hat&&_SKIN_HATS.includes(s.hat)) _mySkin.hat=s.hat;
+    if(s.trail&&_SKIN_TRAILS.includes(s.trail)) _mySkin.trail=s.trail;
+    if(s.eyes&&_SKIN_EYES.includes(s.eyes)) _mySkin.eyes=s.eyes;
+    if(s.aura&&_SKIN_AURAS.includes(s.aura)) _mySkin.aura=s.aura;
   }catch(_){}
 })();
 function saveSkin(){try{localStorage.setItem('pac_skin',JSON.stringify(_mySkin));}catch(_){}}
@@ -1289,7 +1301,10 @@ async function pkConnect(roomId, paidAblyToken){
     _myHelloTs=Date.now();
     const myHello={
       id:myPid, spawn:[sp.x,sp.y], color:_mySkin.color, ts:_myHelloTs,
-      hat:  _mySkin.hat,
+      hat:   _mySkin.hat,
+      trail: _mySkin.trail||'none',
+      eyes:  _mySkin.eyes||'dot',
+      aura:  _mySkin.aura||'none',
       name: ST.email ? ST.email.split('@')[0].slice(0,8).toUpperCase() : '',
       sol:  ST.wagerSol || 0,
       et:   ST.entryToken || null  // HMAC proof of payment — verified server-side by host/guests
@@ -1648,6 +1663,10 @@ async function joinLobby(usd){
 // PAC-MAN PVP ENGINE
 // ═══════════════════════════════════════════════════════════
 const T=24,C=28,R=22,TICK_MS=33; let canvas,ctx,gLoop,rafHandle,frm=0,G={};
+const _FNT_LBL='bold 11px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",monospace';
+const _FNT_SOL='bold 8px monospace';
+const _FNT_HUD='bold 6px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",monospace';
+const _FNT_TOA='bold 12px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",monospace';
 let _mazeOC=null,_mazeDirty=true; // offscreen maze canvas — only rebuilt when cells change (~huge FPS win)
 // ── Drift-free host loop (rAF replaces setInterval) ──────────
 let _hostRaf=null, _lastTickTs=0;
@@ -2140,6 +2159,7 @@ async function doRejoin(){
     const _rjName=ST.email?ST.email.split('@')[0].slice(0,8).toUpperCase():'';
     G.players.set(myPid,{
       id:myPid, num:G.players.size, color:_mySkin.color, hat:_mySkin.hat,
+      trail:_mySkin.trail||'none', eyes:_mySkin.eyes||'dot', aura:_mySkin.aura||'none', _trail:[],
       x:sp.x, y:sp.y, dx:0, dy:0, nx:0, ny:0,
       prevX:sp.x, prevY:sp.y, renderX:sp.x, renderY:sp.y,
       sc:0, lives:1, pow:false, pt:0, mc:0, pep:false, pet:0, held:[],
@@ -2317,6 +2337,7 @@ function mkP(info){
   const sp=info.spawn||[14,18];
   return {
     id:info.id, num:info.num, color:info.color||'#FFD700', hat:info.hat||'none',
+    trail:info.trail||'none', eyes:info.eyes||'dot', aura:info.aura||'none', _trail:[],
     x:sp[0], y:sp[1], dx:0, dy:0, nx:0, ny:0,  // stationary until first key press
     prevX:sp[0], prevY:sp[1],
     renderX:sp[0], renderY:sp[1], // smooth float position for 60fps draw
@@ -2556,6 +2577,33 @@ function _buildMazeCanvas(){
   _mazeDirty=false;
 }
 
+function drawEye(ec,r,eyes){
+  if(!eyes||eyes==='dot'){
+    ec.fillStyle='#000'; ec.beginPath(); ec.arc(r*0.35,-r*0.38,r*0.11,0,Math.PI*2); ec.fill();
+  } else if(eyes==='shades'){
+    ec.fillStyle='rgba(8,8,8,0.92)';
+    ec.beginPath(); ec.roundRect(-r*0.52,-r*0.65,r*1.04,r*0.40,r*0.08); ec.fill();
+    ec.fillStyle='rgba(255,255,255,0.10)';
+    ec.fillRect(-r*0.49,-r*0.61,r*0.44,r*0.13);
+    ec.fillRect(r*0.07,-r*0.61,r*0.44,r*0.13);
+  } else if(eyes==='star'){
+    ec.save(); ec.translate(r*0.3,-r*0.40);
+    const sr=r*0.15;
+    ec.fillStyle='#FFD700';
+    ec.beginPath();
+    for(let i=0;i<8;i++){
+      const ang=i*Math.PI/4-Math.PI/2, ri=i%2===0?sr:sr*0.38;
+      i===0?ec.moveTo(Math.cos(ang)*ri,Math.sin(ang)*ri):ec.lineTo(Math.cos(ang)*ri,Math.sin(ang)*ri);
+    }
+    ec.closePath(); ec.fill(); ec.restore();
+  } else if(eyes==='alien'){
+    ec.fillStyle='#39FF14'; ec.shadowColor='#39FF14'; ec.shadowBlur=6;
+    ec.beginPath(); ec.ellipse(r*0.17,-r*0.38,r*0.12,r*0.08,0,0,Math.PI*2); ec.fill();
+    ec.beginPath(); ec.ellipse(r*0.54,-r*0.38,r*0.12,r*0.08,0,0,Math.PI*2); ec.fill();
+    ec.shadowBlur=0;
+  }
+}
+
 function drawHat(hCtx,cx,cy,r,hat){
   hCtx.save();
   const top=cy-r;
@@ -2608,31 +2656,80 @@ function drawSkinPreview(){
   const c=cv.getContext('2d'); const w=cv.width,h=cv.height;
   c.clearRect(0,0,w,h); c.fillStyle='#000'; c.fillRect(0,0,w,h);
   const r=w*0.30, pcx=w/2, pcy=h*0.58;
+  // Trail preview — fading dots to the left
+  if(_mySkin.trail&&_mySkin.trail!=='none'){
+    const trailPalette={fire:[[255,60,0],[255,140,0]],ice:[[0,160,255],[80,220,255]],rainbow:[[200,60,255],[60,200,255]],ghost:[[200,220,255],[200,220,255]]};
+    const pal=trailPalette[_mySkin.trail]||[[200,200,200],[200,200,200]];
+    [0.52,0.30].forEach((f,i)=>{
+      const [rr,gg,bb]=pal[i];
+      c.fillStyle=`rgba(${rr},${gg},${bb},${f})`;
+      c.beginPath(); c.arc(pcx-r*(1.3+i*0.8),pcy,r*(0.52-i*0.14),0,Math.PI*2); c.fill();
+    });
+  }
+  // Aura glow
+  if(_mySkin.aura&&_mySkin.aura!=='none'){
+    const auraCols={white:'#FFFFFF',fire:'#FF4500',ice:'#00BFFF',rainbow:'#CC44FF'};
+    c.shadowColor=auraCols[_mySkin.aura]||'#fff'; c.shadowBlur=16;
+  }
   c.fillStyle=_mySkin.color;
   c.beginPath(); c.moveTo(pcx,pcy); c.arc(pcx,pcy,r,0.15*Math.PI,1.85*Math.PI); c.closePath(); c.fill();
-  c.fillStyle='#000'; c.beginPath(); c.arc(pcx+r*0.35,pcy-r*0.38,r*0.11,0,Math.PI*2); c.fill();
+  c.shadowBlur=0;
+  // Eye (drawn in body-rotated space — preview faces right so no rotation needed)
+  c.save(); c.translate(pcx,pcy); drawEye(c,r,_mySkin.eyes||'dot'); c.restore();
   if(_mySkin.hat!=='none') drawHat(c,pcx,pcy,r,_mySkin.hat);
 }
 
+function _custBtn(label,active,accentCol,onClick){
+  const b=document.createElement('button');
+  b.textContent=label;
+  b.style.cssText='padding:5px 9px;border-radius:6px;cursor:pointer;font-family:\'Press Start 2P\',monospace;font-size:6px;border:1px solid '+(active?accentCol:'rgba(255,255,255,0.2)')+';background:'+(active?accentCol+'29':'rgba(255,255,255,.04)')+';color:'+(active?accentCol:'var(--muted)')+';transition:all .15s;';
+  b.onclick=onClick; return b;
+}
 function initCustomizePanel(){
-  const colWrap=document.getElementById('cust-colors');
-  const hatWrap=document.getElementById('cust-hats');
+  const colWrap  =document.getElementById('cust-colors');
+  const hatWrap  =document.getElementById('cust-hats');
+  const trailWrap=document.getElementById('cust-trails');
+  const eyesWrap =document.getElementById('cust-eyes');
+  const auraWrap =document.getElementById('cust-aura');
   if(!colWrap||!hatWrap) return;
   colWrap.innerHTML=''; hatWrap.innerHTML='';
+  if(trailWrap) trailWrap.innerHTML='';
+  if(eyesWrap) eyesWrap.innerHTML='';
+  if(auraWrap) auraWrap.innerHTML='';
+
   _SKIN_COLORS.forEach(col=>{
     const b=document.createElement('div');
     b.style.cssText='width:28px;height:28px;border-radius:50%;cursor:pointer;background:'+col+';border:3px solid '+(_mySkin.color===col?'#fff':'rgba(255,255,255,0.15)')+';transition:border-color .15s;flex-shrink:0;';
     b.onclick=()=>{ _mySkin.color=col; saveSkin(); initCustomizePanel(); drawSkinPreview(); };
     colWrap.appendChild(b);
   });
+
   const hatLabels={none:'NONE',crown:'👑 CROWN',bow:'🎀 BOW',party:'🎉 PARTY',halo:'✨ HALO'};
   _SKIN_HATS.forEach(h=>{
-    const b=document.createElement('button');
-    b.textContent=hatLabels[h]||h.toUpperCase();
-    b.style.cssText='padding:5px 9px;border-radius:6px;cursor:pointer;font-family:\'Press Start 2P\',monospace;font-size:6px;border:1px solid '+((_mySkin.hat===h)?'#FFD700':'rgba(255,255,255,0.2)')+';background:'+(_mySkin.hat===h?'rgba(255,215,0,.18)':'rgba(255,255,255,.04)')+';color:'+(_mySkin.hat===h?'#FFD700':'var(--muted)')+';transition:all .15s;';
-    b.onclick=()=>{ _mySkin.hat=h; saveSkin(); initCustomizePanel(); drawSkinPreview(); };
-    hatWrap.appendChild(b);
+    hatWrap.appendChild(_custBtn(hatLabels[h]||h.toUpperCase(),_mySkin.hat===h,'#FFD700',()=>{ _mySkin.hat=h; saveSkin(); initCustomizePanel(); drawSkinPreview(); }));
   });
+
+  if(trailWrap){
+    const tl={none:'NONE',fire:'🔥 FIRE',ice:'❄️ ICE',rainbow:'🌈 RAINBOW',ghost:'👻 GHOST'};
+    _SKIN_TRAILS.forEach(t=>{
+      trailWrap.appendChild(_custBtn(tl[t]||t.toUpperCase(),_mySkin.trail===t,'#FF6B35',()=>{ _mySkin.trail=t; saveSkin(); initCustomizePanel(); drawSkinPreview(); }));
+    });
+  }
+
+  if(eyesWrap){
+    const el={dot:'● DOT',shades:'🕶 SHADES',star:'★ STAR',alien:'👽 ALIEN'};
+    _SKIN_EYES.forEach(e=>{
+      eyesWrap.appendChild(_custBtn(el[e]||e.toUpperCase(),_mySkin.eyes===e,'#00FFFF',()=>{ _mySkin.eyes=e; saveSkin(); initCustomizePanel(); drawSkinPreview(); }));
+    });
+  }
+
+  if(auraWrap){
+    const al={none:'NONE',white:'◯ WHITE',fire:'◉ FIRE',ice:'◉ ICE',rainbow:'◉ RAINBOW'};
+    _SKIN_AURAS.forEach(a=>{
+      auraWrap.appendChild(_custBtn(al[a]||a.toUpperCase(),_mySkin.aura===a,'#CC44FF',()=>{ _mySkin.aura=a; saveSkin(); initCustomizePanel(); drawSkinPreview(); }));
+    });
+  }
+
   drawSkinPreview();
 }
 
@@ -2697,47 +2794,73 @@ function draw(){
     }
   });
 
+  // ── Update trail positions (render-only, not game state) ──────
+  G.players.forEach(p=>{
+    if(!p._trail) p._trail=[];
+    if(p.trail&&p.trail!=='none'){
+      p._trail.push({x:p.renderX,y:p.renderY});
+      if(p._trail.length>7) p._trail.shift();
+    } else { p._trail.length=0; }
+  });
+
   // ── Players ─────────────────────────────────────────────────
   function pac(p,col,label,solLabel){
-    const px=p.renderX*T, py=p.renderY*T; // use smooth float position, not snapped integer
+    const px=p.renderX*T, py=p.renderY*T;
     const a=Math.sin(now/90)*0.09+0.11;
-    // Use desired direction (nx/ny) for rotation when a key is held — pie immediately
-    // faces where the player WANTS to go, not just where they're currently moving.
-    // This makes both host and guest feel instant regardless of intersection timing.
+    const r=T/2-1;
+    // ── Trail ─────────────────────────────────────────────────
+    const trl=p._trail;
+    if(trl&&trl.length>1&&p.trail!=='none'){
+      const n=trl.length;
+      for(let i=0;i<n-1;i++){
+        const f=(i+1)/n;
+        const trx=trl[i].x*T+T/2, try_=trl[i].y*T+T/2;
+        let tcol;
+        const tt=p.trail;
+        if(tt==='fire')    tcol=`rgba(255,${Math.floor(60+140*f)},0,${f*0.55})`;
+        else if(tt==='ice')     tcol=`rgba(${Math.floor(60*f)},${Math.floor(160+80*f)},255,${f*0.55})`;
+        else if(tt==='ghost')   tcol=`rgba(210,230,255,${f*0.38})`;
+        else if(tt==='rainbow') tcol=`hsla(${(now*0.18+i*55)%360},100%,70%,${f*0.55})`;
+        ctx.fillStyle=tcol;
+        ctx.beginPath(); ctx.arc(trx,try_,r*f*0.72,0,Math.PI*2); ctx.fill();
+      }
+    }
     const vdx=(p.nx!==0||p.ny!==0)?p.nx:p.dx;
     const vdy=(p.nx!==0||p.ny!==0)?p.ny:p.dy;
     const rot=vdx===1?0:vdx===-1?Math.PI:vdy===1?Math.PI/2:-Math.PI/2;
     ctx.save(); ctx.translate(px+T/2,py+T/2); ctx.rotate(rot);
     const activeCol=p.pow?'#00FF7F':p.pep?'#39FF14':col;
     ctx.fillStyle=activeCol;
-    // Static shadowBlur — animated blur values force GPU re-composite every frame
+    // Power-up glow overrides aura; aura overrides nothing
     if(p.pow){ ctx.shadowColor='#00FF7F'; ctx.shadowBlur=14; }
     else if(p.pep){ ctx.shadowColor='#39FF14'; ctx.shadowBlur=8; }
-    ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0,0,T/2-1,a*Math.PI,(2-a)*Math.PI); ctx.closePath(); ctx.fill();
-    ctx.shadowBlur=0; ctx.restore();
+    else{
+      const au=p.aura||'none';
+      if(au==='white'){ ctx.shadowColor='#FFFFFF'; ctx.shadowBlur=10; }
+      else if(au==='fire'){ ctx.shadowColor='#FF4500'; ctx.shadowBlur=14; }
+      else if(au==='ice'){ ctx.shadowColor='#00BFFF'; ctx.shadowBlur=12; }
+      else if(au==='rainbow'){ ctx.shadowColor=`hsl(${(now*0.3)%360},100%,70%)`; ctx.shadowBlur=12; }
+    }
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0,0,r,a*Math.PI,(2-a)*Math.PI); ctx.closePath(); ctx.fill();
+    ctx.shadowBlur=0;
+    drawEye(ctx,r,p.eyes||'dot');
+    ctx.restore();
     // Hat drawn upright (no body rotation) — purely cosmetic, zero hitbox impact
-    if(p.hat&&p.hat!=='none') drawHat(ctx,px+T/2,py+T/2,T/2-1,p.hat);
+    if(p.hat&&p.hat!=='none') drawHat(ctx,px+T/2,py+T/2,r,p.hat);
     // Name label + SOL wager above the player
     if(label && py>T*1.2){
-      const fs=Math.max(7,Math.floor(T*0.46));
-      ctx.save();
-      ctx.textAlign='center';
-      // ── SOL wager line (top, smaller, neon green) ──
+      ctx.save(); ctx.textAlign='center';
       if(solLabel){
-        const sfs=Math.max(6,Math.floor(T*0.34));
-        ctx.font='bold '+sfs+'px monospace';
-        const sly=py-T*0.9-fs-1;
+        ctx.font=_FNT_SOL;
+        const sly=py-T*0.9-12;
         ctx.lineWidth=2; ctx.strokeStyle='rgba(0,0,0,0.95)';
         ctx.strokeText(solLabel,px+T/2,sly);
-        ctx.fillStyle='#39FF14';
-        ctx.fillText(solLabel,px+T/2,sly);
+        ctx.fillStyle='#39FF14'; ctx.fillText(solLabel,px+T/2,sly);
       }
-      // ── Username line (bottom of the label group) ──
-      ctx.font='bold '+fs+'px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",monospace';
+      ctx.font=_FNT_LBL;
       ctx.lineWidth=3; ctx.strokeStyle='rgba(0,0,0,0.95)';
       ctx.strokeText(label,px+T/2,py-T*0.9);
-      ctx.fillStyle=col;
-      ctx.fillText(label,px+T/2,py-T*0.9);
+      ctx.fillStyle=col; ctx.fillText(label,px+T/2,py-T*0.9);
       ctx.restore();
     }
   }
@@ -2783,7 +2906,7 @@ function draw(){
     const holdLabel=_hl.length===0?'-- no powerup held --':_hl.length===2?'🍒 V=KILL  🌶️ C=SPEED':_hl[0]==='cherry'?'🍒 KILL MODE — press V (or tap 🍒)':'🌶️ SPEED BOOST — press C (or tap button)';
     const holdCol=_hl.length===0?'rgba(255,255,255,0.25)':_hl.length===2?'#FFD700':_hl[0]==='cherry'?'#FF6347':'#39FF14';
     ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(bx-2,by-lfs-2,bw+4,lfs+6);
-    ctx.fillStyle=holdCol; ctx.font='bold '+lfs+'px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",monospace'; ctx.textAlign='left';
+    ctx.fillStyle=holdCol; ctx.font=_FNT_HUD; ctx.textAlign='left';
     ctx.fillText(holdLabel,bx,by);
     // Cherry kill timer bar (bottom-left below held display)
     if(me.pow&&me.pt>0){
@@ -2794,7 +2917,7 @@ function draw(){
       ctx.fillStyle='#FF6347'; ctx.fillRect(bx,cy,bw*cpct,bh);
       ctx.shadowBlur=0;
       ctx.strokeStyle='rgba(255,100,50,0.4)'; ctx.lineWidth=1; ctx.strokeRect(bx,cy,bw,bh);
-      ctx.fillStyle='#FF6347'; ctx.font='bold '+lfs+'px monospace'; ctx.textAlign='left';
+      ctx.fillStyle='#FF6347'; ctx.font=_FNT_HUD; ctx.textAlign='left';
       ctx.fillText('🍒 KILL '+Math.ceil(me.pt/30)+'s',bx,cy-2);
     }
     // Pepper speed timer bar (bottom-right)
@@ -2806,7 +2929,7 @@ function draw(){
       ctx.fillStyle='#39FF14'; ctx.fillRect(cx,cy,bw*ppct,bh);
       ctx.shadowBlur=0;
       ctx.strokeStyle='rgba(57,255,20,0.4)'; ctx.strokeRect(cx,cy,bw,bh);
-      ctx.fillStyle='#39FF14'; ctx.font='bold '+lfs+'px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",monospace'; ctx.textAlign='left';
+      ctx.fillStyle='#39FF14'; ctx.font=_FNT_HUD; ctx.textAlign='left';
       ctx.fillText('🌶️ SPEED '+Math.ceil(me.pet/30)+'s',cx,cy-2);
     }
   }
@@ -2819,7 +2942,7 @@ function draw(){
     const ty=R*T*0.22+i*T*1.4;
     ctx.save();
     ctx.globalAlpha=alpha;
-    ctx.font='bold '+fs+'px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",monospace';
+    ctx.font=_FNT_TOA;
     ctx.textAlign='center'; ctx.textBaseline='middle';
     // Shadow
     ctx.fillStyle='rgba(0,0,0,0.85)';
@@ -2828,6 +2951,25 @@ function draw(){
     ctx.fillText(t.msg,C*T/2,ty);
     ctx.restore();
   });
+
+  // ── Live wallet balance tracker (top-right corner) ────────────
+  // Updates every frame automatically — no click needed.
+  if(ST.balance>0){
+    const bal=ST.balance.toFixed(4)+'◎';
+    const usd=ST.solPrice?'≈ $'+(ST.balance*ST.solPrice).toFixed(2):'';
+    const bx=C*T-5, wy=5;
+    ctx.save();
+    ctx.font='bold 9px monospace';
+    ctx.textAlign='right'; ctx.textBaseline='top';
+    const bw=Math.max(ctx.measureText(bal).width, usd?ctx.measureText(usd).width:0);
+    ctx.fillStyle='rgba(0,0,0,0.70)';
+    ctx.fillRect(bx-bw-9,wy-3,bw+13,usd?26:14);
+    ctx.strokeStyle='rgba(57,255,20,0.25)'; ctx.lineWidth=1;
+    ctx.strokeRect(bx-bw-9,wy-3,bw+13,usd?26:14);
+    ctx.fillStyle='#39FF14'; ctx.fillText(bal,bx,wy);
+    if(usd){ ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText(usd,bx,wy+13); }
+    ctx.restore();
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
