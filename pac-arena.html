@@ -1,4 +1,4 @@
-<!-- PAC ARENA v27 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v29 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -31,7 +31,7 @@
 // Block stale bfcache (back/forward navigation serving frozen game state)
 window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});
 })();</script>
-<title>PAC MONEY v27</title>
+<title>PAC MONEY v29</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
@@ -1360,7 +1360,7 @@ async function pkConnect(roomId){
         const p=G.players.get(msg.clientId||msg.data.id);
         if(p&&(p.held||[]).includes(msg.data.type)){
           p.held=(p.held||[]).filter(h=>h!==msg.data.type);
-          if(msg.data.type==='cherry'){ p.pow=true; p.pt=450; }
+          if(msg.data.type==='cherry'){ p.pow=true; p.pt=300; }
           else if(msg.data.type==='pepper'){ p.pep=true; p.pet=390; }
         }
       }
@@ -1953,7 +1953,7 @@ function usePow(type){
   const me=G.players.get(myPid);
   if(!me||(me.held||[]).indexOf(type)===-1) return;
   me.held=(me.held||[]).filter(h=>h!==type);
-  if(type==='cherry'){ me.pow=true; me.pt=450; playCherry(); }
+  if(type==='cherry'){ me.pow=true; me.pt=300; playCherry(); }
   else if(type==='pepper'){ me.pep=true; me.pet=390; playPepper(); }
   // Tell host if we're a guest
   if(!isHost&&ablyChannel) ablyChannel.publish('pow',{id:myPid,type},()=>{});
@@ -2361,7 +2361,7 @@ function eatCellP(p){
     // 🍒 Cherry: pick up and store — press V to activate kill mode
     G.maze[p.y][p.x]=0; _mazeDirty=true; G.eaten++;
     G.eatLog.push([p.y,p.x]);
-    if(G.powRespawnQ) G.powRespawnQ.push({type:3, at:frm+450}); // respawn in 15s
+    if(G.powRespawnQ) G.powRespawnQ.push({type:3, at:frm+405}); // respawn in ~13.5s (10% faster)
     if(!(p.held||[]).includes('cherry')) p.held=[...(p.held||[]),'cherry']; // add to held array
     if(p.id===myPid){ playCherry(); _updatePowBtns(p); }
   }
@@ -2369,7 +2369,7 @@ function eatCellP(p){
     // 🌶 Pepper: pick up and store — press C to activate speed boost
     G.maze[p.y][p.x]=0; _mazeDirty=true; G.eaten++;
     G.eatLog.push([p.y,p.x]);
-    if(G.powRespawnQ) G.powRespawnQ.push({type:4, at:frm+450}); // respawn in 15s
+    if(G.powRespawnQ) G.powRespawnQ.push({type:4, at:frm+405}); // respawn in ~13.5s (10% faster)
     if(!(p.held||[]).includes('pepper')) p.held=[...(p.held||[]),'pepper']; // add to held array
     if(p.id===myPid){ playPepper(); _updatePowBtns(p); }
   }
@@ -2607,7 +2607,7 @@ function draw(){
     // Cherry kill timer bar (bottom-left below held display)
     if(me.pow&&me.pt>0){
       const cy=by+T*0.45;
-      const cpct=me.pt/450;
+      const cpct=me.pt/300;
       ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(bx-1,cy-1,bw+2,bh+2);
       ctx.shadowColor='#FF4500'; ctx.shadowBlur=6;
       ctx.fillStyle='#FF6347'; ctx.fillRect(bx,cy,bw*cpct,bh);
