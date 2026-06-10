@@ -375,7 +375,21 @@ body{touch-action:manipulation;}
     </div>
     <div id="login-err" style="display:none;background:rgba(255,51,51,.08);border:1px solid rgba(255,51,51,.3);border-radius:8px;padding:12px;margin-top:.75rem;font-size:12px;color:#ff9999;line-height:1.6;white-space:pre-wrap;"></div>
   </div>
-  <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:var(--muted);line-height:2.4;text-align:center;margin-top:1.5rem;">NO WALLET EXTENSION NEEDED<br>AUTO SOL WALLET ON SIGN UP<br>FREE · $1 · $5 LOBBIES</div>
+  <!-- HOME MINI LEADERBOARD — always visible, live every 30 s -->
+  <div style="width:100%;max-width:480px;margin:1.1rem auto .25rem;padding:0 1rem;box-sizing:border-box;">
+    <div style="background:rgba(255,215,0,.04);border:1px solid rgba(255,215,0,.22);border-radius:12px;padding:13px 15px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;">
+        <div style="font-family:'Press Start 2P',monospace;font-size:8px;color:#FFD700;">🏆 TOP EARNERS</div>
+        <div id="home-lb-global" style="font-size:9px;color:var(--muted);font-family:monospace;">– SOL global</div>
+      </div>
+      <div id="home-lb-rows"><div style="text-align:center;color:var(--muted);font-size:10px;padding:.5rem 0;">Loading…</div></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+        <button onclick="openLeaderboard()" style="background:none;border:none;color:rgba(255,215,0,.5);font-size:9px;cursor:pointer;padding:0;font-family:'Press Start 2P',monospace;">VIEW ALL →</button>
+        <span id="home-lb-ts" style="font-size:8px;color:var(--muted);opacity:.4;font-family:monospace;">–</span>
+      </div>
+    </div>
+  </div>
+  <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:var(--muted);line-height:2.4;text-align:center;margin-top:1rem;">NO WALLET EXTENSION NEEDED<br>AUTO SOL WALLET ON SIGN UP<br>FREE · $1 · $5 LOBBIES</div>
 </div>
 
 <!-- LOBBY -->
@@ -1948,7 +1962,8 @@ function hideSpectatePanel(){
 }
 
 function spectateRejoin(){
-  if(!G||G.over) return;
+  if(!G) return;
+  // Allow rejoin even when G.over — player cashed out and wants back in
   if(!_lobbyIsPaid){ _doFreeRejoin(); return; }
   openRejoinOverlay();
 }
@@ -3257,6 +3272,39 @@ function playAgain(){
 }
 
 // ═══════════════════════════════════════════════════════════
+// HOME MINI LEADERBOARD
+async function fetchHomeLb(){
+  try{
+    const r=await fetch('/api/leaderboard',{cache:'no-store'});
+    if(!r.ok) return;
+    const d=await r.json();
+    const players=(d.players||[]).slice(0,5);
+    const g=d.global||{};
+    const totalSol=(+(g.totalEarned||0)/1e9).toFixed(3);
+    const el=document.getElementById('home-lb-global');
+    if(el) el.textContent=totalSol+' SOL global';
+    const medals=['🥇','🥈','🥉'];
+    const rows=players.map((p,i)=>{
+      const earned=(+(p.earned||0)/1e9).toFixed(3);
+      const addrShort=(p.address||'').length>8?(p.address.slice(0,4)+'…'+p.address.slice(-4)):'--';
+      const name=p.name?escHtml(p.name.slice(0,14).toUpperCase()):addrShort;
+      const rankLabel=medals[i]||('#'+(i+1));
+      const rankStyle=i<3?'font-size:14px':'font-family:\'Press Start 2P\',monospace;font-size:7px;color:var(--muted)';
+      return `<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;${i<players.length-1?'border-bottom:1px solid rgba(255,255,255,.05);':''}">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="${rankStyle};min-width:22px;text-align:center;">${rankLabel}</span>
+          <span style="font-family:'Press Start 2P',monospace;font-size:7px;color:var(--txt);">${name}</span>
+        </div>
+        <span style="font-family:'Press Start 2P',monospace;font-size:8px;color:#FFD700;">${earned} SOL</span>
+      </div>`;
+    }).join('');
+    const rowEl=document.getElementById('home-lb-rows');
+    if(rowEl) rowEl.innerHTML=rows||'<div style="text-align:center;color:var(--muted);font-size:10px;padding:.4rem 0;">No ranked players yet</div>';
+    const tsEl=document.getElementById('home-lb-ts');
+    if(tsEl) tsEl.textContent='Live · '+new Date().toLocaleTimeString();
+  }catch(_){}
+}
+
 // LEADERBOARD
 // ═══════════════════════════════════════════════════════════
 async function openLeaderboard(){
@@ -3601,6 +3649,8 @@ window.addEventListener('load',()=>{
   setupOtp();
   fetchPrice();
   setInterval(fetchPrice,30000); // refresh live SOL price every 30s
+  fetchHomeLb();
+  setInterval(fetchHomeLb,30000); // refresh home leaderboard every 30s
   // Auto-refresh balance every 30s when on home screen
   setInterval(()=>{
     if(ST.address&&document.getElementById('scr-home').classList.contains('on')){
