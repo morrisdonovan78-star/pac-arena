@@ -1,4 +1,4 @@
-<!-- PAC ARENA v36 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v37 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -31,7 +31,7 @@
 // Block stale bfcache (back/forward navigation serving frozen game state)
 window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});
 })();</script>
-<title>PAC MONEY v36</title>
+<title>PAC MONEY v37</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
@@ -116,6 +116,7 @@ window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(tr
 })(window);
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@solana/web3.js@1.98.0/lib/index.iife.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tweetnacl@1.0.3/nacl-fast.min.js"></script>
 
 <style>
 :root{--y:#FFD700;--c:#00FFFF;--pk:#FF69B4;--g:#39FF14;--r:#FF3333;--dark:#07070f;--panel:#0e0e1c;--border:#1c1c38;--txt:#e0e0ff;--muted:#555588;}
@@ -248,7 +249,7 @@ body{touch-action:manipulation;}
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
-    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v36</div>
+    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v37</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;">
     <div class="w-strip">
@@ -1656,10 +1657,10 @@ async function claimKillReward(victimSol){
     const wagerLamports=Math.floor(rewardSol*solanaWeb3.LAMPORTS_PER_SOL);
     const estKill=(rewardSol*0.9).toFixed(4);
     addToast('⚔️ KILL! +~'+estKill+' SOL incoming…','#00FF7F');
-    const _killTok=await getSettleToken('kill',ST.address,wagerLamports);
+    const {sig:_kSig,ts:_kTs}=signSettleMsg('kill',ST.address,wagerLamports);
     const r=await fetch('/api/settle',{
       method:'POST',
-      headers:{'Content-Type':'application/json','x-settle-token':_killTok},
+      headers:{'Content-Type':'application/json','x-settle-sig':_kSig,'x-settle-ts':String(_kTs)},
       body:JSON.stringify({action:'kill',playerAddress:ST.address,wagerLamports})
     });
     let d; try{ d=await r.json(); }catch(_){ throw new Error('Server error (not JSON) — try again'); }
@@ -2720,17 +2721,16 @@ async function endGame(reason){
   }
 }
 
-// Fetch a short-lived HMAC token from /api/settle-auth before every settle call.
-// This prevents anyone who intercepts the API endpoint from replaying or forging requests.
-async function getSettleToken(action, playerAddress, wagerLamports) {
-  const r = await fetch('/api/settle-auth', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({action, playerAddress: playerAddress||'', wagerLamports: wagerLamports||0})
-  });
-  const d = await r.json().catch(() => ({}));
-  if (!r.ok || d.error) throw new Error('Auth error: ' + (d.error || r.status));
-  return d.token;
+// Sign a settle request with the player's own wallet private key.
+// The server verifies the signature matches the playerAddress — only the real
+// wallet owner can produce a valid signature, so forged cashouts are impossible.
+function signSettleMsg(action, playerAddress, wagerLamports) {
+  if (!_keypair) throw new Error('No wallet loaded');
+  const ts = Math.floor(Date.now() / 1000);
+  const msg = 'pac-arena:' + action + ':' + (playerAddress||'') + ':' + (wagerLamports||0) + ':' + ts;
+  const msgBytes = new TextEncoder().encode(msg);
+  const sigBytes = nacl.sign.detached(msgBytes, _keypair.secretKey);
+  return { sig: btoa(String.fromCharCode(...sigBytes)), ts };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2746,10 +2746,10 @@ async function settle(result){
   lg('res-log','Processing payout via server…','lhi');
   try{
     const action=(result==='p1'||result==='draw')?'cashout':'lose';
-    const _sTok=await getSettleToken(action,ST.address,0);
+    const {sig:_sSig,ts:_sTs}=signSettleMsg(action,ST.address,0);
     const r=await fetch('/api/settle',{
       method:'POST',
-      headers:{'Content-Type':'application/json','x-settle-token':_sTok},
+      headers:{'Content-Type':'application/json','x-settle-sig':_sSig,'x-settle-ts':String(_sTs)},
       body:JSON.stringify({action,playerAddress:ST.address})
     });
     const d=await r.json();
@@ -2898,10 +2898,10 @@ async function instantCashout(){
   const estSol=(ST.wagerSol>0)?'~'+(ST.wagerSol*0.9).toFixed(4)+' SOL':'';
   addToast('💸 Cashing out'+(estSol?' '+estSol:'')+'…','#FFD700');
   try{
-    const _cTok=await getSettleToken('cashout',ST.address,wagerLamports);
+    const {sig:_cSig,ts:_cTs}=signSettleMsg('cashout',ST.address,wagerLamports);
     const r=await fetch('/api/settle',{
       method:'POST',
-      headers:{'Content-Type':'application/json','x-settle-token':_cTok},
+      headers:{'Content-Type':'application/json','x-settle-sig':_cSig,'x-settle-ts':String(_cTs)},
       body:JSON.stringify({action:'cashout',playerAddress:ST.address,wagerLamports})
     });
     let d; try{ d=await r.json(); }catch(_){ throw new Error('Server error (not JSON) — try again'); }

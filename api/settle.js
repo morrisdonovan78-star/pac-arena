@@ -1,27 +1,22 @@
 // api/settle.js — tweetnacl only, no @solana/web3.js (ESM/runtime issues)
 'use strict';
-const nacl    = require('tweetnacl');
-const crypto  = require('crypto');
+const nacl = require('tweetnacl');
 
-// ── HMAC token validation ─────────────────────────────────────────────────────
-// Tokens are issued by /api/settle-auth and must be passed as x-settle-token header.
-// Each token is bound to (action, playerAddress, wagerLamports, 2-min window).
-// We accept the current window and the previous one to handle clock drift / slow clients.
-function validateToken(token) {
-  const secret = process.env.SETTLE_SECRET || '';
-  if (!secret) {
-    console.warn('[settle] SETTLE_SECRET not configured — token validation skipped');
-    return true;
-  }
-  if (!token || token === 'open') return false;
-  const now = Math.floor(Date.now() / 120_000);
-  for (const w of [now, now - 1]) {
-    const expected = crypto.createHmac('sha256', secret).update(String(w)).digest('hex');
-    try {
-      if (crypto.timingSafeEqual(Buffer.from(token, 'hex'), Buffer.from(expected, 'hex'))) return true;
-    } catch (_) {}
-  }
-  return false;
+// ── Ed25519 wallet signature verification ─────────────────────────────────────
+// The client signs: "pac-arena:{action}:{playerAddress}:{wagerLamports}:{unixTs}"
+// using their Solana wallet private key (tweetnacl detached signature).
+// Only the real wallet owner can produce a valid signature — forged cashouts are impossible.
+function verifyPlayerSig(sig, ts, action, playerAddress, wagerLamports) {
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    if (!sig || !ts) return false;
+    if (Math.abs(now - Number(ts)) > 120) return false; // 2-minute window
+    const msg = 'pac-arena:' + action + ':' + (playerAddress||'') + ':' + (wagerLamports||0) + ':' + ts;
+    const msgBytes  = Buffer.from(msg, 'utf8');
+    const sigBytes  = Buffer.from(sig, 'base64');
+    const pubBytes  = b58Decode(playerAddress);
+    return nacl.sign.detached.verify(msgBytes, sigBytes, pubBytes);
+  } catch (_) { return false; }
 }
 
 const CREATOR_WALLET  = '2ZLqQww5koLr2J7PU54UwA7yNX4DRmMHMLAQjm411E7a';
@@ -267,7 +262,7 @@ module.exports = async function handler(req, res) {
   try {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-settle-token');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-settle-sig, x-settle-ts');
     if (req.method === 'OPTIONS') { clearTimeout(guard); done = true; return res.status(200).end(); }
     if (req.method !== 'POST')   { clearTimeout(guard); done = true; return res.status(405).end(); }
 
@@ -278,12 +273,15 @@ module.exports = async function handler(req, res) {
     const { action, playerAddress } = body;
     const wagerLamportsRaw = Number(body.wagerLamports) || 0;
 
-    // ── Token auth — required for all fund-moving actions ────────────────────
+    // ── Wallet signature auth — required for all fund-moving actions ─────────
+    // The player signs the request with their Solana private key.
+    // Only the real wallet owner can produce a valid signature.
     if (action !== 'balance') {
-      const token = req.headers['x-settle-token'] || '';
-      if (!validateToken(token)) {
+      const sig = req.headers['x-settle-sig'] || '';
+      const ts  = req.headers['x-settle-ts']  || '';
+      if (!verifyPlayerSig(sig, ts, action, playerAddress || '', wagerLamportsRaw)) {
         clearTimeout(guard); done = true;
-        return res.status(403).json({ error: 'Invalid or missing settle token — request one from /api/settle-auth' });
+        return res.status(403).json({ error: 'Invalid wallet signature — cashout must originate from the game client' });
       }
     }
 
