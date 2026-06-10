@@ -1,4 +1,4 @@
-<!-- PAC ARENA v46 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v47 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -36,7 +36,7 @@
 // Block stale bfcache (back/forward navigation serving frozen game state)
 window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});
 })();</script>
-<title>PAC MONEY v46</title>
+<title>PAC MONEY v47</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
@@ -250,11 +250,11 @@ body{touch-action:manipulation;}
 
 <!-- HOME -->
 <div id="scr-home" class="scr on">
-  <div class="ghosts"><span class="gf">🍒</span><span class="gf"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="32" viewBox="0 0 18 22"><ellipse cx="9" cy="14" rx="6.5" ry="7.5" fill="#FF2200"/><path d="M9 7 Q14 2 11 0" stroke="#22BB00" stroke-width="2.5" stroke-linecap="round" fill="none"/></svg></span><span class="gf">🍒</span><span class="gf"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="32" viewBox="0 0 18 22"><ellipse cx="9" cy="14" rx="6.5" ry="7.5" fill="#FF2200"/><path d="M9 7 Q14 2 11 0" stroke="#22BB00" stroke-width="2.5" stroke-linecap="round" fill="none"/></svg></span></div>
+  <div class="ghosts"><span class="gf">🍒</span><span class="gf">🌶️</span><span class="gf">🍒</span><span class="gf">🌶️</span></div>
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
-    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v46</div>
+    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v47</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;">
     <div class="w-strip">
@@ -276,12 +276,20 @@ body{touch-action:manipulation;}
       <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);line-height:2.6;">
         ↑↓←→ &nbsp;MOVE<br>
         V &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;USE CHERRY 🍒 (KILL MODE)<br>
-        C &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;USE PEPPER <svg xmlns="http://www.w3.org/2000/svg" width="10" height="12" viewBox="0 0 18 22" style="vertical-align:middle"><ellipse cx="9" cy="14" rx="6.5" ry="7.5" fill="#FF2200"/><path d="M9 7 Q14 2 11 0" stroke="#22BB00" stroke-width="2.5" stroke-linecap="round" fill="none"/></svg> (SPEED BOOST)<br>
+        C &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;USE PEPPER 🌶️ (SPEED BOOST)<br>
         T &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CHAT<br>
         SPACE &nbsp;CASH OUT
       </div>
     </div>
     <button class="btn" style="background:rgba(57,255,20,.12);color:var(--g);border-color:var(--g);font-family:'Press Start 2P',monospace;font-size:9px;margin-bottom:.75rem;" onclick="openCashout()">💸 CASHOUT / WITHDRAW</button>
+    <div style="background:rgba(255,215,0,.05);border:1px solid rgba(255,215,0,.25);border-radius:10px;padding:12px 14px;margin-bottom:.75rem;text-align:center;">
+      <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:#FFD700;margin-bottom:10px;">🎨 CUSTOMIZE PAC</div>
+      <canvas id="cust-preview" width="72" height="72" style="display:block;margin:0 auto 10px;border-radius:50%;border:2px solid rgba(255,215,0,.3);background:#000;"></canvas>
+      <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:6px;">BODY COLOR</div>
+      <div id="cust-colors" style="display:flex;gap:7px;flex-wrap:wrap;justify-content:center;margin-bottom:10px;"></div>
+      <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:6px;">HAT</div>
+      <div id="cust-hats" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;"></div>
+    </div>
     <button class="btn btn-r btn-sm" onclick="doLogout()" style="margin:0 auto;">LOG OUT</button>
   </div>
   <div id="home-off" class="card" style="text-align:center;">
@@ -485,7 +493,7 @@ body{touch-action:manipulation;}
   <!-- Powerup use buttons — bottom-right corner -->
   <div id="pow-btns" style="position:fixed;bottom:8px;right:8px;z-index:100;display:none;flex-direction:column;align-items:center;gap:6px;">
     <button id="cherry-use-btn" class="pow-use-btn cherry-btn" style="opacity:0.35;">🍒<br>KILL</button>
-    <button id="pepper-use-btn" class="pow-use-btn pepper-btn" style="opacity:0.35;"><svg xmlns="http://www.w3.org/2000/svg" width="22" height="25" viewBox="0 0 18 22"><ellipse cx="9" cy="14" rx="6.5" ry="7.5" fill="#FF2200"/><path d="M9 7 Q14 2 11 0" stroke="#22BB00" stroke-width="2.5" stroke-linecap="round" fill="none"/></svg><br>SPEED</button>
+    <button id="pepper-use-btn" class="pow-use-btn pepper-btn" style="opacity:0.35;">🌶️<br>SPEED</button>
   </div>
 </div>
 
@@ -642,6 +650,19 @@ function makeConnection(){
 // ═══════════════════════════════════════════════════════════
 const ST = { email:'', address:'', balance:0, solPrice:0, lobbyUsd:0, wagerSol:0, hasEscrow:false, conn:null };
 // solPrice starts at 0 — fetchPrice() sets the real live value before anything displays it.
+
+// ── Pac-Man skin customization ───────────────────────────────────────────────
+const _SKIN_COLORS=['#FFD700','#FF69B4','#00FFFF','#FF4500','#39FF14','#CC44FF','#FFFFFF','#FF2222'];
+const _SKIN_HATS  =['none','crown','bow','party','halo'];
+let _mySkin={color:'#FFD700',hat:'none'};
+(function(){
+  try{
+    const s=JSON.parse(localStorage.getItem('pac_skin')||'{}');
+    if(s.color&&_SKIN_COLORS.includes(s.color)) _mySkin.color=s.color;
+    if(s.hat&&_SKIN_HATS.includes(s.hat)) _mySkin.hat=s.hat;
+  }catch(_){}
+})();
+function saveSkin(){try{localStorage.setItem('pac_skin',JSON.stringify(_mySkin));}catch(_){}}
 let _jwt      = null;
 let _otpToken = null;
 let _keypair  = null; // solanaWeb3.Keypair - stored locally
@@ -1112,6 +1133,7 @@ async function finishLogin(kp){
   document.getElementById('home-off').style.display='none';
   document.getElementById('home-on').style.display='block';
   const rsel=document.getElementById('region-sel'); if(rsel) rsel.value=REGION;
+  initCustomizePanel();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1137,6 +1159,7 @@ async function checkSession(){
     document.getElementById('home-off').style.display='none';
     document.getElementById('home-on').style.display='block';
     const rsel=document.getElementById('region-sel'); if(rsel) rsel.value=REGION;
+    initCustomizePanel();
   }catch(e){ localStorage.removeItem('pa_last'); }
 }
 
@@ -1265,7 +1288,8 @@ async function pkConnect(roomId, paidAblyToken){
     const sp=rndSpawn();
     _myHelloTs=Date.now();
     const myHello={
-      id:myPid, spawn:[sp.x,sp.y], color:colorFromId(myPid), ts:_myHelloTs,
+      id:myPid, spawn:[sp.x,sp.y], color:_mySkin.color, ts:_myHelloTs,
+      hat:  _mySkin.hat,
       name: ST.email ? ST.email.split('@')[0].slice(0,8).toUpperCase() : '',
       sol:  ST.wagerSol || 0,
       et:   ST.entryToken || null  // HMAC proof of payment — verified server-side by host/guests
@@ -1299,7 +1323,7 @@ async function pkConnect(roomId, paidAblyToken){
       // If game already running and we're host, add them + reply with full roster
       if(G&&!G.over&&isHost){
         if(!G.players.has(d.id))
-          addPlayer({ id:d.id, num:G.players.size, color:d.color||colorFromId(d.id), spawn:d.spawn||[14,18], name:d.name||'', sol:d.sol||0 });
+          addPlayer({ id:d.id, num:G.players.size, color:d.color||colorFromId(d.id), hat:d.hat||'none', spawn:d.spawn||[14,18], name:d.name||'', sol:d.sol||0 });
         const rp=[]; hellos.forEach(h=>rp.push(h));
         ablyChannel.publish('roster',{players:rp},()=>{});
       }
@@ -1379,7 +1403,7 @@ async function pkConnect(roomId, paidAblyToken){
         if(!G.players.has(d.id)){
           const sp=rndSpawn();
           G.players.set(d.id,{
-            id:d.id, num:G.players.size, color:colorFromId(d.id),
+            id:d.id, num:G.players.size, color:d.color||colorFromId(d.id), hat:d.hat||'none',
             x:sp.x, y:sp.y, dx:0, dy:0, nx:0, ny:0,
             prevX:sp.x, prevY:sp.y, renderX:sp.x, renderY:sp.y,
             sc:0, lives:1, pow:false, pt:0, mc:0, pep:false, pet:0, held:[],
@@ -1511,10 +1535,11 @@ function applyRemoteState(d){
     const heldVal=[]; if(heldN&1) heldVal.push('cherry'); if(heldN&2) heldVal.push('pepper');
     let p=G.players.get(id);
     if(!p){
-      G.players.set(id,{ id, num:G.players.size, color:colorFromId(id),
+      const _sh=hellos.get(id)||{};
+      G.players.set(id,{ id, num:G.players.size, color:_sh.color||colorFromId(id), hat:_sh.hat||'none',
         x, y, dx, dy, nx:dx, ny:dy, sc, lives, pow:!!pow, pt, mc:0,
         pep:!!pep, pet:pet||0, held:heldVal,
-        name:'', sol:ST.wagerSol||0,
+        name:_sh.name||'', sol:ST.wagerSol||0,
         prevX:x, prevY:y,
         renderX:x, renderY:y }); // snap to exact position for new players
       changed=true; return;
@@ -2114,7 +2139,7 @@ async function doRejoin(){
     const sp=rndSpawn();
     const _rjName=ST.email?ST.email.split('@')[0].slice(0,8).toUpperCase():'';
     G.players.set(myPid,{
-      id:myPid, num:G.players.size, color:colorFromId(myPid),
+      id:myPid, num:G.players.size, color:_mySkin.color, hat:_mySkin.hat,
       x:sp.x, y:sp.y, dx:0, dy:0, nx:0, ny:0,
       prevX:sp.x, prevY:sp.y, renderX:sp.x, renderY:sp.y,
       sc:0, lives:1, pow:false, pt:0, mc:0, pep:false, pet:0, held:[],
@@ -2291,7 +2316,7 @@ function launchGame(){
 function mkP(info){
   const sp=info.spawn||[14,18];
   return {
-    id:info.id, num:info.num, color:info.color||'#FFD700',
+    id:info.id, num:info.num, color:info.color||'#FFD700', hat:info.hat||'none',
     x:sp[0], y:sp[1], dx:0, dy:0, nx:0, ny:0,  // stationary until first key press
     prevX:sp[0], prevY:sp[1],
     renderX:sp[0], renderY:sp[1], // smooth float position for 60fps draw
@@ -2522,15 +2547,93 @@ function _buildMazeCanvas(){
       mc.fillText('🍒',x+T/2,y+T/2+1); mc.restore();
     } else if(v===4){
       mc.save();
-      const cx=x+T/2,cy=y+T/2+T*0.05,pr=T*0.30;
-      mc.beginPath(); mc.ellipse(cx,cy,pr,pr*1.15,0,0,Math.PI*2);
-      mc.fillStyle='#FF2200'; mc.fill();
-      mc.beginPath(); mc.moveTo(cx,cy-pr); mc.quadraticCurveTo(cx+T*0.18,cy-pr-T*0.22,cx+T*0.10,cy-pr-T*0.28);
-      mc.strokeStyle='#22BB00'; mc.lineWidth=T*0.13; mc.lineCap='round'; mc.stroke();
+      mc.font=Math.floor(T*0.82)+'px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",serif';
+      mc.textAlign='center'; mc.textBaseline='middle';
+      mc.fillText('🌶️',x+T/2,y+T/2+1);
       mc.restore();
     }
   }
   _mazeDirty=false;
+}
+
+function drawHat(hCtx,cx,cy,r,hat){
+  hCtx.save();
+  const top=cy-r;
+  if(hat==='crown'){
+    const cw=r*0.85,ch=r*0.52;
+    hCtx.fillStyle='#FFD700'; hCtx.strokeStyle='#B8860B'; hCtx.lineWidth=Math.max(1,r*0.1);
+    hCtx.beginPath();
+    hCtx.moveTo(cx-cw,top); hCtx.lineTo(cx-cw,top-ch*0.5);
+    hCtx.lineTo(cx-cw*0.5,top-ch); hCtx.lineTo(cx-cw*0.15,top-ch*0.35);
+    hCtx.lineTo(cx,top-ch*1.1); hCtx.lineTo(cx+cw*0.15,top-ch*0.35);
+    hCtx.lineTo(cx+cw*0.5,top-ch); hCtx.lineTo(cx+cw,top-ch*0.5);
+    hCtx.lineTo(cx+cw,top); hCtx.closePath();
+    hCtx.fill(); hCtx.stroke();
+    [{x:cx-cw*0.5,y:top-ch*1.05,c:'#FF2222'},{x:cx,y:top-ch*1.2,c:'#00BFFF'},{x:cx+cw*0.5,y:top-ch*1.05,c:'#FF2222'}]
+      .forEach(g=>{hCtx.beginPath();hCtx.arc(g.x,g.y,r*0.11,0,Math.PI*2);hCtx.fillStyle=g.c;hCtx.fill();});
+  }
+  if(hat==='bow'){
+    const bw=r*0.78,bh=r*0.52,by=top-bh*0.25;
+    hCtx.fillStyle='#FF69B4';
+    hCtx.beginPath(); hCtx.moveTo(cx,by);
+    hCtx.bezierCurveTo(cx-bw*0.4,by-bh*1.1,cx-bw,by-bh*0.8,cx-bw,by-bh*0.15);
+    hCtx.bezierCurveTo(cx-bw,by+bh*0.35,cx-bw*0.3,by+bh*0.2,cx,by); hCtx.fill();
+    hCtx.beginPath(); hCtx.moveTo(cx,by);
+    hCtx.bezierCurveTo(cx+bw*0.4,by-bh*1.1,cx+bw,by-bh*0.8,cx+bw,by-bh*0.15);
+    hCtx.bezierCurveTo(cx+bw,by+bh*0.35,cx+bw*0.3,by+bh*0.2,cx,by); hCtx.fill();
+    hCtx.fillStyle='#FF1493'; hCtx.beginPath(); hCtx.ellipse(cx,by,r*0.19,r*0.23,0,0,Math.PI*2); hCtx.fill();
+  }
+  if(hat==='party'){
+    const ph=r*1.05,pw=r*0.62;
+    hCtx.fillStyle='#CC44FF'; hCtx.fillRect(cx-pw,top-r*0.06,pw*2,r*0.2);
+    hCtx.beginPath(); hCtx.moveTo(cx-pw,top); hCtx.lineTo(cx+pw,top); hCtx.lineTo(cx,top-ph); hCtx.closePath();
+    const grd=hCtx.createLinearGradient(cx-pw,top,cx+pw,top-ph);
+    grd.addColorStop(0,'#FF2222'); grd.addColorStop(0.33,'#FFD700'); grd.addColorStop(0.66,'#39FF14'); grd.addColorStop(1,'#CC44FF');
+    hCtx.fillStyle=grd; hCtx.fill();
+    hCtx.strokeStyle='rgba(255,255,255,0.45)'; hCtx.lineWidth=1;
+    [1,2].forEach(i=>{const t=i/3; hCtx.beginPath(); hCtx.moveTo(cx-pw*(1-t),top-ph*t); hCtx.lineTo(cx+pw*(1-t),top-ph*t); hCtx.stroke();});
+    hCtx.fillStyle='#fff'; hCtx.beginPath(); hCtx.arc(cx,top-ph,r*0.14,0,Math.PI*2); hCtx.fill();
+  }
+  if(hat==='halo'){
+    hCtx.strokeStyle='#FFD700'; hCtx.lineWidth=r*0.17;
+    hCtx.shadowColor='#FFD700'; hCtx.shadowBlur=r*0.9;
+    hCtx.beginPath(); hCtx.ellipse(cx,top-r*0.28,r*0.68,r*0.22,0,0,Math.PI*2); hCtx.stroke();
+    hCtx.shadowBlur=0;
+  }
+  hCtx.restore();
+}
+
+function drawSkinPreview(){
+  const cv=document.getElementById('cust-preview'); if(!cv) return;
+  const c=cv.getContext('2d'); const w=cv.width,h=cv.height;
+  c.clearRect(0,0,w,h); c.fillStyle='#000'; c.fillRect(0,0,w,h);
+  const r=w*0.30, pcx=w/2, pcy=h*0.58;
+  c.fillStyle=_mySkin.color;
+  c.beginPath(); c.moveTo(pcx,pcy); c.arc(pcx,pcy,r,0.15*Math.PI,1.85*Math.PI); c.closePath(); c.fill();
+  c.fillStyle='#000'; c.beginPath(); c.arc(pcx+r*0.35,pcy-r*0.38,r*0.11,0,Math.PI*2); c.fill();
+  if(_mySkin.hat!=='none') drawHat(c,pcx,pcy,r,_mySkin.hat);
+}
+
+function initCustomizePanel(){
+  const colWrap=document.getElementById('cust-colors');
+  const hatWrap=document.getElementById('cust-hats');
+  if(!colWrap||!hatWrap) return;
+  colWrap.innerHTML=''; hatWrap.innerHTML='';
+  _SKIN_COLORS.forEach(col=>{
+    const b=document.createElement('div');
+    b.style.cssText='width:28px;height:28px;border-radius:50%;cursor:pointer;background:'+col+';border:3px solid '+(_mySkin.color===col?'#fff':'rgba(255,255,255,0.15)')+';transition:border-color .15s;flex-shrink:0;';
+    b.onclick=()=>{ _mySkin.color=col; saveSkin(); initCustomizePanel(); drawSkinPreview(); };
+    colWrap.appendChild(b);
+  });
+  const hatLabels={none:'NONE',crown:'👑 CROWN',bow:'🎀 BOW',party:'🎉 PARTY',halo:'✨ HALO'};
+  _SKIN_HATS.forEach(h=>{
+    const b=document.createElement('button');
+    b.textContent=hatLabels[h]||h.toUpperCase();
+    b.style.cssText='padding:5px 9px;border-radius:6px;cursor:pointer;font-family:\'Press Start 2P\',monospace;font-size:6px;border:1px solid '+((_mySkin.hat===h)?'#FFD700':'rgba(255,255,255,0.2)')+';background:'+(_mySkin.hat===h?'rgba(255,215,0,.18)':'rgba(255,255,255,.04)')+';color:'+(_mySkin.hat===h?'#FFD700':'var(--muted)')+';transition:all .15s;';
+    b.onclick=()=>{ _mySkin.hat=h; saveSkin(); initCustomizePanel(); drawSkinPreview(); };
+    hatWrap.appendChild(b);
+  });
+  drawSkinPreview();
 }
 
 function draw(){
@@ -2612,6 +2715,8 @@ function draw(){
     else if(p.pep){ ctx.shadowColor='#39FF14'; ctx.shadowBlur=8; }
     ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0,0,T/2-1,a*Math.PI,(2-a)*Math.PI); ctx.closePath(); ctx.fill();
     ctx.shadowBlur=0; ctx.restore();
+    // Hat drawn upright (no body rotation) — purely cosmetic, zero hitbox impact
+    if(p.hat&&p.hat!=='none') drawHat(ctx,px+T/2,py+T/2,T/2-1,p.hat);
     // Name label + SOL wager above the player
     if(label && py>T*1.2){
       const fs=Math.max(7,Math.floor(T*0.46));
