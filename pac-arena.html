@@ -1,4 +1,4 @@
-<!-- PAC ARENA v40 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v41 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -31,7 +31,7 @@
 // Block stale bfcache (back/forward navigation serving frozen game state)
 window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});
 })();</script>
-<title>PAC MONEY v40</title>
+<title>PAC MONEY v41</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
@@ -249,7 +249,7 @@ body{touch-action:manipulation;}
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
-    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v40</div>
+    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v41</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;">
     <div class="w-strip">
@@ -1198,36 +1198,41 @@ function colorFromId(id){ let h=0; for(let i=0;i<id.length;i++) h=(h*31+id.charC
 let _pkTick=0;    // throttle counter for state sends
 let _myHelloTs=0; // my join-timestamp, used for host-conflict resolution
 
-async function pkConnect(roomId){
+async function pkConnect(roomId, paidAblyToken){
   pkRoomId=roomId;
   const clientId=ST.address||('anon-'+Math.random().toString(36).slice(2,8));
   myPid=clientId;
   try{
-    // ── Step 1: fetch a token from our server (key never touches the browser) ──
-    let ablyToken=null;
-    try{
-      const ctrl=new AbortController();
-      const tOut=setTimeout(()=>ctrl.abort(),7000);
-      const tr=await fetch('/api/ably-token?clientId='+encodeURIComponent(clientId),
-                           {signal:ctrl.signal});
-      clearTimeout(tOut);
-      const td=await tr.json();
-      if(td && td.token){ ablyToken=td.token; }
-      else{ throw new Error(td.error||'Token server returned no token'); }
-    }catch(e){
-      // Give a specific, actionable error instead of the generic Ably message
-      const msg=e.message||'unreachable';
-      if(msg.includes('ABLY_KEY')){
+    // ── Step 1: get Ably token ─────────────────────────────────────────────────
+    // For paid lobbies: use the token issued by join.js after deposit verification.
+    //   That token has capability only for the specific paid channel — Ably itself
+    //   blocks presence.enter() without it, so payment bypass is impossible.
+    // For free lobby: fetch a restricted token from ably-token.js (free channel only).
+    let ablyToken=paidAblyToken||null;
+    if(!ablyToken){
+      try{
+        const ctrl=new AbortController();
+        const tOut=setTimeout(()=>ctrl.abort(),7000);
+        const tr=await fetch('/api/ably-token?clientId='+encodeURIComponent(clientId),
+                             {signal:ctrl.signal});
+        clearTimeout(tOut);
+        const td=await tr.json();
+        if(td && td.token){ ablyToken=td.token; }
+        else{ throw new Error(td.error||'Token server returned no token'); }
+      }catch(e){
+        const msg=e.message||'unreachable';
+        if(msg.includes('ABLY_KEY')){
+          const isLive=window.location.hostname!=='localhost'&&window.location.hostname!=='127.0.0.1';
+          if(isLive)
+            throw new Error('Ably key missing on server — go to Vercel dashboard → Settings → Environment Variables → add ABLY_KEY, then redeploy');
+          else
+            throw new Error('Ably key missing — open server.py, paste your key on the ABLY_KEY line, then restart LAUNCH.bat');
+        }
         const isLive=window.location.hostname!=='localhost'&&window.location.hostname!=='127.0.0.1';
-        if(isLive)
-          throw new Error('Ably key missing on server — go to Vercel dashboard → Settings → Environment Variables → add ABLY_KEY, then redeploy');
-        else
-          throw new Error('Ably key missing — open server.py, paste your key on the ABLY_KEY line, then restart LAUNCH.bat');
+        throw new Error(isLive
+          ? 'Cannot reach Ably token server: '+msg+' — check Vercel deployment and ABLY_KEY env var'
+          : 'Cannot reach token server: '+msg+' — make sure LAUNCH.bat is running');
       }
-      const isLive=window.location.hostname!=='localhost'&&window.location.hostname!=='127.0.0.1';
-      throw new Error(isLive
-        ? 'Cannot reach Ably token server: '+msg+' — check Vercel deployment and ABLY_KEY env var'
-        : 'Cannot reach token server: '+msg+' — make sure LAUNCH.bat is running');
     }
 
     // ── Step 2: connect with the fetched token (no authUrl, no second round-trip) ──
@@ -1553,14 +1558,15 @@ async function joinLobby(usd){
     ST.hasEscrow=true;
     lg('mm-log','Deposit confirmed ✓','lok');
     // Record wager server-side — MUST succeed before entering lobby.
-    // If this fails, the player cannot cashout (server requires KV entry).
-    // Don't silently swallow the error: block entry so they can retry.
+    // join.js also returns a lobby-specific Ably token; without it pkConnect
+    // cannot enter presence on the paid channel and game entry is blocked.
     lg('mm-log','Recording wager…','lhi');
-    await recordWager(ST.address, lamps, sig);
+    const roomId=usd===1?'gold-lobby':'diamond-lobby';
+    const joinResult=await recordWager(ST.address, lamps, sig, roomId);
+    const paidAblyToken=joinResult.ablyToken||null;
     document.getElementById('mm-sub').textContent='Wager locked · Joining live lobby…';
     await refreshBal();
-    const roomId=usd===1?'gold-lobby':'diamond-lobby';
-    pkConnect(roomId);
+    pkConnect(roomId, paidAblyToken);
   }catch(e){
     _joiningLobby=false;
     lg('mm-log','Error: '+e.message,'lerr');
@@ -2733,16 +2739,19 @@ async function endGame(reason){
   }
 }
 
-// Tell the server what this player wagered so it can enforce the correct cashout amount.
-async function recordWager(walletAddress, wagerLamports, txSig) {
+// Tell the server what this player wagered and get back a lobby-specific Ably token.
+// The returned token has capability ONLY for the paid lobby channel — without it, Ably
+// will reject the player's presence.enter() and they cannot enter the game.
+async function recordWager(walletAddress, wagerLamports, txSig, lobbyId) {
   const {sig, ts} = signSettleMsg('join', walletAddress, wagerLamports);
   const r = await fetch('/api/join', {
     method: 'POST',
     headers: {'Content-Type':'application/json','x-settle-sig':sig,'x-settle-ts':String(ts)},
-    body: JSON.stringify({walletAddress, wagerLamports, txSig})
+    body: JSON.stringify({walletAddress, wagerLamports, txSig, lobbyId})
   });
   const d = await r.json().catch(()=>({}));
   if (!r.ok) throw new Error(d.error || 'join failed');
+  return d; // { ok, recorded, ablyToken }
 }
 
 // Sign a settle request with the player's own wallet private key.

@@ -8,6 +8,36 @@ const nacl = require('tweetnacl');
 const { kvGet, kvSet } = require('./kv');
 
 const ESCROW_PUBKEY = '2SYFfCsSmKr8qwK1AfWd36JtAc1BCaRaSSxyECKUJjBb';
+
+// Issues a short-lived Ably token with capability ONLY for the specific paid lobby channel.
+// ably-token.js issues free-lobby-only tokens — paid tokens must come through here (post-deposit).
+async function issueAblyLobbyToken(clientId, lobbyId) {
+  const key = (process.env.ABLY_KEY || '').trim();
+  if (!key) return null;
+  const colonIdx = key.indexOf(':');
+  if (colonIdx < 0) return null;
+  const keyName = key.slice(0, colonIdx);
+  const channel = 'pac-arena-' + lobbyId;
+  const tokenParams = {
+    keyName,
+    ttl: 3_600_000, // 1 hour
+    timestamp: Date.now(),
+    nonce: Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2),
+    capability: JSON.stringify({ [channel]: ['publish', 'subscribe', 'presence', 'history'] }),
+    clientId,
+  };
+  try {
+    const r = await fetch(`https://rest.ably.io/keys/${keyName}/requestToken`, {
+      method: 'POST',
+      headers: { Authorization: 'Basic ' + Buffer.from(key).toString('base64'), 'Content-Type': 'application/json' },
+      body: JSON.stringify(tokenParams),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!r.ok) return null;
+    const d = await r.json();
+    return d.token || null;
+  } catch (_) { return null; }
+}
 const RPCS = [
   process.env.HELIUS_RPC_URL,
   'https://api.mainnet-beta.solana.com',
@@ -99,7 +129,7 @@ module.exports = async function handler(req, res) {
     if (typeof body === 'string') try { body = JSON.parse(body); } catch (_) { return res.status(400).json({ error: 'Bad JSON' }); }
     body = body || {};
 
-    const { walletAddress, wagerLamports, txSig } = body;
+    const { walletAddress, wagerLamports, txSig, lobbyId } = body;
     const sig = req.headers['x-settle-sig'] || '';
     const ts  = req.headers['x-settle-ts']  || '';
     const lamps = Number(wagerLamports) || 0;
@@ -131,7 +161,15 @@ module.exports = async function handler(req, res) {
     // Store for 4 hours — more than enough for any game session
     await kvSet('pw:' + walletAddress, lamps, 14400);
 
-    return res.status(200).json({ ok: true, recorded: lamps });
+    // Issue a lobby-specific Ably token — capability restricted to just this paid channel.
+    // The client uses this to connect to the lobby instead of the default free-only token.
+    // Without a successful join.js call (verified deposit), the player can't get a paid token.
+    const VALID_LOBBIES = new Set(['gold-lobby', 'diamond-lobby']);
+    const ablyToken = VALID_LOBBIES.has(lobbyId)
+      ? await issueAblyLobbyToken(walletAddress, lobbyId)
+      : null;
+
+    return res.status(200).json({ ok: true, recorded: lamps, ablyToken });
   } catch (e) {
     console.error('[join]', e.message);
     return res.status(500).json({ error: e.message });

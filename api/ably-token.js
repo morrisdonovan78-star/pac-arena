@@ -35,7 +35,9 @@ module.exports = async function handler(req, res) {
     ttl:        3600000,
     timestamp:  Date.now(),
     nonce:      Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2),
-    capability: '{"*":["publish","subscribe","presence","history"]}',
+    // Free-lobby only — paid lobbies require a token issued by join.js after deposit verification.
+    // Without a verified deposit, players literally cannot enter presence on paid channels.
+    capability: '{"pac-arena-free-lobby":["publish","subscribe","presence","history"]}',
   };
   if (clientId) tokenParams.clientId = clientId;
 
