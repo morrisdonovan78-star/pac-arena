@@ -1,4 +1,4 @@
-<!-- PAC ARENA v29 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v30 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -31,7 +31,7 @@
 // Block stale bfcache (back/forward navigation serving frozen game state)
 window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});
 })();</script>
-<title>PAC MONEY v29</title>
+<title>PAC MONEY v30</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
@@ -1686,6 +1686,8 @@ let _audioCtx=null, _musicStop=false;
 let _lastDrawTs=0; // used by draw() for frame-delta interpolation
 let _lastSbSig='';  // scoreboard change-detection — skip DOM rebuild when nothing changed
 let _cachedMyName='YOU'; // cached once — avoids string ops inside 60fps draw loop
+const _collisionBuf=[]; // pre-allocated — avoids new array every tick in checkAllCollisions
+const _elimBuf=[];      // same
 let _chatTyping=false, _chatFadeTimer=null; // chat input state
 const _chatLog=[];                          // recent chat messages (max 8)
 let _visHandler=null; // tab-visibility handler ref (so we can removeEventListener cleanly)
@@ -2217,7 +2219,7 @@ function launchGame(){
       const me=G.players.get(myPid);
       if(me&&(me.nx!==0||me.ny!==0))
         ablyChannel.publish('in',{t:'in',id:myPid,dx:me.nx,dy:me.ny},()=>{});
-    },50); // 50ms heartbeat — recover from dropped input packets 2× faster
+    },100); // 100ms heartbeat — input sent instantly on keypress, this just recovers drops
   }
   rafHandle=requestAnimationFrame(rafDraw);
 }
@@ -2384,34 +2386,40 @@ function tick(){
   checkAllCollisions();
   // Process powerup respawn queue (host only): place new powerup when timer fires
   if(isHost && G.powRespawnQ && G.powRespawnQ.length){
-    G.powRespawnQ=G.powRespawnQ.filter(r=>{
-      if(frm<r.at) return true;
-      const s=rndPowSpot(); if(s){ G.maze[s.y][s.x]=r.type; _mazeDirty=true; } return false;
-    });
+    for(let i=G.powRespawnQ.length-1;i>=0;i--){
+      const r=G.powRespawnQ[i];
+      if(frm>=r.at){ const s=rndPowSpot(); if(s){ G.maze[s.y][s.x]=r.type; _mazeDirty=true; } G.powRespawnQ.splice(i,1); }
+    }
   }
   updateScoreboard();
   if(isHost){
     _pkTick++;
-    if(true){ // 30fps state sync — halves guest input-to-screen lag vs old 15fps
+    // Publish at 20fps (every 1.5 ticks on average — skip every 3rd tick).
+    // Dead-reckoning keeps remote players smooth at this rate.
+    // Cutting from 30→20 publishes/sec reduces Ably main-thread overhead by 33%,
+    // which was the main cause of stutters for both host and guests.
+    if(_pkTick%3!==0){
       const ps=[];
       G.players.forEach((p,id)=>{
-        const hN=((p.held||[]).includes('cherry')?1:0)|((p.held||[]).includes('pepper')?2:0);
+        const held=p.held;
+        const hN=(held&&held.includes('cherry')?1:0)|(held&&held.includes('pepper')?2:0);
         ps.push([id,p.x,p.y,p.dx,p.dy,p.sc,p.lives,p.pow?1:0,p.pt,p.pep?1:0,p.pet||0,hN]);
       });
       const spec=G.spectators?G.spectators.size:0;
-      // Delta encoding: send full maze every ~2s, otherwise just the cells that changed.
+      // Delta encoding: send full maze every ~3s, otherwise just the cells that changed.
       const fullSync=(_pkTick%60===0);
       const msg={t:'s',ps,hostTs:_myHelloTs,spec};
-      if(fullSync)            msg.maze=G.maze;          // full sync
-      else if(G.eatLog.length) msg.eat=G.eatLog;        // only eaten cells
+      if(fullSync)             msg.maze=G.maze;
+      else if(G.eatLog.length) msg.eat=G.eatLog;
       pkSend(msg);
-      G.eatLog=[];  // clear after each publish — safe now that we publish every tick
+      G.eatLog=[];
     }
   }
 }
 function checkAllCollisions(){
-  const players=[...G.players.values()];
-  const toElim=[]; // {id, killerId}
+  const players=_collisionBuf; players.length=0;
+  G.players.forEach(p=>players.push(p));
+  const toElim=_elimBuf; toElim.length=0;
   for(let i=0;i<players.length;i++){
     for(let j=i+1;j<players.length;j++){
       const a=players[i],b=players[j];
