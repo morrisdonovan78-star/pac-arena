@@ -557,7 +557,7 @@ body{touch-action:manipulation;}
 <div id="rejoin-overlay" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.88);z-index:500;align-items:center;justify-content:center;flex-direction:column;">
   <div class="card" style="max-width:380px;width:90%;text-align:center;padding:2rem 1.75rem;">
     <div style="font-family:'Press Start 2P',monospace;font-size:18px;margin-bottom:.5rem;">💀</div>
-    <div style="font-family:'Press Start 2P',monospace;font-size:12px;color:#FF4444;margin-bottom:.6rem;">YOU WERE KILLED!</div>
+    <div id="rjo-head" style="font-family:'Press Start 2P',monospace;font-size:12px;color:#FF4444;margin-bottom:.6rem;">YOU WERE KILLED!</div>
     <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:var(--muted);margin-bottom:1.25rem;line-height:2;">Pay the entry fee to jump back in.<br>Same spawn, fresh start.</div>
     <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:1.4rem;">
       <span style="font-family:'Press Start 2P',monospace;font-size:9px;color:var(--muted);">REJOIN COST</span>
@@ -1963,8 +1963,14 @@ function hideSpectatePanel(){
 
 function spectateRejoin(){
   if(!G) return;
-  // Allow rejoin even when G.over — player cashed out and wants back in
+  if(G.over){
+    // Game already ended — can't rejoin a dead game, send to lobby
+    addToast('🏁 Game ended — returning to lobby…','#FF6B6B');
+    setTimeout(leaveSpectate,1500);
+    return;
+  }
   if(!_lobbyIsPaid){ _doFreeRejoin(); return; }
+  _rejoinFromCashout=true; // player is rejoining after cashout, not after being killed
   openRejoinOverlay();
 }
 
@@ -2155,15 +2161,19 @@ function freeLobbyCashout(){
 
 // ── Pay-to-Rejoin flow ────────────────────────────────────────
 let _rejoinCountdown=null;
+let _rejoinFromCashout=false; // true when player chose to rejoin after cashing out (vs being killed)
 
 function openRejoinOverlay(){
-  // Enter spectate view so the eliminated player can see the game continue
   isSpectating=true;
   go('scr-game');
   if(!rafHandle) rafHandle=requestAnimationFrame(rafDraw);
-  playDeath(); // 🎵 death sound
+  if(!_rejoinFromCashout) playDeath(); // death sound only when actually killed
 
-  // Hide cashout & powerup buttons — dead player can't cashout, only rejoin or give up
+  // Update overlay text based on how they got here
+  const _headEl=document.getElementById('rjo-head');
+  if(_headEl) _headEl.textContent=_rejoinFromCashout?'REJOIN GAME?':'YOU WERE KILLED!';
+
+  // Hide cashout & powerup buttons — player can't act, only rejoin or give up
   const _pb=document.getElementById('pow-btns'); if(_pb) _pb.style.display='none';
   const _cw=document.getElementById('cash-btn-wrap'); if(_cw) _cw.style.display='none';
 
@@ -2273,14 +2283,22 @@ async function doRejoin(){
       name:_rjName, sol:ST.wagerSol||0
     });
     isSpectating=false;
-    _cashoutInProgress=false; ST.cashoutLamports=Math.floor((ST.wagerSol||0)*solanaWeb3.LAMPORTS_PER_SOL);
+    _rejoinFromCashout=false;
+    _cashoutInProgress=false;
+    ST.cashoutLamports=Math.floor((ST.wagerSol||0)*solanaWeb3.LAMPORTS_PER_SOL);
+    ST.hasEscrow=true;
+    if(G.spectators) G.spectators.delete(myPid);
     updateScoreboard();
 
     // Tell host (and all other guests via broadcast) that we're back
     if(ablyChannel) ablyChannel.publish('rejoin',{id:myPid, name:_rjName, sol:ST.wagerSol||0},()=>{});
 
-    // Close overlay
+    // Restore full in-game UI
     document.getElementById('rejoin-overlay').style.display='none';
+    const _sp=document.getElementById('spectate-panel'); if(_sp) _sp.style.display='none';
+    const _pb=document.getElementById('pow-btns'); if(_pb) _pb.style.display='flex';
+    const _cw=document.getElementById('cash-btn-wrap'); if(_cw) _cw.style.display='block';
+    _updatePowBtns(G.players.get(myPid));
     addToast('✅ BACK IN THE GAME!','#00FF7F');
     await refreshBal();
   }catch(e){
@@ -2295,6 +2313,7 @@ async function doRejoin(){
 
 function declineRejoin(){
   if(_rejoinCountdown){ clearInterval(_rejoinCountdown); _rejoinCountdown=null; }
+  _rejoinFromCashout=false;
   document.getElementById('rejoin-overlay').style.display='none';
   // Transition to spectate mode — stay connected and watch the live game
   isSpectating=true;
