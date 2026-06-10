@@ -1,4 +1,4 @@
-<!-- PAC ARENA v44 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v45 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -10,6 +10,11 @@
 <!-- AUTO CACHE-BUST: bumps version on every deploy → forces all players to fetch fresh page automatically -->
 <!-- Also handles bfcache (back-forward cache) which bypasses HTTP headers entirely -->
 <script>(function(){try{
+  // Redirect old deployment URL to canonical
+  if(location.hostname==='pac-arena-yc7l.vercel.app'){
+    location.replace('https://pac-arena.vercel.app'+location.pathname+location.search);
+    return;
+  }
   // Auto-update: fetch Vercel deployment ID from /api/version on every page load.
   // When a new deploy happens, the ID changes → we navigate to a URL unique to that
   // deployment (never cached by any browser) → fresh HTML is served automatically.
@@ -31,7 +36,7 @@
 // Block stale bfcache (back/forward navigation serving frozen game state)
 window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});
 })();</script>
-<title>PAC MONEY v44</title>
+<title>PAC MONEY v45</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
@@ -249,7 +254,7 @@ body{touch-action:manipulation;}
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
-    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v44</div>
+    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v45</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;">
     <div class="w-strip">
@@ -2516,9 +2521,13 @@ function _buildMazeCanvas(){
       mc.textAlign='center'; mc.textBaseline='middle';
       mc.fillText('🍒',x+T/2,y+T/2+1); mc.restore();
     } else if(v===4){
-      mc.save(); mc.font=Math.floor(T*0.82)+'px serif';
-      mc.textAlign='center'; mc.textBaseline='middle';
-      mc.fillText('🌶',x+T/2,y+T/2+1); mc.restore();
+      mc.save();
+      const cx=x+T/2,cy=y+T/2+T*0.05,pr=T*0.30;
+      mc.beginPath(); mc.ellipse(cx,cy,pr,pr*1.15,0,0,Math.PI*2);
+      mc.fillStyle='#FF2200'; mc.fill();
+      mc.beginPath(); mc.moveTo(cx,cy-pr); mc.quadraticCurveTo(cx+T*0.18,cy-pr-T*0.22,cx+T*0.10,cy-pr-T*0.28);
+      mc.strokeStyle='#22BB00'; mc.lineWidth=T*0.13; mc.lineCap='round'; mc.stroke();
+      mc.restore();
     }
   }
   _mazeDirty=false;
