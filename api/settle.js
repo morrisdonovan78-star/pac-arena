@@ -363,10 +363,14 @@ module.exports = async function handler(req, res) {
         console.log('[settle] kill attempt=' + attempt + ' bal=' + killBal + ' blockhash=' + killHash.slice(0,8) + '… killer=' + playerAddress.slice(0,8) + '… wager=' + body.wagerLamports);
         const killAvail = killBal - TX_FEE;
         if (killAvail <= 0) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'Escrow empty' }); }
-        // Cap kill reward at the killer's own KV-recorded wager (same lobby = same wager as victim).
+        // Kill reward is strictly capped by the killer's KV-recorded wager.
+        // Requiring a KV entry prevents anyone without an active deposit from draining escrow.
         const kvKillWager = Number(await kvGet('pw:' + playerAddress)) || 0;
-        const maxKill = kvKillWager > 0 ? kvKillWager : (Number(body.wagerLamports) || 0);
-        let total = Math.min(maxKill, killAvail);
+        if (kvKillWager <= 0) {
+          clearTimeout(guard); done = true;
+          return res.status(403).json({ error: 'No active wager on record — must join with a deposit before claiming kill rewards' });
+        }
+        let total = Math.min(kvKillWager, killAvail);
         // Sub-rent safety check: if remaining after payout would be between 0 and RENT_MIN, drain to 0
         const killRemaining = killAvail - total;
         if (killRemaining > 0 && killRemaining < RENT_MIN) { total = killAvail; }
@@ -397,12 +401,15 @@ module.exports = async function handler(req, res) {
     // ── lose ──────────────────────────────────────────────────────────────────
     if (action === 'lose') {
       const kvLoseWager = Number(await kvGet('pw:' + playerAddress)) || 0;
+      // Require KV entry — prevents draining escrow to creator for players not in an active game.
+      if (kvLoseWager <= 0) {
+        clearTimeout(guard); done = true;
+        return res.status(200).json({ sig: null, amount: 0, confirmed: true }); // nothing to do
+      }
       const { bal: loseBal, blockhash: loseHash } = await fetchBalAndHash(esc.pubkeyB58);
       const loseAvail = loseBal - TX_FEE;
       if (loseAvail <= 0) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'Escrow empty' }); }
-      // Use KV-recorded wager to limit how much is sent to creator for this player's loss.
-      // Falls back to full escrow available if KV not set.
-      const loseAmt = kvLoseWager > 0 ? Math.min(kvLoseWager, loseAvail) : loseAvail;
+      const loseAmt = Math.min(kvLoseWager, loseAvail);
       const remaining = loseAvail - loseAmt;
       const finalAmt  = (remaining > 0 && remaining < RENT_MIN) ? loseAvail : loseAmt;
       const tx = buildTx(esc, loseHash, [{ to: b58Decode(CREATOR_WALLET), lamports: finalAmt }]);

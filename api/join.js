@@ -5,7 +5,7 @@
 // 3. Stores wallet → wagerLamports in KV (settle.js reads this at cashout time).
 
 const nacl = require('tweetnacl');
-const { kvSet } = require('./kv');
+const { kvGet, kvSet } = require('./kv');
 
 const ESCROW_PUBKEY = '2SYFfCsSmKr8qwK1AfWd36JtAc1BCaRaSSxyECKUJjBb';
 const RPCS = [
@@ -113,9 +113,21 @@ module.exports = async function handler(req, res) {
       return res.status(403).json({ error: 'Invalid wallet signature' });
     }
 
+    // Replay guard — reject re-use of a txSig that was already registered.
+    // After cashout the KV wager entry is deleted, but an attacker could re-submit
+    // the same old txSig to recreate it and cashout again from other players' funds.
+    // We store tx:{txSig} for 24h so replays are blocked even after cashout.
+    const txKey = 'tx:' + txSig;
+    const alreadyUsed = await kvGet(txKey);
+    if (alreadyUsed !== null) {
+      return res.status(400).json({ error: 'Transaction already registered — make a new deposit to play again' });
+    }
+
     // On-chain tx proves they actually paid
     await verifyWagerTx(txSig, walletAddress, lamps);
 
+    // Store replay guard (24h) before the wager entry so even a partial failure blocks replay.
+    await kvSet(txKey, '1', 86400);
     // Store for 4 hours — more than enough for any game session
     await kvSet('pw:' + walletAddress, lamps, 14400);
 
