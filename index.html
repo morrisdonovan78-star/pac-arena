@@ -1,4 +1,4 @@
-<!-- PAC ARENA v50 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v51 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -36,7 +36,7 @@
 // Block stale bfcache (back/forward navigation serving frozen game state)
 window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});
 })();</script>
-<title>PAC MONEY v50</title>
+<title>PAC MONEY v51</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
@@ -254,7 +254,7 @@ body{touch-action:manipulation;}
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
-    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v50</div>
+    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v51</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;">
     <div class="w-strip">
@@ -291,7 +291,7 @@ body{touch-action:manipulation;}
       <div id="cust-hats" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:10px;"></div>
       <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:6px;">TRAIL</div>
       <div id="cust-trails" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:10px;"></div>
-      <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:6px;">EYES</div>
+      <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:6px;">BUFFS</div>
       <div id="cust-eyes" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:10px;"></div>
       <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:6px;">AURA</div>
       <div id="cust-aura" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;"></div>
@@ -658,7 +658,7 @@ const ST = { email:'', address:'', balance:0, solPrice:0, lobbyUsd:0, wagerSol:0
 // solPrice starts at 0 — fetchPrice() sets the real live value before anything displays it.
 
 // ── Pac-Man skin customization ───────────────────────────────────────────────
-const _SKIN_COLORS=['#FFD700','#FF69B4','#00FFFF','#FF4500','#39FF14','#CC44FF','#FFFFFF','#FF2222','#111111'];
+const _SKIN_COLORS=['#FFD700','#FF2D55','#00C8FF','#FF6D00','#39FF14','#BF5FFF','#FFFFFF','#FF375F','#00E5CC','#FFB300','#34C759','#111111'];
 const _SKIN_HATS  =['none','crown','bow','party','halo'];
 const _SKIN_TRAILS=['none','fire','ice','rainbow','ghost'];
 const _SKIN_EYES  =['dot','shades','star','alien'];
@@ -2582,27 +2582,38 @@ function _buildMazeCanvas(){
 
 function drawEye(ec,r,eyes){
   if(!eyes||eyes==='dot'){
-    ec.fillStyle='#000'; ec.beginPath(); ec.arc(r*0.35,-r*0.38,r*0.11,0,Math.PI*2); ec.fill();
+    ec.fillStyle='#000'; ec.beginPath(); ec.arc(r*0.35,-r*0.38,r*0.12,0,Math.PI*2); ec.fill();
   } else if(eyes==='shades'){
-    ec.fillStyle='rgba(8,8,8,0.92)';
-    ec.beginPath(); ec.roundRect(-r*0.52,-r*0.65,r*1.04,r*0.40,r*0.08); ec.fill();
-    ec.fillStyle='rgba(255,255,255,0.10)';
-    ec.fillRect(-r*0.49,-r*0.61,r*0.44,r*0.13);
-    ec.fillRect(r*0.07,-r*0.61,r*0.44,r*0.13);
+    ec.save();
+    const ly=-r*0.38, lr2=r*0.27;
+    // Left lens — dark blue tint + silver frame
+    ec.fillStyle='rgba(0,20,60,0.85)';
+    ec.strokeStyle='#C0C0C0'; ec.lineWidth=Math.max(1,r*0.1);
+    ec.beginPath(); ec.arc(-r*0.28,ly,lr2,0,Math.PI*2); ec.fill(); ec.stroke();
+    // Right lens
+    ec.beginPath(); ec.arc(r*0.30,ly,lr2,0,Math.PI*2); ec.fill(); ec.stroke();
+    // Bridge
+    ec.beginPath(); ec.moveTo(-r*0.01,ly); ec.lineTo(r*0.03,ly);
+    ec.strokeStyle='#D0D0D0'; ec.lineWidth=Math.max(1,r*0.07); ec.stroke();
+    // Lens shine (top-left reflection in each lens)
+    ec.fillStyle='rgba(255,255,255,0.28)';
+    ec.beginPath(); ec.arc(-r*0.37,ly-lr2*0.32,lr2*0.32,0,Math.PI*2); ec.fill();
+    ec.beginPath(); ec.arc(r*0.21,ly-lr2*0.32,lr2*0.32,0,Math.PI*2); ec.fill();
+    ec.restore();
   } else if(eyes==='star'){
-    ec.save(); ec.translate(r*0.3,-r*0.40);
-    const sr=r*0.15;
-    ec.fillStyle='#FFD700';
+    ec.save(); ec.translate(r*0.30,-r*0.40);
+    const sr=r*0.16;
+    ec.fillStyle='#FFD700'; ec.shadowColor='#FFD700'; ec.shadowBlur=4;
     ec.beginPath();
     for(let i=0;i<8;i++){
       const ang=i*Math.PI/4-Math.PI/2, ri=i%2===0?sr:sr*0.38;
       i===0?ec.moveTo(Math.cos(ang)*ri,Math.sin(ang)*ri):ec.lineTo(Math.cos(ang)*ri,Math.sin(ang)*ri);
     }
-    ec.closePath(); ec.fill(); ec.restore();
+    ec.closePath(); ec.fill(); ec.shadowBlur=0; ec.restore();
   } else if(eyes==='alien'){
     ec.fillStyle='#39FF14'; ec.shadowColor='#39FF14'; ec.shadowBlur=6;
-    ec.beginPath(); ec.ellipse(r*0.17,-r*0.38,r*0.12,r*0.08,0,0,Math.PI*2); ec.fill();
-    ec.beginPath(); ec.ellipse(r*0.54,-r*0.38,r*0.12,r*0.08,0,0,Math.PI*2); ec.fill();
+    ec.beginPath(); ec.ellipse(r*0.17,-r*0.38,r*0.13,r*0.09,0,0,Math.PI*2); ec.fill();
+    ec.beginPath(); ec.ellipse(r*0.54,-r*0.38,r*0.13,r*0.09,0,0,Math.PI*2); ec.fill();
     ec.shadowBlur=0;
   }
 }
@@ -2720,7 +2731,7 @@ function initCustomizePanel(){
   }
 
   if(eyesWrap){
-    const el={dot:'● DOT',shades:'🕶 SHADES',star:'★ STAR',alien:'👽 ALIEN'};
+    const el={dot:'CLEAN',shades:'🕶 SHADES',star:'⭐ STAR',alien:'👽 ALIEN'};
     _SKIN_EYES.forEach(e=>{
       eyesWrap.appendChild(_custBtn(el[e]||e.toUpperCase(),_mySkin.eyes===e,'#00FFFF',()=>{ _mySkin.eyes=e; saveSkin(); initCustomizePanel(); drawSkinPreview(); }));
     });
@@ -2797,12 +2808,17 @@ function draw(){
     }
   });
 
-  // ── Update trail positions (render-only, not game state) ──────
+  // ── Update trail positions — distance-based so trail stretches out ──
   G.players.forEach(p=>{
     if(!p._trail) p._trail=[];
     if(p.trail&&p.trail!=='none'){
-      p._trail.push({x:p.renderX,y:p.renderY});
-      if(p._trail.length>7) p._trail.shift();
+      const last=p._trail[p._trail.length-1];
+      const ddx=p.renderX-(last?last.x:p.renderX+99);
+      const ddy=p.renderY-(last?last.y:p.renderY+99);
+      if(!last||ddx*ddx+ddy*ddy>0.025){
+        p._trail.push({x:p.renderX,y:p.renderY});
+        if(p._trail.length>16) p._trail.shift();
+      }
     } else { p._trail.length=0; }
   });
 
@@ -2815,17 +2831,26 @@ function draw(){
     const trl=p._trail;
     if(trl&&trl.length>1&&p.trail!=='none'){
       const n=trl.length;
-      for(let i=0;i<n-1;i++){
-        const f=(i+1)/n;
+      const tt=p.trail;
+      for(let i=0;i<n;i++){
+        const f=(i+1)/n;           // 0→old  1→newest (closest to player)
         const trx=trl[i].x*T+T/2, try_=trl[i].y*T+T/2;
+        const tr=r*(0.22+f*0.62);  // small at tail, large near player
         let tcol;
-        const tt=p.trail;
-        if(tt==='fire')    tcol=`rgba(255,${Math.floor(60+140*f)},0,${f*0.55})`;
-        else if(tt==='ice')     tcol=`rgba(${Math.floor(60*f)},${Math.floor(160+80*f)},255,${f*0.55})`;
-        else if(tt==='ghost')   tcol=`rgba(210,230,255,${f*0.38})`;
-        else if(tt==='rainbow') tcol=`hsla(${(now*0.18+i*55)%360},100%,70%,${f*0.55})`;
+        if(tt==='fire'){
+          const g=Math.floor(30+180*f);
+          tcol=`rgba(255,${g},0,${0.15+f*0.6})`;
+        } else if(tt==='ice'){
+          const b=Math.floor(180+60*f);
+          tcol=`rgba(${Math.floor(80-60*f)},${Math.floor(180+40*f)},${b},${0.15+f*0.6})`;
+        } else if(tt==='ghost'){
+          tcol=`rgba(200,220,255,${0.08+f*0.35})`;
+        } else if(tt==='rainbow'){
+          const hue=((now*0.12)+(i/n)*220)%360;
+          tcol=`hsla(${hue},100%,65%,${0.12+f*0.58})`;
+        }
         ctx.fillStyle=tcol;
-        ctx.beginPath(); ctx.arc(trx,try_,r*f*0.72,0,Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(trx,try_,tr,0,Math.PI*2); ctx.fill();
       }
     }
     const vdx=(p.nx!==0||p.ny!==0)?p.nx:p.dx;
