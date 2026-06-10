@@ -1,4 +1,4 @@
-<!-- PAC ARENA v45 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v46 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -36,7 +36,7 @@
 // Block stale bfcache (back/forward navigation serving frozen game state)
 window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});
 })();</script>
-<title>PAC MONEY v45</title>
+<title>PAC MONEY v46</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
@@ -250,11 +250,11 @@ body{touch-action:manipulation;}
 
 <!-- HOME -->
 <div id="scr-home" class="scr on">
-  <div class="ghosts"><span class="gf">🍒</span><span class="gf">🌶️</span><span class="gf">🍒</span><span class="gf">🌶️</span></div>
+  <div class="ghosts"><span class="gf">🍒</span><span class="gf"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="32" viewBox="0 0 18 22"><ellipse cx="9" cy="14" rx="6.5" ry="7.5" fill="#FF2200"/><path d="M9 7 Q14 2 11 0" stroke="#22BB00" stroke-width="2.5" stroke-linecap="round" fill="none"/></svg></span><span class="gf">🍒</span><span class="gf"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="32" viewBox="0 0 18 22"><ellipse cx="9" cy="14" rx="6.5" ry="7.5" fill="#FF2200"/><path d="M9 7 Q14 2 11 0" stroke="#22BB00" stroke-width="2.5" stroke-linecap="round" fill="none"/></svg></span></div>
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
-    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v45</div>
+    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v46</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;">
     <div class="w-strip">
@@ -276,7 +276,7 @@ body{touch-action:manipulation;}
       <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);line-height:2.6;">
         ↑↓←→ &nbsp;MOVE<br>
         V &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;USE CHERRY 🍒 (KILL MODE)<br>
-        C &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;USE PEPPER 🌶 (SPEED BOOST)<br>
+        C &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;USE PEPPER <svg xmlns="http://www.w3.org/2000/svg" width="10" height="12" viewBox="0 0 18 22" style="vertical-align:middle"><ellipse cx="9" cy="14" rx="6.5" ry="7.5" fill="#FF2200"/><path d="M9 7 Q14 2 11 0" stroke="#22BB00" stroke-width="2.5" stroke-linecap="round" fill="none"/></svg> (SPEED BOOST)<br>
         T &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CHAT<br>
         SPACE &nbsp;CASH OUT
       </div>
@@ -485,7 +485,7 @@ body{touch-action:manipulation;}
   <!-- Powerup use buttons — bottom-right corner -->
   <div id="pow-btns" style="position:fixed;bottom:8px;right:8px;z-index:100;display:none;flex-direction:column;align-items:center;gap:6px;">
     <button id="cherry-use-btn" class="pow-use-btn cherry-btn" style="opacity:0.35;">🍒<br>KILL</button>
-    <button id="pepper-use-btn" class="pow-use-btn pepper-btn" style="opacity:0.35;">🌶<br>SPEED</button>
+    <button id="pepper-use-btn" class="pow-use-btn pepper-btn" style="opacity:0.35;"><svg xmlns="http://www.w3.org/2000/svg" width="22" height="25" viewBox="0 0 18 22"><ellipse cx="9" cy="14" rx="6.5" ry="7.5" fill="#FF2200"/><path d="M9 7 Q14 2 11 0" stroke="#22BB00" stroke-width="2.5" stroke-linecap="round" fill="none"/></svg><br>SPEED</button>
   </div>
 </div>
 
@@ -2644,8 +2644,8 @@ function draw(){
     // LEFT of name = powerup being carried (held, ready to use)
     // RIGHT of name = powerup currently active (in use right now)
     const displayName=isMe?myName:(p.name||('P'+(p.num+1)));
-    const heldBadge=(p.held||[]).map(h=>h==='cherry'?'🍒':h==='pepper'?'🌶':'').join('');
-    const activeBadge=(p.pow?'🍒':'')+(p.pep?'🌶':'');
+    const heldBadge=(p.held||[]).map(h=>h==='cherry'?'🍒':h==='pepper'?'[S]':'').join('');
+    const activeBadge=(p.pow?'🍒':'')+(p.pep?'[S!]':'');
     const label=(heldBadge?heldBadge+' ':'')+displayName+(activeBadge?' '+activeBadge:'');
     // Show wager in SOL above the name — same for all players in a paid lobby
     const solAmt=isMe?(ST.wagerSol||0):(p.sol||ST.wagerSol||0);
@@ -2675,7 +2675,7 @@ function draw(){
     const lfs=Math.max(5,Math.floor(T*0.26));
     // Held powerup display (bottom-left)
     const _hl=me.held||[];
-    const holdLabel=_hl.length===0?'-- no powerup held --':_hl.length===2?'🍒 V=KILL  🌶 C=SPEED':_hl[0]==='cherry'?'🍒 KILL MODE — press V (or tap 🍒)':'🌶 SPEED BOOST — press C (or tap 🌶)';
+    const holdLabel=_hl.length===0?'-- no powerup held --':_hl.length===2?'🍒 V=KILL  [S] C=SPEED':_hl[0]==='cherry'?'🍒 KILL MODE — press V (or tap 🍒)':'[S] SPEED BOOST — press C (or tap button)';
     const holdCol=_hl.length===0?'rgba(255,255,255,0.25)':_hl.length===2?'#FFD700':_hl[0]==='cherry'?'#FF6347':'#39FF14';
     ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(bx-2,by-lfs-2,bw+4,lfs+6);
     ctx.fillStyle=holdCol; ctx.font='bold '+lfs+'px monospace'; ctx.textAlign='left';
@@ -2702,7 +2702,7 @@ function draw(){
       ctx.shadowBlur=0;
       ctx.strokeStyle='rgba(57,255,20,0.4)'; ctx.strokeRect(cx,cy,bw,bh);
       ctx.fillStyle='#39FF14'; ctx.font='bold '+lfs+'px monospace'; ctx.textAlign='left';
-      ctx.fillText('🌶 SPEED '+Math.ceil(me.pet/30)+'s',cx,cy-2);
+      ctx.fillText('SPEED '+Math.ceil(me.pet/30)+'s',cx,cy-2);
     }
   }
 
