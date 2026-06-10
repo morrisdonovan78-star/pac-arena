@@ -1,4 +1,4 @@
-<!-- PAC ARENA v41 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v42 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -31,7 +31,7 @@
 // Block stale bfcache (back/forward navigation serving frozen game state)
 window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});
 })();</script>
-<title>PAC MONEY v41</title>
+<title>PAC MONEY v42</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
@@ -249,7 +249,7 @@ body{touch-action:manipulation;}
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
-    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v41</div>
+    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v42</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;">
     <div class="w-strip">
@@ -1204,10 +1204,13 @@ async function pkConnect(roomId, paidAblyToken){
   myPid=clientId;
   try{
     // ── Step 1: get Ably token ─────────────────────────────────────────────────
-    // For paid lobbies: use the token issued by join.js after deposit verification.
-    //   That token has capability only for the specific paid channel — Ably itself
-    //   blocks presence.enter() without it, so payment bypass is impossible.
-    // For free lobby: fetch a restricted token from ably-token.js (free channel only).
+    // Paid lobbies MUST have a token issued by join.js after deposit verification.
+    // Guard here so console-bypass attempts (pkConnect('gold-lobby')) fail immediately
+    // before Ably is even contacted — the Ably capability restriction is a second layer.
+    const isPaidLobby = roomId==='gold-lobby' || roomId==='diamond-lobby';
+    if(isPaidLobby && !paidAblyToken){
+      throw new Error('Paid lobby requires a verified deposit — use the lobby buttons to join');
+    }
     let ablyToken=paidAblyToken||null;
     if(!ablyToken){
       try{
