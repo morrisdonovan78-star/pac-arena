@@ -1,7 +1,7 @@
 // api/settle.js — tweetnacl only, no @solana/web3.js (ESM/runtime issues)
 'use strict';
 const nacl = require('tweetnacl');
-const { kvGet, kvDel } = require('./kv');
+const { kvGet, kvDel } = require('../lib/kv');
 
 // ── Ed25519 wallet signature verification ─────────────────────────────────────
 // The client signs: "pac-arena:{action}:{playerAddress}:{wagerLamports}:{unixTs}"

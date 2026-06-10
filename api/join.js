@@ -6,7 +6,7 @@
 
 const nacl   = require('tweetnacl');
 const crypto = require('crypto');
-const { kvGet, kvSet } = require('./kv');
+const { kvGet, kvSet } = require('../lib/kv');
 
 // Signed entry token — proves this wallet went through join.js with a real deposit.
 // Token is HMAC(SETTLE_SECRET, "entry:{address}:{lobby}:{10-min-window}").

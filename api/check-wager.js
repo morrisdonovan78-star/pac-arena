@@ -1,7 +1,7 @@
 'use strict';
 // Returns whether a wallet address has an active server-recorded wager.
 // Used by the game host to reject players who joined without paying.
-const { kvGet } = require('./kv');
+const { kvGet } = require('../lib/kv');
 
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
