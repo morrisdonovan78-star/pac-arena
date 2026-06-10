@@ -1,4 +1,4 @@
-<!-- PAC ARENA v49 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v50 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -36,7 +36,7 @@
 // Block stale bfcache (back/forward navigation serving frozen game state)
 window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});
 })();</script>
-<title>PAC MONEY v49</title>
+<title>PAC MONEY v50</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
@@ -254,7 +254,7 @@ body{touch-action:manipulation;}
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
-    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v49</div>
+    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v50</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;">
     <div class="w-strip">
@@ -658,7 +658,7 @@ const ST = { email:'', address:'', balance:0, solPrice:0, lobbyUsd:0, wagerSol:0
 // solPrice starts at 0 — fetchPrice() sets the real live value before anything displays it.
 
 // ── Pac-Man skin customization ───────────────────────────────────────────────
-const _SKIN_COLORS=['#FFD700','#FF69B4','#00FFFF','#FF4500','#39FF14','#CC44FF','#FFFFFF','#FF2222'];
+const _SKIN_COLORS=['#FFD700','#FF69B4','#00FFFF','#FF4500','#39FF14','#CC44FF','#FFFFFF','#FF2222','#111111'];
 const _SKIN_HATS  =['none','crown','bow','party','halo'];
 const _SKIN_TRAILS=['none','fire','ice','rainbow','ghost'];
 const _SKIN_EYES  =['dot','shades','star','alien'];
@@ -1338,7 +1338,7 @@ async function pkConnect(roomId, paidAblyToken){
       // If game already running and we're host, add them + reply with full roster
       if(G&&!G.over&&isHost){
         if(!G.players.has(d.id))
-          addPlayer({ id:d.id, num:G.players.size, color:d.color||colorFromId(d.id), hat:d.hat||'none', spawn:d.spawn||[14,18], name:d.name||'', sol:d.sol||0 });
+          addPlayer({ id:d.id, num:G.players.size, color:d.color||colorFromId(d.id), hat:d.hat||'none', trail:d.trail||'none', eyes:d.eyes||'dot', aura:d.aura||'none', spawn:d.spawn||[14,18], name:d.name||'', sol:d.sol||0 });
         const rp=[]; hellos.forEach(h=>rp.push(h));
         ablyChannel.publish('roster',{players:rp},()=>{});
       }
@@ -1419,6 +1419,7 @@ async function pkConnect(roomId, paidAblyToken){
           const sp=rndSpawn();
           G.players.set(d.id,{
             id:d.id, num:G.players.size, color:d.color||colorFromId(d.id), hat:d.hat||'none',
+            trail:d.trail||'none', eyes:d.eyes||'dot', aura:d.aura||'none', _trail:[],
             x:sp.x, y:sp.y, dx:0, dy:0, nx:0, ny:0,
             prevX:sp.x, prevY:sp.y, renderX:sp.x, renderY:sp.y,
             sc:0, lives:1, pow:false, pt:0, mc:0, pep:false, pet:0, held:[],
@@ -1498,7 +1499,8 @@ async function pkConnect(roomId, paidAblyToken){
     // Sort by join-time; use id as stable tiebreaker
     const allPlayers=[...hellos.values()]
       .sort((a,b)=>(a.ts-b.ts)||(a.id<b.id?-1:1))
-      .map((h,i)=>({ id:h.id, num:i, color:h.color||colorFromId(h.id), spawn:h.spawn||[14,18], name:h.name||'', sol:h.sol||0 }));
+      .map((h,i)=>({ id:h.id, num:i, color:h.color||colorFromId(h.id), spawn:h.spawn||[14,18], name:h.name||'', sol:h.sol||0,
+        hat:h.hat||'none', trail:h.trail||'none', eyes:h.eyes||'dot', aura:h.aura||'none' }));
 
     isHost=allPlayers.length>0&&allPlayers[0].id===myPid;
     initGame(allPlayers);
@@ -1552,6 +1554,7 @@ function applyRemoteState(d){
     if(!p){
       const _sh=hellos.get(id)||{};
       G.players.set(id,{ id, num:G.players.size, color:_sh.color||colorFromId(id), hat:_sh.hat||'none',
+        trail:_sh.trail||'none', eyes:_sh.eyes||'dot', aura:_sh.aura||'none', _trail:[],
         x, y, dx, dy, nx:dx, ny:dy, sc, lives, pow:!!pow, pt, mc:0,
         pep:!!pep, pet:pet||0, held:heldVal,
         name:_sh.name||'', sol:ST.wagerSol||0,
