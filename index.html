@@ -1,4 +1,4 @@
-<!-- PAC ARENA v43 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v44 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -31,7 +31,7 @@
 // Block stale bfcache (back/forward navigation serving frozen game state)
 window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});
 })();</script>
-<title>PAC MONEY v43</title>
+<title>PAC MONEY v44</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
@@ -249,7 +249,7 @@ body{touch-action:manipulation;}
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
-    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v43</div>
+    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v44</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;">
     <div class="w-strip">
@@ -1262,7 +1262,8 @@ async function pkConnect(roomId, paidAblyToken){
     const myHello={
       id:myPid, spawn:[sp.x,sp.y], color:colorFromId(myPid), ts:_myHelloTs,
       name: ST.email ? ST.email.split('@')[0].slice(0,8).toUpperCase() : '',
-      sol:  ST.wagerSol || 0
+      sol:  ST.wagerSol || 0,
+      et:   ST.entryToken || null  // HMAC proof of payment — verified server-side by host/guests
     };
 
     // hellos map: id → {id,spawn,color,ts}  — everyone we know about in this lobby
@@ -1273,16 +1274,19 @@ async function pkConnect(roomId, paidAblyToken){
     ablyChannel.subscribe('hello',async(msg)=>{
       const d=msg.data;
       if(!d||!d.id||d.id===myPid) return;
-      // In paid lobbies, host verifies the new player has a server-recorded wager
-      // before admitting them. This blocks players who joined without paying even if
-      // they have an old Ably token with unrestricted capability.
+      // In paid lobbies, host verifies the new player's signed entry token before admitting them.
+      // Entry tokens are issued by join.js only after a verified on-chain deposit — unforgeable.
       if(ST.lobbyUsd>0&&isHost){
         try{
-          const ck=await fetch('/api/check-wager?address='+encodeURIComponent(d.id));
+          if(!d.et){
+            console.warn('[host] rejected player with no entry token:',d.id.slice(0,8)+'…');
+            return;
+          }
+          const ck=await fetch('/api/verify-entry?address='+encodeURIComponent(d.id)+'&lobby='+encodeURIComponent(pkRoomId)+'&token='+encodeURIComponent(d.et));
           const cd=await ck.json();
-          if(!cd.hasWager){
-            console.warn('[host] rejected unpaid player:',d.id.slice(0,8)+'…');
-            return; // drop silently — don't add to game or reply
+          if(!cd.valid){
+            console.warn('[host] rejected unverified player:',d.id.slice(0,8)+'…');
+            return;
           }
         }catch(_){ /* API down — allow to avoid blocking legit players */ }
       }
@@ -1297,8 +1301,26 @@ async function pkConnect(roomId, paidAblyToken){
     });
 
     // ── roster: host sends full player list to late joiners ─
-    ablyChannel.subscribe('roster',(msg)=>{
+    let _hostVerified=false;
+    ablyChannel.subscribe('roster',async(msg)=>{
       if(!msg.data||!msg.data.players) return;
+      // Guests verify the host's entry token on first roster receipt.
+      // Prevents a free-rider from being host and collecting kill payouts they didn't pay for.
+      if(!isHost&&ST.lobbyUsd>0&&!_hostVerified){
+        _hostVerified=true;
+        const hostHello=msg.data.players.find(h=>h.id!==myPid&&h.et);
+        if(hostHello){
+          try{
+            const ck=await fetch('/api/verify-entry?address='+encodeURIComponent(hostHello.id)+'&lobby='+encodeURIComponent(pkRoomId)+'&token='+encodeURIComponent(hostHello.et));
+            const cd=await ck.json();
+            if(!cd.valid){
+              addToast('Host payment not verified — leaving lobby','#FF4444');
+              leaveGame();
+              return;
+            }
+          }catch(_){}
+        }
+      }
       msg.data.players.forEach(h=>{
         if(h.id&&h.id!==myPid&&!hellos.has(h.id)) hellos.set(h.id,h);
       });
@@ -1580,6 +1602,7 @@ async function joinLobby(usd){
     const roomId=usd===1?'gold-lobby':'diamond-lobby';
     const joinResult=await recordWager(ST.address, lamps, sig, roomId);
     const paidAblyToken=joinResult.ablyToken||null;
+    ST.entryToken=joinResult.entryToken||null; // HMAC proof of payment — included in hello
     document.getElementById('mm-sub').textContent='Wager locked · Joining live lobby…';
     await refreshBal();
     pkConnect(roomId, paidAblyToken);
@@ -2755,9 +2778,11 @@ async function endGame(reason){
   }
 }
 
-// Tell the server what this player wagered and get back a lobby-specific Ably token.
-// The returned token has capability ONLY for the paid lobby channel — without it, Ably
-// will reject the player's presence.enter() and they cannot enter the game.
+// Tell the server what this player wagered.
+// Returns { ok, recorded, ablyToken, entryToken }.
+// ablyToken  — Ably token with capability only for the paid lobby channel.
+// entryToken — HMAC-signed proof of payment; included in hello so host/guests can
+//              verify each other server-side via /api/verify-entry (can't be forged).
 async function recordWager(walletAddress, wagerLamports, txSig, lobbyId) {
   const {sig, ts} = signSettleMsg('join', walletAddress, wagerLamports);
   const r = await fetch('/api/join', {
@@ -2767,7 +2792,7 @@ async function recordWager(walletAddress, wagerLamports, txSig, lobbyId) {
   });
   const d = await r.json().catch(()=>({}));
   if (!r.ok) throw new Error(d.error || 'join failed');
-  return d; // { ok, recorded, ablyToken }
+  return d;
 }
 
 // Sign a settle request with the player's own wallet private key.

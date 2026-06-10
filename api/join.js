@@ -4,8 +4,21 @@
 // 2. Verifies the on-chain tx (proves they actually paid).
 // 3. Stores wallet → wagerLamports in KV (settle.js reads this at cashout time).
 
-const nacl = require('tweetnacl');
+const nacl   = require('tweetnacl');
+const crypto = require('crypto');
 const { kvGet, kvSet } = require('./kv');
+
+// Signed entry token — proves this wallet went through join.js with a real deposit.
+// Token is HMAC(SETTLE_SECRET, "entry:{address}:{lobby}:{10-min-window}").
+// The host and guests verify this via /api/verify-entry before admitting a player.
+function makeEntryToken(walletAddress, lobbyId) {
+  const secret = process.env.SETTLE_SECRET || '';
+  if (!secret) return null;
+  const w = Math.floor(Date.now() / 600_000); // 10-minute window
+  return crypto.createHmac('sha256', secret)
+    .update('entry:' + walletAddress + ':' + lobbyId + ':' + w)
+    .digest('hex').slice(0, 32);
+}
 
 const ESCROW_PUBKEY = '2SYFfCsSmKr8qwK1AfWd36JtAc1BCaRaSSxyECKUJjBb';
 
@@ -165,11 +178,10 @@ module.exports = async function handler(req, res) {
     // The client uses this to connect to the lobby instead of the default free-only token.
     // Without a successful join.js call (verified deposit), the player can't get a paid token.
     const VALID_LOBBIES = new Set(['gold-lobby', 'diamond-lobby']);
-    const ablyToken = VALID_LOBBIES.has(lobbyId)
-      ? await issueAblyLobbyToken(walletAddress, lobbyId)
-      : null;
+    const ablyToken  = VALID_LOBBIES.has(lobbyId) ? await issueAblyLobbyToken(walletAddress, lobbyId) : null;
+    const entryToken = VALID_LOBBIES.has(lobbyId) ? makeEntryToken(walletAddress, lobbyId) : null;
 
-    return res.status(200).json({ ok: true, recorded: lamps, ablyToken });
+    return res.status(200).json({ ok: true, recorded: lamps, ablyToken, entryToken });
   } catch (e) {
     console.error('[join]', e.message);
     return res.status(500).json({ error: e.message });
