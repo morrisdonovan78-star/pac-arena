@@ -1,4 +1,4 @@
-<!-- PAC ARENA v37 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v38 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -31,7 +31,7 @@
 // Block stale bfcache (back/forward navigation serving frozen game state)
 window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});
 })();</script>
-<title>PAC MONEY v37</title>
+<title>PAC MONEY v38</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
@@ -249,7 +249,7 @@ body{touch-action:manipulation;}
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
-    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v37</div>
+    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v38</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;">
     <div class="w-strip">
@@ -1552,6 +1552,8 @@ async function joinLobby(usd){
     await ST.conn.confirmTransaction({signature:sig,blockhash:lb.blockhash,lastValidBlockHeight:lb.lastValidBlockHeight},'confirmed');
     ST.hasEscrow=true;
     lg('mm-log','Deposit confirmed ✓','lok');
+    // Record wager server-side so settle.js can enforce the correct cashout amount.
+    await recordWager(ST.address, lamps, sig).catch(e=>console.warn('[join]',e.message));
     document.getElementById('mm-sub').textContent='Wager locked · Joining live lobby…';
     await refreshBal();
     const roomId=usd===1?'gold-lobby':'diamond-lobby';
@@ -2044,6 +2046,7 @@ async function doRejoin(){
     await signLocalTx(tx);
     const sig=await ST.conn.sendRawTransaction(tx.serialize());
     await ST.conn.confirmTransaction({signature:sig,blockhash:lb.blockhash,lastValidBlockHeight:lb.lastValidBlockHeight},'confirmed');
+    await recordWager(ST.address, lamps, sig).catch(e=>console.warn('[join-rejoin]',e.message));
 
     // Payment confirmed — cancel the countdown
     if(_rejoinCountdown){ clearInterval(_rejoinCountdown); _rejoinCountdown=null; }
@@ -2719,6 +2722,18 @@ async function endGame(reason){
   } else {
     await refreshBal();
   }
+}
+
+// Tell the server what this player wagered so it can enforce the correct cashout amount.
+async function recordWager(walletAddress, wagerLamports, txSig) {
+  const {sig, ts} = signSettleMsg('join', walletAddress, wagerLamports);
+  const r = await fetch('/api/join', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json','x-settle-sig':sig,'x-settle-ts':String(ts)},
+    body: JSON.stringify({walletAddress, wagerLamports, txSig})
+  });
+  const d = await r.json().catch(()=>({}));
+  if (!r.ok) throw new Error(d.error || 'join failed');
 }
 
 // Sign a settle request with the player's own wallet private key.

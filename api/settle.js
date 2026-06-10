@@ -1,6 +1,7 @@
 // api/settle.js — tweetnacl only, no @solana/web3.js (ESM/runtime issues)
 'use strict';
 const nacl = require('tweetnacl');
+const { kvGet, kvDel } = require('./kv');
 
 // ── Ed25519 wallet signature verification ─────────────────────────────────────
 // The client signs: "pac-arena:{action}:{playerAddress}:{wagerLamports}:{unixTs}"
@@ -299,7 +300,11 @@ module.exports = async function handler(req, res) {
       if (!playerAddress) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'playerAddress required' }); }
       const playerPubkey = b58Decode(playerAddress);
       if (playerPubkey.length !== 32) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'playerAddress must be a 32-byte Solana address' }); }
-      const wagerLamports = Number(body.wagerLamports) || 0;
+      // Use KV-recorded wager if available — prevents player from inflating their cashout amount.
+      // Falls back to client's value when KV is not configured or player is in a free lobby.
+      const kvWager = Number(await kvGet('pw:' + playerAddress)) || 0;
+      const wagerLamports = kvWager > 0 ? kvWager : (Number(body.wagerLamports) || 0);
+      console.log('[settle] cashout kv=' + kvWager + ' client=' + (Number(body.wagerLamports)||0) + ' using=' + wagerLamports);
 
       // Retry once if on-chain execution fails — a concurrent kill tx may have changed the
       // balance between our balance check and our tx submission. Re-fetching fixes it.
@@ -329,6 +334,7 @@ module.exports = async function handler(req, res) {
           const tx = buildTx(esc, blockhash, transfers);
           const result = await sendAndConfirm(tx);
           sig = result.sig; txConfirmed = result.confirmed;
+          await kvDel('pw:' + playerAddress); // wager claimed — remove so it can't be replayed
           break; // success — exit retry loop
         } catch (e) {
           const isOnChainFail = e.message.includes('TX rejected') || e.message.includes('insufficient') || e.message.includes('0x1') || e.message.includes('-32002') || e.message.includes('Send failed');
@@ -357,7 +363,10 @@ module.exports = async function handler(req, res) {
         console.log('[settle] kill attempt=' + attempt + ' bal=' + killBal + ' blockhash=' + killHash.slice(0,8) + '… killer=' + playerAddress.slice(0,8) + '… wager=' + body.wagerLamports);
         const killAvail = killBal - TX_FEE;
         if (killAvail <= 0) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'Escrow empty' }); }
-        let total = Math.min(Number(body.wagerLamports), killAvail);
+        // Cap kill reward at the killer's own KV-recorded wager (same lobby = same wager as victim).
+        const kvKillWager = Number(await kvGet('pw:' + playerAddress)) || 0;
+        const maxKill = kvKillWager > 0 ? kvKillWager : (Number(body.wagerLamports) || 0);
+        let total = Math.min(maxKill, killAvail);
         // Sub-rent safety check: if remaining after payout would be between 0 and RENT_MIN, drain to 0
         const killRemaining = killAvail - total;
         if (killRemaining > 0 && killRemaining < RENT_MIN) { total = killAvail; }
@@ -387,14 +396,20 @@ module.exports = async function handler(req, res) {
 
     // ── lose ──────────────────────────────────────────────────────────────────
     if (action === 'lose') {
+      const kvLoseWager = Number(await kvGet('pw:' + playerAddress)) || 0;
       const { bal: loseBal, blockhash: loseHash } = await fetchBalAndHash(esc.pubkeyB58);
       const loseAvail = loseBal - TX_FEE;
       if (loseAvail <= 0) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'Escrow empty' }); }
-      const avail = loseAvail; // alias for buildTx call below
-      const tx = buildTx(esc, loseHash, [{ to: b58Decode(CREATOR_WALLET), lamports: avail }]);
+      // Use KV-recorded wager to limit how much is sent to creator for this player's loss.
+      // Falls back to full escrow available if KV not set.
+      const loseAmt = kvLoseWager > 0 ? Math.min(kvLoseWager, loseAvail) : loseAvail;
+      const remaining = loseAvail - loseAmt;
+      const finalAmt  = (remaining > 0 && remaining < RENT_MIN) ? loseAvail : loseAmt;
+      const tx = buildTx(esc, loseHash, [{ to: b58Decode(CREATOR_WALLET), lamports: finalAmt }]);
       const { sig: loseSig, confirmed: loseConfirmed } = await sendAndConfirm(tx);
+      await kvDel('pw:' + playerAddress);
       clearTimeout(guard); done = true;
-      return res.status(200).json({ sig: loseSig, amount: avail, confirmed: loseConfirmed });
+      return res.status(200).json({ sig: loseSig, amount: finalAmt, confirmed: loseConfirmed });
     }
 
     clearTimeout(guard); done = true;
