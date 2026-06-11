@@ -3025,6 +3025,10 @@ function draw(){
     const _ty=(_cme0.renderY!==undefined?_cme0.renderY+0.5:_cme0.y+0.5)*T;
     _camX+=(_tx-_camX)*0.18; _camY+=(_ty-_camY)*0.18;
   }
+  // Clamp camera so it never shows black outside the maze edges
+  const _visW=canvas.width/_camZoom, _visH=canvas.height/_camZoom;
+  _camX=Math.max(_visW/2, Math.min(C*T-_visW/2, _camX));
+  _camY=Math.max(_visH/2, Math.min(R*T-_visH/2, _camY));
   ctx.save();
   ctx.translate(canvas.width/2,canvas.height/2);
   ctx.scale(_camZoom,_camZoom);
