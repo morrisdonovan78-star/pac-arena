@@ -1,4 +1,4 @@
-<!-- PAC ARENA v3 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v4 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -36,7 +36,7 @@
 // Block stale bfcache (back/forward navigation serving frozen game state)
 window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});
 })();</script>
-<title>PAC MONEY v3</title>
+<title>PAC MONEY v4</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
@@ -254,7 +254,7 @@ body{touch-action:manipulation;}
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
-    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v3</div>
+    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v4</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;">
     <div class="w-strip">
@@ -2250,6 +2250,9 @@ async function doRejoin(){
   payBtn.disabled=true; payBtn.textContent='PAYING…';
   giveBtn.disabled=true;
   resEl.style.display='none';
+  // Cancel the 30-second countdown immediately — Solana confirmations can take 60+ seconds
+  // and the auto-decline would fire mid-payment, hiding the overlay while the TX is in flight.
+  if(_rejoinCountdown){ clearInterval(_rejoinCountdown); _rejoinCountdown=null; }
 
   try{
     // Pay to rejoin: deposit full wager to escrow; server sends 10% to creator
@@ -2287,9 +2290,6 @@ async function doRejoin(){
       catch(e2){ addToast('⚠️ Wager recording failed — cashout may not work. Contact support.','#FF8C00'); console.error('[join-rejoin]',e2.message); }
     }
 
-    // Payment confirmed — cancel the countdown
-    if(_rejoinCountdown){ clearInterval(_rejoinCountdown); _rejoinCountdown=null; }
-
     // Add self back to the game at a random spawn
     const sp=rndSpawn();
     const _rjName=ST.email?ST.email.split('@')[0].slice(0,8).toUpperCase():'';
@@ -2309,6 +2309,14 @@ async function doRejoin(){
     if(G.spectators) G.spectators.delete(myPid);
     updateScoreboard();
 
+    // Re-register keyboard handler in case it was removed
+    document.removeEventListener('keydown',onKey);
+    document.addEventListener('keydown',onKey);
+
+    // Restart RAF and host loop in case they somehow stalled during the long payment wait
+    if(!rafHandle) rafHandle=requestAnimationFrame(rafDraw);
+    if(isHost&&!_hostRaf) startHostLoop();
+
     // Tell host (and all other guests via broadcast) that we're back
     if(ablyChannel) ablyChannel.publish('rejoin',{id:myPid, name:_rjName, sol:ST.wagerSol||0},()=>{});
 
@@ -2317,6 +2325,7 @@ async function doRejoin(){
     const _sp=document.getElementById('spectate-panel'); if(_sp) _sp.style.display='none';
     const _pb=document.getElementById('pow-btns'); if(_pb) _pb.style.display='flex';
     const _cw=document.getElementById('cash-btn-wrap'); if(_cw) _cw.style.display='block';
+    go('scr-game');
     _updatePowBtns(G.players.get(myPid));
     addToast('✅ BACK IN THE GAME!','#00FF7F');
     await refreshBal();
