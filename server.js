@@ -141,6 +141,17 @@ function nextSpawn() { const s = SPAWNS[_si++ % SPAWNS.length]; return { x: s.x,
 // ── Game logic (authoritative — runs on server) ───────────────────────────────
 function movePlayer(p, room) {
   if (!p.alive) return;
+  // Accumulator-based speed — matches client moveP() so speed is identical to old host-side.
+  // Base 0.2185/tick → ~4.6 ticks/cell → ~6.6 cells/sec at TICK_MS=33.
+  const spd = p.pep && p.pet > 0 ? 0.2185 * 1.55 : p.pow && p.pt > 0 ? 0.2185 * 1.25 : 0.2185;
+  p.mc = (p.mc || 0) + spd;
+  if (p.mc < 1) {
+    // Powerup timers still tick even when not moving a cell
+    if (p.pow && p.pt > 0 && --p.pt <= 0) p.pow = false;
+    if (p.pep && p.pet > 0 && --p.pet <= 0) p.pep = false;
+    return;
+  }
+  p.mc -= 1;
   // Try to turn if requested
   if (p.nx !== 0 || p.ny !== 0) {
     const tnx = p.x + p.nx, tny = p.y + p.ny;
@@ -153,16 +164,7 @@ function movePlayer(p, room) {
   if (tx >= 0 && tx < C && ty >= 0 && ty < R && room.maze[ty][tx] !== 1) {
     p.prevX = p.x; p.prevY = p.y;
     p.x = tx; p.y = ty;
-    // Tunnel row wrap
     if (ty === 17) { if (p.x < 0) p.x = C - 1; else if (p.x >= C) p.x = 0; }
-  }
-  // Double-move if pepper active
-  if (p.pep && p.pet > 0) {
-    const tx2 = p.x + p.dx, ty2 = p.y + p.dy;
-    if (tx2 >= 0 && tx2 < C && ty2 >= 0 && ty2 < R && room.maze[ty2][tx2] !== 1) {
-      p.prevX = p.x; p.prevY = p.y;
-      p.x = tx2; p.y = ty2;
-    }
   }
   // Powerup timers
   if (p.pow && p.pt > 0 && --p.pt <= 0) p.pow = false;
@@ -283,7 +285,7 @@ io.on('connection', socket => {
     x: spawn.x, y: spawn.y,
     dx: 1, dy: 0, nx: 0, ny: 0,
     prevX: spawn.x, prevY: spawn.y,
-    sc: 0, alive: true,
+    sc: 0, alive: true, mc: 0,
     pow: false, pt: 0, pep: false, pet: 0,
     held: [], sol: wagerSol || 0,
     num: room.players.size
