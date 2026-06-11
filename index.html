@@ -1491,7 +1491,7 @@ async function pkConnect(roomId, paidAblyToken){
         // Client-supplied sol/et fields can be forged from the browser console —
         // pw:{address} in KV is only written by join.js after a verified on-chain payment.
         try{
-          const ck=await fetch('/api/check-wager?address='+encodeURIComponent(d.id));
+          const ck=await fetch('/api/verify-entry?check=wager&address='+encodeURIComponent(d.id));
           const cd=await ck.json();
           if(!cd.valid){
             console.warn('[rejoin-host] rejected',d.id,'— no active wager in KV (free-rejoin blocked)');
