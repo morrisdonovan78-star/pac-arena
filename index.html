@@ -1,4 +1,4 @@
-<!-- PAC ARENA v11 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v12 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -211,15 +211,16 @@ html,body{background:var(--dark);color:var(--txt);font-family:'Exo 2',sans-serif
 #dp1{position:fixed;bottom:8px;left:8px;z-index:100;}
 #pow-btns{position:fixed;bottom:8px;right:8px;z-index:100;}
 #cash-btn-wrap{position:fixed;top:70px;right:8px;z-index:100;}
+#zoom-slider{position:fixed;left:175px;top:14px;width:26px;height:116px;writing-mode:vertical-lr;direction:rtl;opacity:0.55;z-index:110;display:none;accent-color:#39FF14;touch-action:none;cursor:pointer;}
 .otp-box{width:44px;height:52px;background:rgba(255,255,255,.04);border:2px solid var(--border);border-radius:8px;font-family:'Press Start 2P',monospace;font-size:20px;text-align:center;color:var(--y);outline:none;}
 .otp-box:focus{border-color:var(--y);box-shadow:0 0 0 3px rgba(255,215,0,.1);}
 .pvpb{font-family:'Press Start 2P',monospace;font-size:7px;color:var(--pk);text-align:center;background:rgba(255,105,180,.07);border:1px solid rgba(255,105,180,.2);border-radius:8px;padding:7px 14px;width:100%;max-width:700px;line-height:1.9;}
 .dpad{display:flex;flex-direction:column;align-items:center;gap:4px;}
 .drow{display:flex;gap:4px;align-items:center;justify-content:center;}
 /* Larger touch targets + instant tap response (no 300ms iOS delay) */
-.dbtn{width:62px;height:62px;background:var(--panel);border:1px solid var(--border);border-radius:10px;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--txt);user-select:none;-webkit-user-select:none;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
+.dbtn{width:50px;height:50px;background:var(--panel);border:1px solid var(--border);border-radius:10px;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--txt);user-select:none;-webkit-user-select:none;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
 .dbtn:active,.dbtn.pressed{background:rgba(255,215,0,.22);border-color:var(--y);}
-.dbtn-ph{width:62px;height:62px;flex-shrink:0;} /* cross-shape spacer */
+.dbtn-ph{width:50px;height:50px;flex-shrink:0;} /* cross-shape spacer */
 .pow-use-btn{width:58px;height:58px;border-radius:10px;font-family:'Press Start 2P',monospace;font-size:7px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;user-select:none;-webkit-user-select:none;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
 .pow-use-btn.cherry-btn{background:rgba(255,69,0,.08);border:1px solid rgba(255,69,0,.35);color:#FF6347;}
 .pow-use-btn.pepper-btn{background:rgba(57,255,20,.08);border:1px solid rgba(57,255,20,.35);color:var(--g);}
@@ -254,7 +255,7 @@ body{touch-action:manipulation;}
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
-    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v11</div>
+    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v12</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;">
     <div class="w-strip">
@@ -546,6 +547,8 @@ body{touch-action:manipulation;}
   <div id="cash-btn-wrap" style="position:fixed;top:70px;right:8px;z-index:100;display:none;">
     <button id="cash-use-btn" class="pow-use-btn" style="background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.65);color:#FFD700;font-size:6px;">💸<br>CASHOUT</button>
   </div>
+  <!-- Zoom slider — vertical, next to minimap top-left -->
+  <input type="range" id="zoom-slider" min="0.25" max="4" step="0.05" value="1">
   <!-- Powerup use buttons — bottom-right corner -->
   <div id="pow-btns" style="position:fixed;bottom:8px;right:8px;z-index:100;display:none;flex-direction:column;align-items:center;gap:6px;">
     <button id="cherry-use-btn" class="pow-use-btn cherry-btn" style="opacity:0.35;">🍒<br>KILL</button>
@@ -1467,6 +1470,7 @@ async function pkConnect(roomId, paidAblyToken){
       if(!isHost&&G&&!G.over){
         if(msg.data.id===myPid){
           // Local player killed → offer pay-to-rejoin (guest side)
+          _spectateKillerPid=msg.data.killerId||null;
           G.players.delete(myPid);
           updateScoreboard();
           openRejoinOverlay();
@@ -1763,7 +1767,7 @@ async function joinLobby(usd){
 // ═══════════════════════════════════════════════════════════
 // PAC-MAN PVP ENGINE
 // ═══════════════════════════════════════════════════════════
-const T=34,C=36,R=28,TICK_MS=33; let canvas,ctx,gLoop,rafHandle,frm=0,G={};
+const T=34,C=48,R=36,TICK_MS=33; let canvas,ctx,gLoop,rafHandle,frm=0,G={};
 let _camX=0,_camY=0,_camZoom=1; // camera: position in game-pixels, zoom multiplier
 const _FNT_LBL='bold 11px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",monospace';
 const _FNT_SOL='bold 8px monospace';
@@ -1802,46 +1806,57 @@ function stopHostLoop(){
 }
 // 36×28 maze — larger playing field with more corridors
 const MAZE=[
-[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-[1,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,1],
-[1,0,1,1,1,1,0,1,1,1,1,1,0,1,1,0,1,1,1,1,0,1,1,0,1,1,1,1,1,0,1,1,1,1,0,1],
-[1,0,1,0,0,1,0,1,0,0,0,1,0,1,1,0,1,0,0,1,0,1,1,0,1,0,0,0,1,0,1,0,0,1,0,1],
-[1,0,1,1,1,1,0,1,1,1,1,1,0,0,0,0,1,1,1,1,0,0,0,0,1,1,1,1,1,0,1,1,1,1,0,1],
-[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-[1,0,1,1,1,1,0,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,0,1,1,1,1,1,1,0,1],
-[1,0,1,1,1,1,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,1,0,1,1,1,1,1,1,0,1],
-[1,0,0,0,0,0,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,1,0,0,0,0,0,0,0,0,1],
-[1,1,1,1,1,1,0,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,0,1,1,1,1,1,1,1,1],
-[1,1,1,1,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,1,1,1,1,1,1,1,1],
-[1,1,1,1,1,1,0,0,0,0,1,1,0,0,0,0,1,1,1,1,0,0,0,0,1,1,0,0,0,0,1,1,1,1,1,1],
-[1,1,1,1,1,1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,1,1,1,1,1,1],
-[0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0],
-[1,1,1,1,1,1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,1,1,1,1,1,1],
-[1,1,1,1,1,1,0,0,0,0,1,1,0,0,0,0,1,1,1,1,0,0,0,0,1,1,0,0,0,0,1,1,1,1,1,1],
-[1,1,1,1,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,1,1,1,1,1,1,1,1],
-[1,1,1,1,1,1,0,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,0,1,1,1,1,1,1,1,1],
-[1,0,0,0,0,0,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,1,0,0,0,0,0,0,0,0,1],
-[1,0,1,1,1,1,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,1,0,1,1,1,1,1,1,0,1],
-[1,0,0,0,1,1,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1,1,0,0,0,0,0,1],
-[1,1,1,0,1,1,0,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,1,1,0,1,1,0,1,1,0,1,1,1,1,1],
-[1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,1],
-[1,0,1,1,0,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,0,1,1,1,1,0,1],
-[1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,1],
-[1,0,1,1,1,1,0,1,1,0,1,1,1,0,0,1,1,1,1,1,1,0,0,1,1,1,0,1,1,0,1,1,1,1,0,1],
-[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+[1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+[1,0,1,1,1,1,1,0,1,1,1,1,0,1,1,0,1,1,1,1,0,1,1,0,0,1,1,0,1,1,1,1,0,1,1,0,1,1,1,1,0,1,1,1,1,1,0,1],
+[1,0,1,0,0,0,1,0,1,0,0,1,0,1,1,0,1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1,0,1,1,0,1,0,0,0,1,0,1,0,0,1,0,1],
+[1,0,1,1,1,1,1,0,1,1,1,1,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0,1,1,1,1,0,1,1,1,1,1,0,1],
+[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+[1,0,1,1,1,1,1,0,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,0,1,1,1,1,1,1,1,1,0,1],
+[1,0,1,1,1,1,1,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,1,0,1,1,1,1,1,1,1,1,0,1],
+[1,0,0,0,0,0,0,1,1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,1,0,0,0,0,0,0,0,0,0,1],
+[1,1,1,1,1,1,0,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,0,1,1,1,1,1,1,1,1,1],
+[1,1,1,1,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,1,1,1,1,1,1,1,1,1],
+[1,1,1,1,1,1,0,0,0,0,0,1,1,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1,1,0,0,0,0,0,1,1,1,1,1,1,1],
+[1,1,1,1,1,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,1,1,1,1,1,1,1],
+[1,1,1,1,1,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,1,1,1,1,1,1,1],
+[1,1,1,1,1,1,0,0,0,0,0,1,1,0,0,0,0,1,1,1,1,0,0,0,0,1,1,1,1,0,0,0,0,1,1,0,0,0,0,0,1,1,1,1,1,1,1,1],
+[1,1,1,1,1,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,1,1,1,1,1,1,1],
+[1,1,1,1,1,1,0,0,0,0,0,1,1,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,0,0,0,0,0,1,1,1,1,1,1,1,1],
+[0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0],
+[1,1,1,1,1,1,0,0,0,0,0,1,1,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,0,0,0,0,0,1,1,1,1,1,1,1,1],
+[1,1,1,1,1,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,1,1,1,1,1,1,1],
+[1,1,1,1,1,1,0,0,0,0,0,1,1,0,0,0,0,1,1,1,1,0,0,0,0,1,1,1,1,0,0,0,0,1,1,0,0,0,0,0,1,1,1,1,1,1,1,1],
+[1,1,1,1,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,1,1,1,1,1,1,1,1,1],
+[1,1,1,1,1,1,0,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,0,1,1,1,1,1,1,1,1,1],
+[1,0,0,0,0,0,0,1,1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,1,0,0,0,0,0,0,0,0,0,1],
+[1,0,1,1,1,1,1,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,1,0,1,1,1,1,1,1,1,1,0,1],
+[1,0,0,0,1,1,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1,1,0,0,0,0,0,0,0,1],
+[1,1,1,0,1,1,0,1,1,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,1,1,0,1,1,0,1,1,1,1,1,1,1],
+[1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,1],
+[1,0,1,1,0,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,0,1,1,1,1,1,1,0,1],
+[1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1],
+[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+[1,0,1,1,1,1,0,1,1,0,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,0,1,1,0,1,1,1,1,1,0,1],
+[1,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1],
+[1,0,1,1,1,1,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,1,0,1,1,1,1,1,1,1,1,0,1],
+[1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+[1,0,1,1,1,1,0,1,1,0,1,1,0,1,1,0,1,1,1,1,0,1,1,0,0,1,1,0,1,1,1,1,0,1,1,0,1,1,1,1,0,1,1,1,1,1,0,1],
+[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
 ];
 function cloneMaze(){ return MAZE.map(r=>[...r]); }
 // Spawn positions verified against maze — every cell is walkable (not wall)
-const SPAWNS=[{x:1,y:1},{x:34,y:1},{x:1,y:5},{x:34,y:5},{x:1,y:8},{x:34,y:8},{x:6,y:12},{x:29,y:12},{x:6,y:14},{x:29,y:14},{x:1,y:18},{x:34,y:18},{x:1,y:22},{x:34,y:22},{x:1,y:26},{x:34,y:26}];
+const SPAWNS=[{x:1,y:1},{x:46,y:1},{x:1,y:5},{x:46,y:5},{x:1,y:8},{x:46,y:8},{x:6,y:12},{x:36,y:12},{x:6,y:19},{x:36,y:19},{x:1,y:23},{x:46,y:23},{x:1,y:27},{x:46,y:27},{x:1,y:30},{x:46,y:30}];
 function rndSpawn(){ return SPAWNS[Math.floor(Math.random()*SPAWNS.length)]; }
 // Powerup spawn spots — all verified walkable cells spread across the map
 const POW_SPOTS=[
-  {x:1,y:1},{x:34,y:1},{x:6,y:1},{x:28,y:1},
-  {x:1,y:5},{x:34,y:5},{x:12,y:5},{x:23,y:5},
-  {x:1,y:8},{x:34,y:8},{x:6,y:8},{x:28,y:8},
-  {x:1,y:18},{x:34,y:18},{x:6,y:18},{x:28,y:18},
-  {x:1,y:26},{x:34,y:26},{x:12,y:26},{x:23,y:26}
+  {x:1,y:1},{x:46,y:1},{x:6,y:1},{x:40,y:1},
+  {x:1,y:5},{x:46,y:5},{x:15,y:5},{x:32,y:5},
+  {x:1,y:8},{x:46,y:8},
+  {x:6,y:12},{x:36,y:12},
+  {x:1,y:23},{x:46,y:23},
+  {x:1,y:30},{x:46,y:30},{x:15,y:30},{x:32,y:30},
+  {x:6,y:19},{x:36,y:19}
 ];
 function rndPowSpot(){
   const free=POW_SPOTS.filter(s=>G.maze[s.y][s.x]===0);
@@ -1855,7 +1870,9 @@ let _rcMenu=null; // context-menu listener ref
 let ablyRt=null, ablyChannel=null, pkRoomId=null; // Ably real-time state
 let myPid=null, isHost=false;                     // N-player game identity
 let isSpectating=false;                           // spectate mode flag
+let _spectateKillerPid=null;                      // pid of player who killed us — camera follows them while spectating
 let _cashoutInProgress=false;                     // debounce: prevent duplicate cashout requests
+let _zoomSliderEl=null;                           // cached zoom slider element — updated each frame
 let _guestInputLoop=null;                         // guest → host input heartbeat
 
 // ── Kill reward — 90% of victim's wager to killer, 10% to creator ─
@@ -2265,6 +2282,7 @@ function _doFreeRejoin(){
     name:rjName, sol:0
   });
   isSpectating=false;
+  _spectateKillerPid=null;
   updateScoreboard();
   if(ablyChannel) ablyChannel.publish('rejoin',{id:myPid,name:rjName,sol:0},()=>{});
   document.getElementById('rejoin-overlay').style.display='none';
@@ -2389,6 +2407,7 @@ async function doRejoin(){
       name:_rjName, sol:ST.wagerSol||0
     });
     isSpectating=false;
+    _spectateKillerPid=null;
     _rejoinFromCashout=false;
     _cashoutInProgress=false;
     ST.cashoutLamports=Math.floor((ST.wagerSol||0)*solanaWeb3.LAMPORTS_PER_SOL);
@@ -2502,7 +2521,7 @@ function launchGame(){
   const powPanel=document.getElementById('pow-btns');
   if(powPanel) powPanel.style.display='flex';
   const cashWrap=document.getElementById('cash-btn-wrap');
-  if(cashWrap) cashWrap.style.display='block';
+  if(cashWrap) cashWrap.style.display=_lobbyIsPaid?'block':'none';
   const cBtn=document.getElementById('cherry-use-btn');
   const pBtn=document.getElementById('pepper-use-btn');
   if(cBtn){
@@ -2520,6 +2539,12 @@ function launchGame(){
     const doCash=e=>{ e.preventDefault(); instantCashout(); };
     caBtn.addEventListener('touchstart',doCash,{passive:false});
     caBtn.addEventListener('mousedown',()=>instantCashout());
+  }
+  _zoomSliderEl=document.getElementById('zoom-slider');
+  if(_zoomSliderEl){
+    _zoomSliderEl.style.display='block';
+    _zoomSliderEl.value=String(_camZoom);
+    _zoomSliderEl.addEventListener('input',()=>{ _camZoom=parseFloat(_zoomSliderEl.value); });
   }
 
   // ── Swipe the canvas to change direction (natural mobile input) ─
@@ -2638,7 +2663,7 @@ function eliminatePlayer(id, killerId){
   updateScoreboard();
   if(isHost) pkSend({t:'elim',id,killerId,victimSol});  // tell all guests (includes killer id + victim's sol)
   // Local player was killed → offer pay-to-rejoin instead of immediately ending game
-  if(id===myPid) openRejoinOverlay();
+  if(id===myPid){ _spectateKillerPid=killerId||null; openRejoinOverlay(); }
   // If I'm the killer, instantly claim the victim's wager from escrow
   if(killerId===myPid && ST.lobbyUsd>0) claimKillReward(victimSol, id);
 }
@@ -2689,8 +2714,8 @@ function onKey(e){
     case'v': case'V': usePow('cherry');  e.preventDefault(); break;
     case'c': case'C': usePow('pepper');  e.preventDefault(); break;
     // Zoom
-    case'z': case'Z':{ const minZ=Math.min(canvas.width/(C*T),canvas.height/(R*T))*0.5; _camZoom=Math.min(4,_camZoom*1.12); e.preventDefault(); break; }
-    case'x': case'X':{ const minZ=Math.max(canvas.width/(C*T),canvas.height/(R*T)); _camZoom=Math.max(minZ,_camZoom*0.89); e.preventDefault(); break; }
+    case'z': case'Z':{ _camZoom=Math.min(4,_camZoom*1.12); e.preventDefault(); break; }
+    case'x': case'X':{ _camZoom=Math.max(0.25,_camZoom*0.89); e.preventDefault(); break; }
   }
 }
 // Update mobile powerup button opacity to reflect held state
@@ -3023,17 +3048,18 @@ function draw(){
   const dt=_lastDrawTs?Math.min(now-_lastDrawTs,50):16.67; // ms since last frame, capped at 50ms
   _lastDrawTs=now;
   ctx.fillStyle='#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
-  // Camera follow: use prev-frame renderX (imperceptible 1-frame lag)
-  const _cme0=G.players.get(myPid);
-  if(_cme0){
-    const _tx=(_cme0.renderX!==undefined?_cme0.renderX+0.5:_cme0.x+0.5)*T;
-    const _ty=(_cme0.renderY!==undefined?_cme0.renderY+0.5:_cme0.y+0.5)*T;
+  // Camera follow: track killer while spectating, else track self
+  const _camTarget=(isSpectating&&_spectateKillerPid)?G.players.get(_spectateKillerPid):G.players.get(myPid);
+  if(_camTarget){
+    const _tx=(_camTarget.renderX!==undefined?_camTarget.renderX+0.5:_camTarget.x+0.5)*T;
+    const _ty=(_camTarget.renderY!==undefined?_camTarget.renderY+0.5:_camTarget.y+0.5)*T;
     _camX+=(_tx-_camX)*0.18; _camY+=(_ty-_camY)*0.18;
   }
   // Clamp camera so it never shows black outside the maze edges
   const _visW=canvas.width/_camZoom, _visH=canvas.height/_camZoom;
   _camX=Math.max(_visW/2, Math.min(C*T-_visW/2, _camX));
   _camY=Math.max(_visH/2, Math.min(R*T-_visH/2, _camY));
+  if(_zoomSliderEl) _zoomSliderEl.value=String(_camZoom);
   ctx.save();
   ctx.translate(canvas.width/2,canvas.height/2);
   ctx.scale(_camZoom,_camZoom);
@@ -3267,24 +3293,24 @@ function draw(){
     ctx.restore();
   });
 
-  // ── Live wallet balance tracker (top-right corner) ────────────
+  // ── Live wallet balance tracker (below minimap, left side) ──────
   // Updates every frame automatically — no click needed.
   if(ST.balance>0){
     const bal=ST.balance.toFixed(4)+'◎';
     const usd=ST.solPrice?'≈ $'+(ST.balance*ST.solPrice).toFixed(2):'';
-    const bx=canvas.width-5, wy=48;
+    const MM_H_w=Math.round(154*R/C);
+    const wx=11, wy=14+MM_H_w+6+10; // left-aligned, below minimap
     ctx.save();
-    ctx.font='bold 11px monospace'; ctx.textAlign='right'; ctx.textBaseline='top';
-    // Only measure text width when the displayed strings change — measureText is slow
+    ctx.font='bold 13px monospace'; ctx.textAlign='left'; ctx.textBaseline='top';
     if(_hudBalCache.bal!==bal||_hudBalCache.usd!==usd){
       _hudBalCache.w=Math.max(ctx.measureText(bal).width,usd?ctx.measureText(usd).width:0);
       _hudBalCache.bal=bal; _hudBalCache.usd=usd;
     }
-    const bw=_hudBalCache.w, bh=usd?26:14;
-    ctx.fillStyle='rgba(0,0,0,0.70)'; ctx.fillRect(bx-bw-9,wy-3,bw+13,bh);
-    ctx.strokeStyle='rgba(57,255,20,0.25)'; ctx.lineWidth=1; ctx.strokeRect(bx-bw-9,wy-3,bw+13,bh);
-    ctx.fillStyle='#39FF14'; ctx.fillText(bal,bx,wy);
-    if(usd){ ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText(usd,bx,wy+13); }
+    const bw=_hudBalCache.w, bh=usd?30:16;
+    ctx.fillStyle='rgba(0,0,0,0.75)'; ctx.fillRect(wx-4,wy-3,bw+14,bh);
+    ctx.strokeStyle='rgba(57,255,20,0.30)'; ctx.lineWidth=1; ctx.strokeRect(wx-4,wy-3,bw+14,bh);
+    ctx.fillStyle='#39FF14'; ctx.fillText(bal,wx,wy);
+    if(usd){ ctx.fillStyle='rgba(255,255,255,0.55)'; ctx.fillText(usd,wx,wy+15); }
     ctx.restore();
   }
 
@@ -3331,6 +3357,7 @@ async function endGame(reason){
   const pb=document.getElementById('pow-btns'); if(pb) pb.style.display='none';
   const cw=document.getElementById('cash-btn-wrap'); if(cw) cw.style.display='none';
   const _spe=document.getElementById('spectate-panel'); if(_spe) _spe.style.display='none';
+  if(_zoomSliderEl){ _zoomSliderEl.style.display='none'; _zoomSliderEl=null; }
   pkDisconnect();
 
   const me=G.players.get(myPid)||{sc:0,lives:0};
