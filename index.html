@@ -1444,6 +1444,7 @@ async function pkConnect(roomId, paidAblyToken){
     // ── state from host ────────────────────────────────────
     ablyChannel.subscribe('s',(msg)=>{
       if(!G||(G.over&&!isSpectating)) return;
+      if(_hostPid&&msg.clientId!==_hostPid) return; // reject state broadcasts not from the known host
       // Conflict resolution: if two hosts exist, the one with the higher ts steps down
       if(isHost&&msg.data.hostTs!==undefined&&msg.data.hostTs<_myHelloTs){
         isHost=false; stopHostLoop();
@@ -1467,6 +1468,7 @@ async function pkConnect(roomId, paidAblyToken){
 
     // ── elimination ────────────────────────────────────────
     ablyChannel.subscribe('elim',(msg)=>{
+      if(_hostPid&&msg.clientId!==_hostPid) return; // reject kills not from the authenticated host
       if(!isHost&&G&&!G.over){
         if(msg.data.id===myPid){
           // Local player killed → offer pay-to-rejoin (guest side)
@@ -1488,6 +1490,7 @@ async function pkConnect(roomId, paidAblyToken){
       if(!isHost||!G||G.over) return;
       const d=msg.data;
       if(!d||!d.id||d.id===myPid) return;
+      if(msg.clientId!==d.id) return; // player can only rejoin as their own authenticated address
       if(G.players.has(d.id)) return; // already in game
 
       if(ST.lobbyUsd>0){
@@ -1544,7 +1547,7 @@ async function pkConnect(roomId, paidAblyToken){
     // ── powerup use from guest ─────────────────────────────
     ablyChannel.subscribe('pow',(msg)=>{
       if(isHost&&G&&!G.over&&msg.data){
-        const p=G.players.get(msg.clientId||msg.data.id);
+        const p=G.players.get(msg.clientId); // clientId is Ably-authenticated — ignore data.id to prevent spoofing
         if(p&&(p.held||[]).includes(msg.data.type)){
           p.held=(p.held||[]).filter(h=>h!==msg.data.type);
           if(msg.data.type==='cherry'){ p.pow=true; p.pt=300; }
@@ -1564,6 +1567,7 @@ async function pkConnect(roomId, paidAblyToken){
 
     // ── game ended — notify spectators ─────────────────────
     ablyChannel.subscribe('gameover',(msg)=>{
+      if(_hostPid&&msg.clientId!==_hostPid) return; // reject game-over signals not from the authenticated host
       if(isSpectating){
         addToast('🏁 GAME OVER — returning to lobby…','#FF6B6B');
         setTimeout(leaveSpectate, 3000);
@@ -1578,10 +1582,13 @@ async function pkConnect(roomId, paidAblyToken){
       // Check if we should become the new host
       if(!isHost){
         const alive=[...hellos.values()].sort((a,b)=>(a.ts-b.ts)||(a.id<b.id?-1:1));
-        if(alive.length&&alive[0].id===myPid){
-          isHost=true;
-          if(G&&!G.over&&!_hostRaf) startHostLoop();
-          lg('mm-log','You are now HOST','lwarn');
+        if(alive.length){
+          _hostPid=alive[0].id; // keep host tracker in sync with who we expect to be host
+          if(alive[0].id===myPid){
+            isHost=true;
+            if(G&&!G.over&&!_hostRaf) startHostLoop();
+            lg('mm-log','You are now HOST','lwarn');
+          }
         }
       }
     });
@@ -1601,6 +1608,7 @@ async function pkConnect(roomId, paidAblyToken){
         hat:h.hat||'none', trail:h.trail||'none', eyes:h.eyes||'dot', aura:h.aura||'none' }));
 
     isHost=allPlayers.length>0&&allPlayers[0].id===myPid;
+    _hostPid=allPlayers.length>0?allPlayers[0].id:myPid;
     initGame(allPlayers);
     document.getElementById('mm-sub').textContent=isHost?'You are HOST':'Connected!';
     lg('mm-log',isHost?('HOST — '+allPlayers.length+' player(s)'):('Joined with '+allPlayers.length+' player(s)'),'lok');
@@ -1624,7 +1632,7 @@ function pkDisconnect(){
   if(ablyChannel){ try{ ablyChannel.presence.leave(); }catch(_){} ablyChannel=null; }
   if(ablyRt){ try{ ablyRt.close(); }catch(_){} ablyRt=null; }
   myPid=null; isHost=false; isSpectating=false; pkRoomId=null; _pkTick=0; _pkSentTick=0; _myHelloTs=0;
-  _joiningLobby=false; _lobbyIsPaid=false;
+  _joiningLobby=false; _lobbyIsPaid=false; _hostPid=null;
   stopPacManMusic();
 }
 
@@ -1871,6 +1879,7 @@ let ablyRt=null, ablyChannel=null, pkRoomId=null; // Ably real-time state
 let myPid=null, isHost=false;                     // N-player game identity
 let isSpectating=false;                           // spectate mode flag
 let _spectateKillerPid=null;                      // pid of player who killed us — camera follows them while spectating
+let _hostPid=null;                                // authenticated host clientId — only messages from this id are trusted for host-only events
 let _cashoutInProgress=false;                     // debounce: prevent duplicate cashout requests
 let _zoomSliderEl=null;                           // cached zoom slider element — updated each frame
 let _guestInputLoop=null;                         // guest → host input heartbeat
