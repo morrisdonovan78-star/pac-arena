@@ -1856,7 +1856,7 @@ let _spectateKillerPid=null;                      // pid of player who killed us
 let _hostPid=null;                                // authenticated host clientId — only messages from this id are trusted for host-only events
 let _cashoutInProgress=false;                     // debounce: prevent duplicate cashout requests
 let _zoomSliderEl=null;                           // cached zoom slider element — updated each frame
-let _joyRaf=null;                                 // rAF handle for joystick draw loop
+let _joyDrawFn=null;                              // joystick draw function — called from main game loop
 let _guestInputLoop=null;                         // guest → host input heartbeat
 
 // ── Kill reward — 90% of victim's wager to killer, 10% to creator ─
@@ -2503,9 +2503,8 @@ function launchGame(){
     _joyCtx.fill();
     _joyCtx.strokeStyle=_joyOn?'rgba(255,215,0,0.9)':'rgba(255,255,255,0.35)';
     _joyCtx.lineWidth=2; _joyCtx.stroke();
-    _joyRaf=requestAnimationFrame(_drawJoy);
   }
-  _joyRaf=requestAnimationFrame(_drawJoy);
+  _joyDrawFn=_drawJoy;
 
   function _joyMove(cx,cy){
     const dx=cx-JOY_CX, dy=cy-JOY_CY;
@@ -2874,15 +2873,22 @@ function _buildMazeCanvas(){
       if(adjLeft) { mc.beginPath(); mc.moveTo(x+ins,y+ins);   mc.lineTo(x+ins,y+T-ins);   mc.stroke(); }
       if(adjRight){ mc.beginPath(); mc.moveTo(x+T-ins,y+ins); mc.lineTo(x+T-ins,y+T-ins); mc.stroke(); }
     } else if(v===3){
-      mc.save(); mc.font=Math.floor(T*0.82)+'px serif';
-      mc.textAlign='center'; mc.textBaseline='middle';
-      mc.fillText('🍒',x+T/2,y+T/2+1); mc.restore();
+      // Cherry — two red circles + green stem (fast, no emoji)
+      mc.fillStyle='#CC0000';
+      mc.beginPath(); mc.arc(x+T/2-T*0.12,y+T/2+T*0.05,T*0.22,0,Math.PI*2); mc.fill();
+      mc.beginPath(); mc.arc(x+T/2+T*0.12,y+T/2+T*0.05,T*0.22,0,Math.PI*2); mc.fill();
+      mc.fillStyle='rgba(255,255,255,0.55)';
+      mc.beginPath(); mc.arc(x+T/2-T*0.17,y+T/2-T*0.04,T*0.07,0,Math.PI*2); mc.fill();
+      mc.strokeStyle='#228B22'; mc.lineWidth=2;
+      mc.beginPath(); mc.moveTo(x+T/2,y+T/2-T*0.05); mc.lineTo(x+T/2+T*0.1,y+T/2-T*0.28); mc.stroke();
     } else if(v===4){
-      mc.save();
-      mc.font=Math.floor(T*0.82)+'px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",serif';
-      mc.textAlign='center'; mc.textBaseline='middle';
-      mc.fillText('🌶️',x+T/2,y+T/2+1);
-      mc.restore();
+      // Pepper — green elongated oval + red tip (fast, no emoji)
+      mc.fillStyle='#39FF14';
+      mc.beginPath(); mc.ellipse(x+T/2,y+T/2,T*0.17,T*0.3,0,0,Math.PI*2); mc.fill();
+      mc.fillStyle='#FF4400';
+      mc.beginPath(); mc.arc(x+T/2,y+T/2+T*0.28,T*0.1,0,Math.PI*2); mc.fill();
+      mc.fillStyle='rgba(255,255,255,0.5)';
+      mc.beginPath(); mc.arc(x+T/2-T*0.05,y+T/2-T*0.12,T*0.06,0,Math.PI*2); mc.fill();
     }
   }
   _mazeDirty=false;
@@ -3359,6 +3365,8 @@ function draw(){
     });
     ctx.restore();
   }
+  // Joystick canvas — rendered into its own canvas element, called here so it shares the main rAF
+  if(_joyDrawFn) _joyDrawFn();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -3380,7 +3388,7 @@ async function endGame(reason){
   const cw=document.getElementById('cash-btn-wrap'); if(cw) cw.style.display='none';
   const _spe=document.getElementById('spectate-panel'); if(_spe) _spe.style.display='none';
   if(_zoomSliderEl){ _zoomSliderEl.style.display='none'; _zoomSliderEl=null; }
-  if(_joyRaf){ cancelAnimationFrame(_joyRaf); _joyRaf=null; }
+  _joyDrawFn=null;
   const _joyEl2=document.getElementById('joy-canvas'); if(_joyEl2) _joyEl2.style.display='none';
   pkDisconnect();
 
