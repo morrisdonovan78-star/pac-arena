@@ -78,7 +78,7 @@ function makeGameToken(lobbyId, pid) {
   return Buffer.from(JSON.stringify({ data, sig })).toString('base64url');
 }
 
-function validateGameToken(token, lobbyId) {
+function validateGameToken(token, lobbyId, pid) {
   if (!GAME_SECRET) return true; // dev: no secret set, allow all
   try {
     const { data, sig } = JSON.parse(Buffer.from(token, 'base64url').toString());
@@ -86,6 +86,7 @@ function validateGameToken(token, lobbyId) {
     if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return false;
     const parts = data.split(':');
     if (parts[0] !== lobbyId) return false;
+    if (pid && parts[1] !== pid) return false; // token must be for this exact wallet
     if (Date.now() - parseInt(parts[2]) > 7200000) return false; // 2h expiry
     return true;
   } catch { return false; }
@@ -200,7 +201,7 @@ function checkCollisions(room, io) {
 
 function elim(victim, killerId, room, io) {
   victim.alive = false;
-  io.to(room.lobbyId).emit('elim', { id: victim.id, killerId });
+  io.to(room.lobbyId).emit('elim', { id: victim.id, killerId, victimSol: victim.sol || 0 });
 }
 
 function tick(room, io) {
@@ -256,7 +257,7 @@ io.on('connection', socket => {
 
   // Validate token for paid lobbies
   if (isPaid && GAME_SECRET) {
-    if (!validateGameToken(gameToken, lobbyId)) {
+    if (!validateGameToken(gameToken, lobbyId, pid)) {
       socket.emit('err', 'Invalid entry token — pay to join');
       socket.disconnect(); return;
     }
@@ -331,7 +332,7 @@ io.on('connection', socket => {
 
   // ── Rejoin (paid lobby) ───────────────────────────────────────
   socket.on('rejoin', ({ gameToken: rt }) => {
-    if (isPaid && GAME_SECRET && !validateGameToken(rt, lobbyId)) return;
+    if (isPaid && GAME_SECRET && !validateGameToken(rt, lobbyId, pid)) return;
     const p = room.players.get(pid);
     if (!p) return;
     const s = nextSpawn();
