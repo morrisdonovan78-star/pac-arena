@@ -1411,6 +1411,12 @@ async function pkConnect(roomId, gameToken){
       addToast('Disconnected: '+reason,'#FF4444');
     });
 
+    // Ping measurement — send timestamp, server echoes it back
+    _sio.on('pong_res',(ts)=>{ _ping=Date.now()-ts; });
+    const _doPing=()=>{ if(_sio&&_sio.connected) _sio.emit('ping_req',Date.now()); };
+    _doPing();
+    _pingInterval=setInterval(_doPing,2000);
+
     document.getElementById('mm-sub').textContent='Looking for players…';
     lg('mm-log','Connected to game server — waiting for init…','lok');
 
@@ -1428,6 +1434,7 @@ function pkSend(data){
 
 function pkDisconnect(){
   clearInterval(_guestInputLoop); _guestInputLoop=null;
+  clearInterval(_pingInterval); _pingInterval=null; _ping=0;
   ablyChannel=null;
   if(_sio){ try{ _sio.disconnect(); }catch(_){} _sio=null; }
   myPid=null; isHost=false; isSpectating=false; pkRoomId=null; _pkTick=0; _pkSentTick=0; _myHelloTs=0;
@@ -1694,6 +1701,7 @@ let _cashoutInProgress=false;                     // debounce: prevent duplicate
 let _zoomSliderEl=null;                           // cached zoom slider element — updated each frame
 let _joyDrawFn=null;                              // joystick draw function — called from main game loop
 let _guestInputLoop=null;                         // guest → host input heartbeat
+let _pingInterval=null, _ping=0;                  // round-trip latency to Socket.io server
 
 // ── Kill reward — 90% of victim's wager to killer, 10% to creator ─
 async function claimKillReward(victimSol, victimAddress){
@@ -3270,6 +3278,19 @@ function draw(){
     ctx.fillText('Z/X=ZOOM',176,135);
     ctx.restore();
   }
+  // ── Ping display (bottom-right) ──────────────────────────────
+  if(_sio&&_sio.connected&&_ping>0){
+    const pCol=_ping<80?'#39FF14':_ping<150?'#FFD700':'#FF4444';
+    const pTxt=_ping+'ms';
+    ctx.save();
+    ctx.font='bold 9px monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom';
+    const pw=ctx.measureText(pTxt).width;
+    const px2=canvas.width-10, py2=canvas.height-10;
+    ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fillRect(px2-pw-6,py2-13,pw+12,16);
+    ctx.fillStyle=pCol; ctx.fillText(pTxt,px2,py2);
+    ctx.restore();
+  }
+
   // Joystick canvas — rendered into its own canvas element, called here so it shares the main rAF
   if(_joyDrawFn) _joyDrawFn();
 }

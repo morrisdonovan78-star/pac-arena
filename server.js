@@ -333,6 +333,8 @@ io.on('connection', socket => {
   });
 
   // ── Rejoin (paid lobby) ───────────────────────────────────────
+  socket.on('ping_req', (ts) => socket.emit('pong_res', ts));
+
   socket.on('rejoin', ({ gameToken: rt }) => {
     if (isPaid && GAME_SECRET && !validateGameToken(rt, lobbyId, pid)) return;
     const p = room.players.get(pid);
