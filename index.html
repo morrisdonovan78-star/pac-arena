@@ -2458,7 +2458,7 @@ function launchGame(){
   ctx=canvas.getContext('2d');
   canvas.width=window.innerWidth;
   canvas.height=window.innerHeight;
-  _camZoom=Math.max(window.innerWidth/(C*T), window.innerHeight/(R*T))*1.25;
+  _camZoom=2.0;
   _camX=(C*T)/2; _camY=(R*T)/2;
   document.getElementById('hpot').textContent=ST.lobbyUsd===0?'FREE':'$'+ST.lobbyUsd*2;
   // initGame() already called from Ably pkConnect
@@ -2685,7 +2685,7 @@ function onKey(e){
     case'c': case'C': usePow('pepper');  e.preventDefault(); break;
     // Zoom
     case'z': case'Z':{ const minZ=Math.min(canvas.width/(C*T),canvas.height/(R*T))*0.5; _camZoom=Math.min(4,_camZoom*1.12); e.preventDefault(); break; }
-    case'x': case'X':{ const minZ=Math.min(canvas.width/(C*T),canvas.height/(R*T))*0.5; _camZoom=Math.max(minZ,_camZoom*0.89); e.preventDefault(); break; }
+    case'x': case'X':{ const minZ=Math.max(canvas.width/(C*T),canvas.height/(R*T)); _camZoom=Math.max(minZ,_camZoom*0.89); e.preventDefault(); break; }
   }
 }
 // Update mobile powerup button opacity to reflect held state
