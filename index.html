@@ -217,7 +217,7 @@ html,body{background:var(--dark);color:var(--txt);font-family:'Exo 2',sans-serif
 .pvpb{font-family:'Press Start 2P',monospace;font-size:7px;color:var(--pk);text-align:center;background:rgba(255,105,180,.07);border:1px solid rgba(255,105,180,.2);border-radius:8px;padding:7px 14px;width:100%;max-width:700px;line-height:1.9;}
 .pow-use-btn{width:58px;height:58px;border-radius:10px;font-family:'Press Start 2P',monospace;font-size:7px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;user-select:none;-webkit-user-select:none;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
 .pow-use-btn.cherry-btn{background:rgba(255,69,0,.08);border:1px solid rgba(255,69,0,.35);color:#FF6347;}
-.pow-use-btn.pepper-btn{background:rgba(57,255,20,.08);border:1px solid rgba(57,255,20,.35);color:var(--g);}
+.pow-use-btn.pepper-btn{background:rgba(232,80,0,.08);border:1px solid rgba(232,80,0,.35);color:#FF8C00;}
 .pow-use-btn.active{filter:brightness(1.4);}
 /* Eliminate 300ms tap delay everywhere */
 body{touch-action:manipulation;}
@@ -245,7 +245,7 @@ body{touch-action:manipulation;}
 
 <!-- HOME -->
 <div id="scr-home" class="scr on">
-  <div class="ghosts"><span class="gf">🍒</span><span class="gf">🌶️</span><span class="gf">🍒</span><span class="gf">🌶️</span></div>
+  <div class="ghosts"><span class="gf">🍒</span><span class="gf" style="filter:hue-rotate(165deg) saturate(2) brightness(1.3)">🌶️</span><span class="gf">🍒</span><span class="gf" style="filter:hue-rotate(165deg) saturate(2) brightness(1.3)">🌶️</span></div>
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
@@ -527,7 +527,7 @@ body{touch-action:manipulation;}
   <!-- Powerup use buttons — bottom-right corner -->
   <div id="pow-btns" style="position:fixed;bottom:8px;right:8px;z-index:100;display:none;flex-direction:column;align-items:center;gap:6px;">
     <button id="cherry-use-btn" class="pow-use-btn cherry-btn" style="opacity:0.35;">🍒<br>KILL</button>
-    <button id="pepper-use-btn" class="pow-use-btn pepper-btn" style="opacity:0.35;">🌶️<br>SPEED</button>
+    <button id="pepper-use-btn" class="pow-use-btn pepper-btn" style="opacity:0.35;"><span style="filter:hue-rotate(165deg) saturate(2) brightness(1.3)">🌶️</span><br>SPEED</button>
   </div>
 </div>
 
@@ -2659,8 +2659,8 @@ function initGame(allPlayers){
   allPlayers.forEach(p=>G.players.set(p.id, mkP(p)));
   // Only place initial powerups when host is starting a fresh game with no pre-existing maze
   if(isHost&&!hadRosterMaze){
-    for(let i=0;i<8;i++){ const s=rndPowSpot(); if(s) G.maze[s.y][s.x]=3; } // 8 cherries
-    for(let i=0;i<8;i++){ const s=rndPowSpot(); if(s) G.maze[s.y][s.x]=4; } // 8 peppers
+    for(let i=0;i<5;i++){ const s=rndPowSpot(); if(s) G.maze[s.y][s.x]=3; } // 5 cherries
+    for(let i=0;i<5;i++){ const s=rndPowSpot(); if(s) G.maze[s.y][s.x]=4; } // 5 peppers
   }
   updateScoreboard();
 }
@@ -3248,8 +3248,8 @@ function draw(){
     // LEFT of name = powerup being carried (held, ready to use)
     // RIGHT of name = powerup currently active (in use right now)
     const displayName=isMe?myName:(p.name||('P'+(p.num+1)));
-    const heldBadge=(p.held||[]).map(h=>h==='cherry'?'🍒':h==='pepper'?'🌶️':'').join('');
-    const activeBadge=(p.pow?'🍒':'')+(p.pep?'🌶️':'');
+    const heldBadge=(p.held||[]).map(h=>h==='cherry'?'🍒':h==='pepper'?'🟠':'').join('');
+    const activeBadge=(p.pow?'🍒':'')+(p.pep?'🟠':'');
     const label=(heldBadge?heldBadge+' ':'')+displayName+(activeBadge?' '+activeBadge:'');
     // Show wager in SOL above the name — same for all players in a paid lobby
     const solAmt=isMe?(ST.wagerSol||0):(p.sol||ST.wagerSol||0);
@@ -3280,8 +3280,8 @@ function draw(){
     const lfs=Math.max(5,Math.floor(T*0.26));
     // Held powerup display (bottom-left)
     const _hl=me.held||[];
-    const holdLabel=_hl.length===0?'-- no powerup held --':_hl.length===2?'🍒 V=KILL  🌶️ C=SPEED':_hl[0]==='cherry'?'🍒 KILL MODE — press V (or tap 🍒)':'🌶️ SPEED BOOST — press C (or tap button)';
-    const holdCol=_hl.length===0?'rgba(255,255,255,0.25)':_hl.length===2?'#FFD700':_hl[0]==='cherry'?'#FF6347':'#39FF14';
+    const holdLabel=_hl.length===0?'-- no powerup held --':_hl.length===2?'🍒 V=KILL  🟠 C=SPEED':_hl[0]==='cherry'?'🍒 KILL MODE — press V (or tap 🍒)':'🟠 SPEED BOOST — press C (or tap button)';
+    const holdCol=_hl.length===0?'rgba(255,255,255,0.25)':_hl.length===2?'#FFD700':_hl[0]==='cherry'?'#FF6347':'#FF8C00';
     ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(bx-2,by-lfs-2,bw+4,lfs+6);
     ctx.fillStyle=holdCol; ctx.font=_FNT_HUD; ctx.textAlign='left';
     ctx.fillText(holdLabel,bx,by);
@@ -3302,12 +3302,12 @@ function draw(){
       const cx=canvas.width-bw-10, cy=by+11;
       const ppct=me.pet/390;
       ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(cx-1,cy-1,bw+2,bh+2);
-      ctx.shadowColor='#39FF14'; ctx.shadowBlur=6;
-      ctx.fillStyle='#39FF14'; ctx.fillRect(cx,cy,bw*ppct,bh);
+      ctx.shadowColor='#FF8C00'; ctx.shadowBlur=6;
+      ctx.fillStyle='#FF8C00'; ctx.fillRect(cx,cy,bw*ppct,bh);
       ctx.shadowBlur=0;
-      ctx.strokeStyle='rgba(57,255,20,0.4)'; ctx.strokeRect(cx,cy,bw,bh);
-      ctx.fillStyle='#39FF14'; ctx.font=_FNT_HUD; ctx.textAlign='left';
-      ctx.fillText('🌶️ SPEED '+Math.ceil(me.pet/30)+'s',cx,cy-2);
+      ctx.strokeStyle='rgba(232,80,0,0.4)'; ctx.strokeRect(cx,cy,bw,bh);
+      ctx.fillStyle='#FF8C00'; ctx.font=_FNT_HUD; ctx.textAlign='left';
+      ctx.fillText('🟠 SPEED '+Math.ceil(me.pet/30)+'s',cx,cy-2);
     }
   }
 
