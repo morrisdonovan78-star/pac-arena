@@ -1763,7 +1763,7 @@ async function joinLobby(usd){
 // ═══════════════════════════════════════════════════════════
 // PAC-MAN PVP ENGINE
 // ═══════════════════════════════════════════════════════════
-const T=24,C=28,R=22,TICK_MS=33; let canvas,ctx,gLoop,rafHandle,frm=0,G={};
+const T=34,C=28,R=22,TICK_MS=33; let canvas,ctx,gLoop,rafHandle,frm=0,G={};
 let _camX=0,_camY=0,_camZoom=1; // camera: position in game-pixels, zoom multiplier
 const _FNT_LBL='bold 11px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",monospace';
 const _FNT_SOL='bold 8px monospace';
@@ -3020,7 +3020,11 @@ function draw(){
   ctx.fillStyle='#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
   // Camera follow: use prev-frame renderX (imperceptible 1-frame lag)
   const _cme0=G.players.get(myPid);
-  if(_cme0){ _camX=(_cme0.renderX!==undefined?_cme0.renderX+0.5:_cme0.x+0.5)*T; _camY=(_cme0.renderY!==undefined?_cme0.renderY+0.5:_cme0.y+0.5)*T; }
+  if(_cme0){
+    const _tx=(_cme0.renderX!==undefined?_cme0.renderX+0.5:_cme0.x+0.5)*T;
+    const _ty=(_cme0.renderY!==undefined?_cme0.renderY+0.5:_cme0.y+0.5)*T;
+    _camX+=(_tx-_camX)*0.18; _camY+=(_ty-_camY)*0.18;
+  }
   ctx.save();
   ctx.translate(canvas.width/2,canvas.height/2);
   ctx.scale(_camZoom,_camZoom);
