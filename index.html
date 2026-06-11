@@ -3094,11 +3094,7 @@ function draw(){
     const _ty=(_cme0.renderY!==undefined?_cme0.renderY+0.5:_cme0.y+0.5)*T;
     _camX+=(_tx-_camX)*0.18; _camY+=(_ty-_camY)*0.18;
   }
-  // Clamp camera: prevent black edges when zoomed in; follow player freely when zoomed out
-  const _visW=canvas.width/_camZoom, _visH=canvas.height/_camZoom;
-  const _mazeW=C*T, _mazeH=R*T;
-  if(_visW<_mazeW) _camX=Math.max(_visW/2,Math.min(_mazeW-_visW/2,_camX));
-  if(_visH<_mazeH) _camY=Math.max(_visH/2,Math.min(_mazeH-_visH/2,_camY));
+  // No clamping — camera always stays locked on the player at every zoom level
   if(_zoomSliderEl) _zoomSliderEl.value=String(_camZoom);
   ctx.save();
   ctx.translate(canvas.width/2,canvas.height/2);
