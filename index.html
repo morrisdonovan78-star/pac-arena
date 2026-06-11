@@ -1,4 +1,4 @@
-<!-- PAC ARENA v8 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v9 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -36,7 +36,7 @@
 // Block stale bfcache (back/forward navigation serving frozen game state)
 window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});
 })();</script>
-<title>PAC MONEY v8</title>
+<title>PAC MONEY v9</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
@@ -254,7 +254,7 @@ body{touch-action:manipulation;}
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
-    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v8</div>
+    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v9</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;">
     <div class="w-strip">
@@ -1763,7 +1763,8 @@ async function joinLobby(usd){
 // ═══════════════════════════════════════════════════════════
 // PAC-MAN PVP ENGINE
 // ═══════════════════════════════════════════════════════════
-const T=24,C=40,R=22,TICK_MS=33; let canvas,ctx,gLoop,rafHandle,frm=0,G={};
+const T=24,C=28,R=22,TICK_MS=33; let canvas,ctx,gLoop,rafHandle,frm=0,G={};
+let _camX=0,_camY=0,_camZoom=1; // camera: position in game-pixels, zoom multiplier
 const _FNT_LBL='bold 11px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",monospace';
 const _FNT_SOL='bold 8px monospace';
 const _FNT_HUD='bold 6px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",monospace';
@@ -1799,44 +1800,43 @@ function stopHostLoop(){
   if(_hostRaf){ cancelAnimationFrame(_hostRaf); _hostRaf=null; }
   gLoop=null;
 }
-// Vertical tunnel at cols 19-20 (new grid): rows 0-4 and 19-21 opened.
+// Vertical tunnel at cols 13-14: rows 0-4 and 19-21 opened.
 // Small dots removed entirely; cherries (3) and peppers (4) placed dynamically at runtime.
-// Maze widened to 40 cols (6 wall-padding cols added per side) to fill widescreen viewports.
 const MAZE=[
-[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-[1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1],
-[1,1,1,1,1,1,1,0,1,1,1,1,0,1,1,1,1,1,0,1,1,0,1,1,1,1,1,0,1,1,1,1,0,1,1,1,1,1,1,1],
-[1,1,1,1,1,1,1,0,1,0,0,1,0,1,0,0,0,1,0,1,1,0,1,0,0,0,1,0,1,0,0,1,0,1,1,1,1,1,1,1],
-[1,1,1,1,1,1,1,0,1,1,1,1,0,1,1,1,1,1,0,0,0,0,1,1,1,1,1,0,1,1,1,1,0,1,1,1,1,1,1,1],
-[1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1],
-[1,1,1,1,1,1,1,0,1,1,1,1,0,1,1,0,1,1,1,1,1,1,1,1,0,1,1,0,1,1,1,1,0,1,1,1,1,1,1,1],
-[1,1,1,1,1,1,1,0,1,1,1,1,0,1,1,0,1,0,0,0,0,0,0,1,0,1,1,0,1,1,1,1,0,1,1,1,1,1,1,1],
-[1,1,1,1,1,1,1,0,0,0,0,0,0,1,1,0,1,0,0,0,0,0,0,1,0,1,1,0,0,0,0,0,0,1,1,1,1,1,1,1],
-[1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,0,1,1,1,1,1,1,1,1,0,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1],
-[1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1],
-[1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1,1,0,0,0,0,1,1,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1],
-[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-[1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1,1,0,0,0,0,1,1,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1],
-[1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1],
-[1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,0,1,1,1,1,1,1,1,1,0,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1],
-[1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1],
-[1,1,1,1,1,1,1,0,1,1,1,1,0,1,1,1,1,1,0,1,1,0,1,1,1,1,1,0,1,1,1,1,0,1,1,1,1,1,1,1],
-[1,1,1,1,1,1,1,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1,1,1,1,1,1,1],
-[1,1,1,1,1,1,1,1,1,0,1,1,0,1,1,0,1,1,1,0,0,1,1,1,0,1,1,0,1,1,0,1,1,1,1,1,1,1,1,1],
-[1,1,1,1,1,1,1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,1,1,1,1,1,1,1],
-[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+[1,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+[1,0,1,1,1,1,0,1,1,1,1,1,0,1,1,0,1,1,1,1,1,0,1,1,1,1,0,1],
+[1,0,1,0,0,1,0,1,0,0,0,1,0,1,1,0,1,0,0,0,1,0,1,0,0,1,0,1],
+[1,0,1,1,1,1,0,1,1,1,1,1,0,0,0,0,1,1,1,1,1,0,1,1,1,1,0,1],
+[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+[1,0,1,1,1,1,0,1,1,0,1,1,1,1,1,1,1,1,0,1,1,0,1,1,1,1,0,1],
+[1,0,1,1,1,1,0,1,1,0,1,0,0,0,0,0,0,1,0,1,1,0,1,1,1,1,0,1],
+[1,0,0,0,0,0,0,1,1,0,1,0,0,0,0,0,0,1,0,1,1,0,0,0,0,0,0,1],
+[1,1,1,1,1,1,0,1,1,0,1,1,1,1,1,1,1,1,0,1,1,0,1,1,1,1,1,1],
+[1,1,1,1,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,1,1,0,1,1,1,1,1,1],
+[1,1,1,1,1,1,0,0,0,0,1,1,0,0,0,0,1,1,0,0,0,0,1,1,1,1,1,1],
+[0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0],
+[1,1,1,1,1,1,0,0,0,0,1,1,0,0,0,0,1,1,0,0,0,0,1,1,1,1,1,1],
+[1,1,1,1,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,1,1,0,1,1,1,1,1,1],
+[1,1,1,1,1,1,0,1,1,0,1,1,1,1,1,1,1,1,0,1,1,0,1,1,1,1,1,1],
+[1,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+[1,0,1,1,1,1,0,1,1,1,1,1,0,1,1,0,1,1,1,1,1,0,1,1,1,1,0,1],
+[1,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1],
+[1,1,1,0,1,1,0,1,1,0,1,1,1,0,0,1,1,1,0,1,1,0,1,1,0,1,1,1],
+[1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,1],
+[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
 ];
 function cloneMaze(){ return MAZE.map(r=>[...r]); }
 // Spawn positions verified against maze — every cell is walkable (not wall)
-const SPAWNS=[{x:7,y:1},{x:32,y:1},{x:7,y:5},{x:32,y:5},{x:12,y:9},{x:27,y:9},{x:15,y:10},{x:24,y:10},{x:9,y:12},{x:30,y:12},{x:7,y:16},{x:32,y:16},{x:15,y:18},{x:24,y:18},{x:7,y:20},{x:32,y:20}];
+const SPAWNS=[{x:1,y:1},{x:26,y:1},{x:1,y:5},{x:26,y:5},{x:6,y:9},{x:21,y:9},{x:9,y:10},{x:18,y:10},{x:3,y:12},{x:24,y:12},{x:1,y:16},{x:26,y:16},{x:9,y:18},{x:18,y:18},{x:1,y:20},{x:26,y:20}];
 function rndSpawn(){ return SPAWNS[Math.floor(Math.random()*SPAWNS.length)]; }
 // Powerup spawn spots — all verified walkable cells spread across the map
 const POW_SPOTS=[
-  {x:7,y:1},{x:32,y:1},{x:12,y:1},{x:27,y:1},
-  {x:7,y:5},{x:32,y:5},{x:12,y:5},{x:27,y:5},
-  {x:7,y:8},{x:32,y:8},{x:12,y:8},{x:27,y:8},
-  {x:7,y:16},{x:32,y:16},{x:12,y:16},{x:27,y:16},
-  {x:15,y:18},{x:24,y:18},{x:7,y:20},{x:32,y:20}
+  {x:1,y:1},{x:26,y:1},{x:6,y:1},{x:21,y:1},
+  {x:1,y:5},{x:26,y:5},{x:6,y:5},{x:21,y:5},
+  {x:1,y:8},{x:26,y:8},{x:6,y:8},{x:21,y:8},
+  {x:1,y:16},{x:26,y:16},{x:6,y:16},{x:21,y:16},
+  {x:9,y:18},{x:18,y:18},{x:1,y:20},{x:26,y:20}
 ];
 function rndPowSpot(){
   const free=POW_SPOTS.filter(s=>G.maze[s.y][s.x]===0);
@@ -2456,10 +2456,10 @@ function launchGame(){
   go('scr-game');
   canvas=document.getElementById('gc');
   ctx=canvas.getContext('2d');
-  const sc=Math.min(window.innerWidth/(C*T), window.innerHeight*1.1/(R*T));
-  canvas.width=Math.floor(C*T*sc);
-  canvas.height=Math.floor(R*T*sc);
-  ctx.scale(sc,sc);
+  canvas.width=window.innerWidth;
+  canvas.height=window.innerHeight;
+  _camZoom=Math.min(window.innerWidth/(C*T), window.innerHeight/(R*T));
+  _camX=(C*T)/2; _camY=(R*T)/2;
   document.getElementById('hpot').textContent=ST.lobbyUsd===0?'FREE':'$'+ST.lobbyUsd*2;
   // initGame() already called from Ably pkConnect
   document.addEventListener('keydown',onKey);
@@ -2683,6 +2683,9 @@ function onKey(e){
     // Powerup activation
     case'v': case'V': usePow('cherry');  e.preventDefault(); break;
     case'c': case'C': usePow('pepper');  e.preventDefault(); break;
+    // Zoom
+    case'z': case'Z':{ const minZ=Math.min(canvas.width/(C*T),canvas.height/(R*T))*0.5; _camZoom=Math.min(4,_camZoom*1.12); e.preventDefault(); break; }
+    case'x': case'X':{ const minZ=Math.min(canvas.width/(C*T),canvas.height/(R*T))*0.5; _camZoom=Math.max(minZ,_camZoom*0.89); e.preventDefault(); break; }
   }
 }
 // Update mobile powerup button opacity to reflect held state
@@ -3014,7 +3017,14 @@ function draw(){
   const now=performance.now(); // MUST be first — used by maze, ghosts and players below
   const dt=_lastDrawTs?Math.min(now-_lastDrawTs,50):16.67; // ms since last frame, capped at 50ms
   _lastDrawTs=now;
-  ctx.fillStyle='#000'; ctx.fillRect(0,0,C*T,R*T);
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  // Camera follow: use prev-frame renderX (imperceptible 1-frame lag)
+  const _cme0=G.players.get(myPid);
+  if(_cme0){ _camX=(_cme0.renderX!==undefined?_cme0.renderX+0.5:_cme0.x+0.5)*T; _camY=(_cme0.renderY!==undefined?_cme0.renderY+0.5:_cme0.y+0.5)*T; }
+  ctx.save();
+  ctx.translate(canvas.width/2,canvas.height/2);
+  ctx.scale(_camZoom,_camZoom);
+  ctx.translate(-_camX,-_camY);
 
   // ── Maze (offscreen cache) ───────────────────────────────────
   // Maze only changes when a dot is eaten or a full sync arrives.
@@ -3139,7 +3149,7 @@ function draw(){
     if(p.hat&&p.hat!=='none') drawHat(ctx,0,0,r,p.hat);
     ctx.restore();
     // Name label + SOL wager above the player
-    if(label && py>T*1.2){
+    if(label){
       ctx.save(); ctx.textAlign='center';
       if(solLabel){
         ctx.font=_FNT_SOL;
@@ -3171,26 +3181,27 @@ function draw(){
     const solLabel=solAmt>0?solAmt.toFixed(4)+'◎':'';
     pac(p, p.color, label, solLabel);
   });
+  ctx.restore(); // end world-space transform — HUD draws in screen space
 
   // ── Spectating overlay ───────────────────────────────────────
   if(isSpectating){
     ctx.save();
     ctx.fillStyle='rgba(0,0,0,0.35)';
-    ctx.fillRect(0,R*T/2-T*1.5,C*T,T*3);
-    ctx.font='bold '+Math.floor(T*0.65)+'px monospace';
+    ctx.fillRect(0,canvas.height/2-18,canvas.width,36);
+    ctx.font='bold 15px monospace';
     ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillStyle='rgba(0,0,0,0.8)';
-    ctx.fillText('👁 SPECTATING',C*T/2+1,R*T/2+1);
+    ctx.fillText('👁 SPECTATING',canvas.width/2+1,canvas.height/2+1);
     ctx.fillStyle='#FFD700';
-    ctx.fillText('👁 SPECTATING',C*T/2,R*T/2);
+    ctx.fillText('👁 SPECTATING',canvas.width/2,canvas.height/2);
     ctx.restore();
   }
 
   // ── Powerup HUD for local player ─────────────────────────────
   const me=G.players.get(myPid);
   if(me){
-    const bw=C*T*0.28, bh=T*0.32;
-    const bx=T*0.4, by=R*T-T*0.75;
+    const bw=canvas.width*0.28, bh=8;
+    const bx=10, by=canvas.height-18;
     const lfs=Math.max(5,Math.floor(T*0.26));
     // Held powerup display (bottom-left)
     const _hl=me.held||[];
@@ -3201,7 +3212,7 @@ function draw(){
     ctx.fillText(holdLabel,bx,by);
     // Cherry kill timer bar (bottom-left below held display)
     if(me.pow&&me.pt>0){
-      const cy=by+T*0.45;
+      const cy=by+11;
       const cpct=me.pt/300;
       ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(bx-1,cy-1,bw+2,bh+2);
       ctx.shadowColor='#FF4500'; ctx.shadowBlur=6;
@@ -3213,7 +3224,7 @@ function draw(){
     }
     // Pepper speed timer bar (bottom-right)
     if(me.pep&&me.pet>0){
-      const cx=C*T-bw-T*0.4, cy=by+T*0.45;
+      const cx=canvas.width-bw-10, cy=by+11;
       const ppct=me.pet/390;
       ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(cx-1,cy-1,bw+2,bh+2);
       ctx.shadowColor='#39FF14'; ctx.shadowBlur=6;
@@ -3230,16 +3241,16 @@ function draw(){
   _toasts.forEach((t,i)=>{
     const alpha=Math.min(1,t.ttl/25);
     const fs=Math.floor(T*0.52);
-    const ty=R*T*0.22+i*T*1.4;
+    const ty=canvas.height*0.15+i*34;
     ctx.save();
     ctx.globalAlpha=alpha;
     ctx.font=_FNT_TOA;
     ctx.textAlign='center'; ctx.textBaseline='middle';
     // Shadow
     ctx.fillStyle='rgba(0,0,0,0.85)';
-    ctx.fillText(t.msg,C*T/2+1,ty+1);
+    ctx.fillText(t.msg,canvas.width/2+1,ty+1);
     ctx.fillStyle=t.color;
-    ctx.fillText(t.msg,C*T/2,ty);
+    ctx.fillText(t.msg,canvas.width/2,ty);
     ctx.restore();
   });
 
@@ -3248,7 +3259,7 @@ function draw(){
   if(ST.balance>0){
     const bal=ST.balance.toFixed(4)+'◎';
     const usd=ST.solPrice?'≈ $'+(ST.balance*ST.solPrice).toFixed(2):'';
-    const bx=C*T-5, wy=5;
+    const bx=canvas.width-5, wy=5;
     ctx.save();
     ctx.font='bold 9px monospace'; ctx.textAlign='right'; ctx.textBaseline='top';
     // Only measure text width when the displayed strings change — measureText is slow
