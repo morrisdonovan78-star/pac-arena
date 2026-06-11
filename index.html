@@ -2458,7 +2458,7 @@ function launchGame(){
   ctx=canvas.getContext('2d');
   canvas.width=window.innerWidth;
   canvas.height=window.innerHeight;
-  _camZoom=Math.min(window.innerWidth/(C*T), window.innerHeight/(R*T));
+  _camZoom=Math.max(window.innerWidth/(C*T), window.innerHeight/(R*T));
   _camX=(C*T)/2; _camY=(R*T)/2;
   document.getElementById('hpot').textContent=ST.lobbyUsd===0?'FREE':'$'+ST.lobbyUsd*2;
   // initGame() already called from Ably pkConnect
