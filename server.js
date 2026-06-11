@@ -278,21 +278,29 @@ io.on('connection', socket => {
 
   socket.join(lobbyId);
 
-  const spawn = nextSpawn();
-  const player = {
-    id: pid, socketId: socket.id,
-    name: name || 'Player', color: color || '#FFD700',
-    x: spawn.x, y: spawn.y,
-    dx: 1, dy: 0, nx: 0, ny: 0,
-    prevX: spawn.x, prevY: spawn.y,
-    sc: 0, alive: true, mc: 0,
-    pow: false, pt: 0, pep: false, pet: 0,
-    held: [], sol: wagerSol || 0,
-    num: room.players.size
-  };
-  room.players.set(pid, player);
+  // Reconnect: if pid already in room, just update socketId and keep all game state
+  const existing = room.players.get(pid);
+  let player;
+  if (existing) {
+    existing.socketId = socket.id;
+    player = existing;
+  } else {
+    const spawn = nextSpawn();
+    player = {
+      id: pid, socketId: socket.id,
+      name: name || 'Player', color: color || '#FFD700',
+      x: spawn.x, y: spawn.y,
+      dx: 1, dy: 0, nx: 0, ny: 0,
+      prevX: spawn.x, prevY: spawn.y,
+      sc: 0, alive: true, mc: 0,
+      pow: false, pt: 0, pep: false, pet: 0,
+      held: [], sol: wagerSol || 0,
+      num: room.players.size
+    };
+    room.players.set(pid, player);
+  }
 
-  // Send full initial state to joining player
+  // Send full initial state to joining/rejoining player
   socket.emit('init', {
     pid,
     maze: room.maze,
@@ -303,11 +311,13 @@ io.on('connection', socket => {
     }))
   });
 
-  // Announce to others
-  socket.to(lobbyId).emit('join', {
-    id: pid, name: player.name, color: player.color,
-    x: player.x, y: player.y, num: player.num, sol: player.sol
-  });
+  // Only announce to others if this is a fresh join (not a reconnect)
+  if (!existing) {
+    socket.to(lobbyId).emit('join', {
+      id: pid, name: player.name, color: player.color,
+      x: player.x, y: player.y, num: player.num, sol: player.sol
+    });
+  }
 
   // Start game loop if not already running
   if (!room.interval) {

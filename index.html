@@ -1320,9 +1320,10 @@ async function pkConnect(roomId, gameToken){
         pid:myPid, lobbyId:roomId, gameToken:gameToken||null,
         name:myName, color:_mySkin.color, wagerSol:ST.wagerSol||0
       },
-      transports:['websocket'],
-      reconnectionAttempts:5,
+      transports:['websocket','polling'], // polling fallback prevents full drop on WebSocket hiccup
+      reconnectionAttempts:Infinity,
       reconnectionDelay:1000,
+      reconnectionDelayMax:5000,
     });
 
     await new Promise((res,rej)=>{
@@ -1373,6 +1374,12 @@ async function pkConnect(roomId, gameToken){
 
     _sio.on('elim',(data)=>{
       if(!G||G.over) return;
+      // Push to kill feed
+      const km=_playerMeta.get(data.killerId)||{}; const vm=_playerMeta.get(data.id)||{};
+      const kName=(km.name||(data.killerId||'').slice(0,6)||'???').toUpperCase();
+      const vName=(vm.name||(data.id||'').slice(0,6)||'???').toUpperCase();
+      _killFeed.push({killerName:kName,killerColor:km.color||'#FFD700',victimName:vName,victimColor:vm.color||'#FF69B4',ts:Date.now()});
+      if(_killFeed.length>6) _killFeed.shift();
       if(data.id===myPid){
         _spectateKillerPid=data.killerId||null;
         G.players.delete(myPid);
@@ -1408,7 +1415,13 @@ async function pkConnect(roomId, gameToken){
 
     _sio.on('disconnect',(reason)=>{
       if(reason==='io client disconnect') return;
-      addToast('Disconnected: '+reason,'#FF4444');
+      addToast('Connection lost — reconnecting…','#FFD700');
+    });
+    _sio.on('reconnect',()=>{
+      addToast('Reconnected!','#39FF14');
+    });
+    _sio.on('reconnect_failed',()=>{
+      addToast('Could not reconnect — check your internet','#FF4444');
     });
 
     // Ping measurement — send timestamp, server echoes it back
@@ -1435,6 +1448,7 @@ function pkSend(data){
 function pkDisconnect(){
   clearInterval(_guestInputLoop); _guestInputLoop=null;
   clearInterval(_pingInterval); _pingInterval=null; _ping=0;
+  _killFeed=[];
   ablyChannel=null;
   if(_sio){ try{ _sio.disconnect(); }catch(_){} _sio=null; }
   myPid=null; isHost=false; isSpectating=false; pkRoomId=null; _pkTick=0; _pkSentTick=0; _myHelloTs=0;
@@ -1702,6 +1716,7 @@ let _zoomSliderEl=null;                           // cached zoom slider element 
 let _joyDrawFn=null;                              // joystick draw function — called from main game loop
 let _guestInputLoop=null;                         // guest → host input heartbeat
 let _pingInterval=null, _ping=0;                  // round-trip latency to Socket.io server
+let _killFeed=[];                                 // [{killerName,killerColor,victimName,victimColor,ts}]
 
 // ── Kill reward — 90% of victim's wager to killer, 10% to creator ─
 async function claimKillReward(victimSol, victimAddress){
@@ -2523,6 +2538,12 @@ function eliminatePlayer(id, killerId){
   if(!G) return;
   // Capture victim's sol BEFORE deleting them from the map
   const victimSol = (G.players.get(id)||{}).sol || ST.wagerSol || 0;
+  // Push to kill feed
+  const km=_playerMeta.get(killerId)||{}; const vm=_playerMeta.get(id)||{};
+  const kName=(km.name||(killerId||'').slice(0,6)||'???').toUpperCase();
+  const vName=(vm.name||(id||'').slice(0,6)||'???').toUpperCase();
+  _killFeed.push({killerName:kName,killerColor:km.color||'#FFD700',victimName:vName,victimColor:vm.color||'#FF69B4',ts:Date.now()});
+  if(_killFeed.length>6) _killFeed.shift();
   G.players.delete(id);
   updateScoreboard();
   if(isHost) pkSend({t:'elim',id,killerId,victimSol});  // tell all guests (includes killer id + victim's sol)
@@ -2993,8 +3014,8 @@ function draw(){
       let ddx=p.x-p.renderX, ddy=p.y-p.renderY;
       if(ddx>C/2) ddx-=C; else if(ddx<-C/2) ddx+=C;
       if(ddy>R/2) ddy-=R; else if(ddy<-R/2) ddy+=R;
-      if(Math.abs(ddx)>2||Math.abs(ddy)>2){ p.renderX=p.x; p.renderY=p.y; } // snap on large gap
-      else{ p.renderX=((p.renderX+ddx*0.18)+C)%C; p.renderY=((p.renderY+ddy*0.18)+R)%R; }
+      if(Math.abs(ddx)>6||Math.abs(ddy)>6){ p.renderX=p.x; p.renderY=p.y; } // snap only on huge gap (reconnect etc)
+      else{ p.renderX=((p.renderX+ddx*0.28)+C)%C; p.renderY=((p.renderY+ddy*0.28)+R)%R; }
     } else {
       // ── Remote players + host's own player: dead-reckoning ───────
       // Advance render at game speed each draw frame so remote players glide
@@ -3009,7 +3030,7 @@ function draw(){
       if(ddx>C/2) ddx-=C; else if(ddx<-C/2) ddx+=C;
       if(ddy>R/2) ddy-=R; else if(ddy<-R/2) ddy+=R;
       const gap=Math.abs(ddx)+Math.abs(ddy);
-      if(gap>2.5){ p.renderX=p.x; p.renderY=p.y; } // large gap → snap
+      if(gap>6){ p.renderX=p.x; p.renderY=p.y; } // snap only on huge gap (reconnect etc)
       else {
         const cf=p.id===myPid?0.55:0.10; // host's own: strong snap; remotes: gentle
         p.renderX=((p.renderX+ddx*cf)+C)%C;
@@ -3278,6 +3299,37 @@ function draw(){
     ctx.fillText('Z/X=ZOOM',176,135);
     ctx.restore();
   }
+  // ── Kill feed (top-right) ────────────────────────────────────
+  if(_killFeed.length>0){
+    const now=Date.now();
+    _killFeed=_killFeed.filter(k=>now-k.ts<4000);
+    if(_killFeed.length>0){
+      ctx.save();
+      ctx.font='bold 9px monospace'; ctx.textBaseline='middle'; ctx.textAlign='right';
+      const rx=canvas.width-12, startY=60, rowH=19;
+      _killFeed.forEach((k,i)=>{
+        const age=now-k.ts;
+        const alpha=age<3000?1:1-(age-3000)/1000;
+        const y=startY+i*rowH;
+        // measure each segment
+        const vw=ctx.measureText(k.victimName).width;
+        const sw=ctx.measureText(' ☠ ').width;
+        const kw=ctx.measureText(k.killerName).width;
+        const totalW=kw+sw+vw;
+        // dark background pill
+        ctx.globalAlpha=alpha*0.65;
+        ctx.fillStyle='#000';
+        ctx.fillRect(rx-totalW-8,y-8,totalW+16,17);
+        ctx.globalAlpha=alpha;
+        // draw right-to-left: victim | skull | killer
+        ctx.fillStyle=k.victimColor; ctx.fillText(k.victimName,rx,y);
+        ctx.fillStyle='rgba(255,255,255,0.75)'; ctx.fillText(' ☠ ',rx-vw,y);
+        ctx.fillStyle=k.killerColor; ctx.fillText(k.killerName,rx-vw-sw,y);
+      });
+      ctx.globalAlpha=1; ctx.restore();
+    }
+  }
+
   // ── Ping display (bottom-right) ──────────────────────────────
   if(_sio&&_sio.connected&&_ping>0){
     const pCol=_ping<80?'#39FF14':_ping<150?'#FFD700':'#FF4444';
