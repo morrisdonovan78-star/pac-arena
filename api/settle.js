@@ -417,6 +417,13 @@ module.exports = async function handler(req, res) {
           const result2 = await sendAndConfirm(tx);
           sig = result2.sig; txConfirmed2 = result2.confirmed;
           await kvSet(rlKey, '1', 30); // rate-limit key: blocks next call for 30 s
+          // Delete victim's wager entry so they can't free-rejoin after being killed.
+          // victimAddress is public game state (wallet address visible to all players) —
+          // we guard against self-deletion and invalid addresses.
+          const va = body.victimAddress;
+          if (va && typeof va === 'string' && va !== playerAddress && va.length > 20) {
+            try { await kvDel('pw:' + va); } catch (_) {}
+          }
           break;
         } catch (e) {
           const isOnChainFail = e.message.includes('TX rejected') || e.message.includes('insufficient') || e.message.includes('0x1') || e.message.includes('-32002') || e.message.includes('Send failed');

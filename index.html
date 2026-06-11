@@ -1,4 +1,4 @@
-<!-- PAC ARENA v5 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v6 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -36,7 +36,7 @@
 // Block stale bfcache (back/forward navigation serving frozen game state)
 window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});
 })();</script>
-<title>PAC MONEY v5</title>
+<title>PAC MONEY v6</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
@@ -254,7 +254,7 @@ body{touch-action:manipulation;}
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
-    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v5</div>
+    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v6</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;">
     <div class="w-strip">
@@ -1475,7 +1475,7 @@ async function pkConnect(roomId, paidAblyToken){
         }
         // If I'm the killer (guest-side), instantly claim victim's wager
         if(msg.data.killerId===myPid && ST.lobbyUsd>0)
-          claimKillReward(msg.data.victimSol);
+          claimKillReward(msg.data.victimSol, msg.data.id);
       }
     });
 
@@ -1487,19 +1487,26 @@ async function pkConnect(roomId, paidAblyToken){
       if(G.players.has(d.id)) return; // already in game
 
       if(ST.lobbyUsd>0){
-        // Verify server-side that this player has an active wager in KV.
-        // Client-supplied sol/et fields can be forged from the browser console —
-        // pw:{address} in KV is only written by join.js after a verified on-chain payment.
-        try{
-          const ck=await fetch('/api/verify-entry?check=wager&address='+encodeURIComponent(d.id));
-          const cd=await ck.json();
-          if(!cd.valid){
-            console.warn('[rejoin-host] rejected',d.id,'— no active wager in KV (free-rejoin blocked)');
-            return;
+        // Verify server-side that pw:{address} exists in KV — written only by join.js
+        // after a verified on-chain payment. Forging this from the browser is impossible.
+        // Retry once: recordWager in doRejoin() and this check run concurrently, so the
+        // first check can arrive before KV is written. A 1.5s retry closes that race.
+        let wagerValid=false;
+        for(let attempt=0;attempt<2;attempt++){
+          if(attempt>0) await new Promise(r=>setTimeout(r,1500));
+          try{
+            const ck=await fetch('/api/verify-entry?check=wager&address='+encodeURIComponent(d.id));
+            const cd=await ck.json();
+            if(cd.valid){ wagerValid=true; break; }
+          }catch(_){
+            // Network error — fail open so a legit rejoin isn't silently blocked.
+            // The KV wager guard in settle.js still prevents any actual financial exploit.
+            console.warn('[rejoin-host] check-wager network error for',d.id,'— allowing (fail-open)');
+            wagerValid=true; break;
           }
-        }catch(_){
-          // Network error — fail safe: deny without KV confirmation
-          console.warn('[rejoin-host] check-wager failed for',d.id,'— rejoin denied');
+        }
+        if(!wagerValid){
+          console.warn('[rejoin-host] rejected',d.id,'— no active wager in KV after 2 checks');
           return;
         }
       }
@@ -1846,14 +1853,12 @@ let _cashoutInProgress=false;                     // debounce: prevent duplicate
 let _guestInputLoop=null;                         // guest → host input heartbeat
 
 // ── Kill reward — 90% of victim's wager to killer, 10% to creator ─
-async function claimKillReward(victimSol){
+async function claimKillReward(victimSol, victimAddress){
   if(!ST.address) return;
-  // Use the victim's actual wager; fall back to this player's wager if unavailable
   const rewardSol = (typeof victimSol === 'number' && victimSol > 0) ? victimSol : (ST.wagerSol || 0);
   if(!rewardSol) return;
-  playKillSfx(); // 🎵 ghost-eaten ascending blip
+  playKillSfx();
   try{
-    // Server applies same 10% creator fee as cashout — killer gets 90% of victim's wager
     const wagerLamports=Math.floor(rewardSol*solanaWeb3.LAMPORTS_PER_SOL);
     const estKill=(rewardSol*0.9).toFixed(4);
     addToast('⚔️ KILL! +~'+estKill+' SOL incoming…','#00FF7F');
@@ -1861,7 +1866,7 @@ async function claimKillReward(victimSol){
     const r=await fetch('/api/settle',{
       method:'POST',
       headers:{'Content-Type':'application/json','x-settle-sig':_kSig,'x-settle-ts':String(_kTs)},
-      body:JSON.stringify({action:'kill',playerAddress:ST.address,wagerLamports})
+      body:JSON.stringify({action:'kill',playerAddress:ST.address,wagerLamports,victimAddress:victimAddress||null})
     });
     let d; try{ d=await r.json(); }catch(_){ throw new Error('Server error (not JSON) — try again'); }
     if(!r.ok||d.error) throw new Error(d.error||'Server error '+r.status);
@@ -2197,6 +2202,7 @@ function freeLobbyCashout(){
 // ── Pay-to-Rejoin flow ────────────────────────────────────────
 let _rejoinCountdown=null;
 let _rejoinFromCashout=false; // true when player chose to rejoin after cashing out (vs being killed)
+let _rjPendingTxSig=null;    // confirmed on-chain txSig waiting for server sync — allows retry without new TX
 
 function openRejoinOverlay(){
   isSpectating=true;
@@ -2264,7 +2270,6 @@ function _doFreeRejoin(){
 }
 async function doRejoin(){
   if(!ST.address){ declineRejoin(); return; }
-  // Free lobby — skip payment, just respawn
   if(!_lobbyIsPaid){ _doFreeRejoin(); return; }
   const payBtn=document.getElementById('rjo-pay-btn');
   const giveBtn=document.getElementById('rjo-give-btn');
@@ -2277,55 +2282,60 @@ async function doRejoin(){
     resEl.style.display='block';
   }
 
-  payBtn.disabled=true; payBtn.textContent='PAYING…';
+  payBtn.disabled=true;
   giveBtn.disabled=true;
-  // Cancel the 30-second countdown immediately — Solana confirmations can take 60+ seconds
-  // and the auto-decline would fire mid-payment, hiding the overlay while the TX is in flight.
   if(_rejoinCountdown){ clearInterval(_rejoinCountdown); _rejoinCountdown=null; }
 
   try{
-    // Pay to rejoin: deposit full wager to escrow
-    const escPubkey=new solanaWeb3.PublicKey(ESCROW_PUBKEY);
-    const from=new solanaWeb3.PublicKey(ST.address);
     const lamps=Math.floor(ST.wagerSol*solanaWeb3.LAMPORTS_PER_SOL);
-    // Guard: wagerSol must be positive — catches console tampering
     if(lamps<=0){
       _rjStatus('Invalid wager amount. Reload the page and rejoin.','#FF4444');
       payBtn.disabled=false; payBtn.textContent='💰 TRY AGAIN'; giveBtn.disabled=false;
       return;
     }
-    _rjStatus('Signing payment transaction…');
-    const tx=new solanaWeb3.Transaction().add(
-      solanaWeb3.SystemProgram.transfer({fromPubkey:from,toPubkey:escPubkey,lamports:lamps})
-    );
-    const lb=await ST.conn.getLatestBlockhash('confirmed');
-    tx.recentBlockhash=lb.blockhash; tx.feePayer=from;
-    await signLocalTx(tx);
-    _rjStatus('Sending TX to Solana… (30-60s, please wait)');
-    const sig=await ST.conn.sendRawTransaction(tx.serialize());
-    _rjStatus('Confirming on-chain… do NOT close this window');
-    console.log('[rejoin] TX sent, confirming:', sig);
-    await ST.conn.confirmTransaction({signature:sig,blockhash:lb.blockhash,lastValidBlockHeight:lb.lastValidBlockHeight},'confirmed');
-    console.log('[rejoin] TX confirmed:', sig);
 
-    // Guard: if the game ended while the TX was confirming, tell the user so they don't lose SOL.
-    // Their deposit is on-chain and pw:{address} will be recorded so they can cashout next time.
+    let sig;
+    // If a previous attempt confirmed on-chain but failed to sync with the server,
+    // skip creating a new transaction — just retry the server sync with the same txSig.
+    if(_rjPendingTxSig){
+      sig=_rjPendingTxSig;
+      payBtn.textContent='RETRYING…';
+      _rjStatus('Retrying server sync — no new charge…');
+    } else {
+      payBtn.textContent='PAYING…';
+      const escPubkey=new solanaWeb3.PublicKey(ESCROW_PUBKEY);
+      const from=new solanaWeb3.PublicKey(ST.address);
+      _rjStatus('Signing payment transaction…');
+      const tx=new solanaWeb3.Transaction().add(
+        solanaWeb3.SystemProgram.transfer({fromPubkey:from,toPubkey:escPubkey,lamports:lamps})
+      );
+      const lb=await ST.conn.getLatestBlockhash('confirmed');
+      tx.recentBlockhash=lb.blockhash; tx.feePayer=from;
+      await signLocalTx(tx);
+      _rjStatus('Sending TX to Solana… (30-60s, please wait)');
+      sig=await ST.conn.sendRawTransaction(tx.serialize());
+      _rjStatus('Confirming on-chain… do NOT close this window');
+      console.log('[rejoin] TX sent, confirming:', sig);
+      await ST.conn.confirmTransaction({signature:sig,blockhash:lb.blockhash,lastValidBlockHeight:lb.lastValidBlockHeight},'confirmed');
+      console.log('[rejoin] TX confirmed:', sig);
+    }
+
     if(!G||G.over){
       _rjStatus('Game ended during payment — your SOL was deposited safely.<br>It will be credited to your next game.','#FF8C00');
-      console.warn('[rejoin] G.over after TX confirm — recording wager but not re-entering game');
-      // Still record the wager so they can cashout it next session
       const _rjPName=ST.email?ST.email.split('@')[0].slice(0,16).toUpperCase():'';
-      try{ await recordWager(ST.address,lamps,sig,pkRoomId,_rjPName); }catch(_){}
+      try{ await recordWager(ST.address,lamps,sig,pkRoomId,_rjPName); _rjPendingTxSig=null; }catch(_){}
       payBtn.disabled=false; payBtn.textContent='💰 TRY AGAIN'; giveBtn.disabled=false;
       return;
     }
 
-    // Record wager server-side (creates pw:{address} in KV so cashout works later)
     _rjStatus('Recording wager on server…');
     const _rjPName=ST.email?ST.email.split('@')[0].slice(0,16).toUpperCase():'';
+    let wagerRecorded=false;
     try {
       const rjResult=await recordWager(ST.address, lamps, sig, pkRoomId, _rjPName);
-      if(rjResult.entryToken) ST.entryToken=rjResult.entryToken; // refresh HMAC proof
+      if(rjResult.entryToken) ST.entryToken=rjResult.entryToken;
+      wagerRecorded=true;
+      _rjPendingTxSig=null;
       console.log('[rejoin] wager recorded, entryToken:', !!rjResult.entryToken);
     }
     catch(e){
@@ -2335,25 +2345,33 @@ async function doRejoin(){
       try {
         const rjResult2=await recordWager(ST.address, lamps, sig, pkRoomId, _rjPName);
         if(rjResult2.entryToken) ST.entryToken=rjResult2.entryToken;
+        wagerRecorded=true;
+        _rjPendingTxSig=null;
         console.log('[rejoin] wager recorded on retry');
       }
       catch(e2){
-        // TX is on-chain so the deposit exists — log but don't block the rejoin.
-        // Cashout will fall back to checking escrow balance.
-        addToast('⚠️ Wager server sync failed — cashout support may be needed.','#FF8C00');
+        // TX confirmed on-chain but server failed to record — save sig so TRY AGAIN retries
+        // the server sync only, without charging SOL again.
+        _rjPendingTxSig=sig;
         console.error('[rejoin] recordWager failed twice:', e2.message);
+        _rjStatus(
+          'Server sync failed — your payment IS confirmed on-chain.<br>'+
+          '<b>Click TRY AGAIN to retry sync (no new charge).</b><br>'+
+          '<small style="color:#aaa">'+e2.message+'</small>',
+          '#FF8C00'
+        );
+        payBtn.disabled=false; payBtn.textContent='🔄 TRY AGAIN (no charge)';
+        giveBtn.disabled=false;
+        return; // STOP — do NOT add player to game until pw:{address} is written to KV
       }
     }
 
-    // Re-check game state after async operations — game might have ended
     if(!G||G.over){
       _rjStatus('Game ended — your deposit is safe. Start a new game to continue.','#FF8C00');
       payBtn.disabled=false; payBtn.textContent='💰 TRY AGAIN'; giveBtn.disabled=false;
       return;
     }
 
-    // Add self back to the game at a random spawn
-    _rjStatus('Joining game…');
     const sp=rndSpawn();
     const _rjName=ST.email?ST.email.split('@')[0].slice(0,8).toUpperCase():'';
     G.players.set(myPid,{
@@ -2372,20 +2390,15 @@ async function doRejoin(){
     if(G.spectators) G.spectators.delete(myPid);
     updateScoreboard();
 
-    // Re-register keyboard handler in case it was removed
     document.removeEventListener('keydown',onKey);
     document.addEventListener('keydown',onKey);
 
-    // Restart RAF and host loop in case they somehow stalled during the long payment wait
     if(!rafHandle) rafHandle=requestAnimationFrame(rafDraw);
     if(isHost&&!_hostRaf) startHostLoop();
 
-    // Tell host (and all other guests via broadcast) that we're back
-    // Include entryToken so host can verify we actually paid (closes free-rejoin exploit)
     if(ablyChannel) ablyChannel.publish('rejoin',{id:myPid, name:_rjName, sol:ST.wagerSol||0, et:ST.entryToken||null},()=>{});
-    console.log('[rejoin] published rejoin event');
+    console.log('[rejoin] published rejoin event, entryToken:', !!ST.entryToken);
 
-    // Restore full in-game UI
     document.getElementById('rejoin-overlay').style.display='none';
     const _sp=document.getElementById('spectate-panel'); if(_sp) _sp.style.display='none';
     const _pb=document.getElementById('pow-btns'); if(_pb) _pb.style.display='flex';
@@ -2408,6 +2421,7 @@ async function doRejoin(){
 function declineRejoin(){
   if(_rejoinCountdown){ clearInterval(_rejoinCountdown); _rejoinCountdown=null; }
   _rejoinFromCashout=false;
+  _rjPendingTxSig=null;
   document.getElementById('rejoin-overlay').style.display='none';
   // Transition to spectate mode — stay connected and watch the live game
   isSpectating=true;
@@ -2620,7 +2634,7 @@ function eliminatePlayer(id, killerId){
   // Local player was killed → offer pay-to-rejoin instead of immediately ending game
   if(id===myPid) openRejoinOverlay();
   // If I'm the killer, instantly claim the victim's wager from escrow
-  if(killerId===myPid && ST.lobbyUsd>0) claimKillReward(victimSol);
+  if(killerId===myPid && ST.lobbyUsd>0) claimKillReward(victimSol, id);
 }
 
 function updateScoreboard(){
