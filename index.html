@@ -39,7 +39,7 @@ window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(tr
 <title>PAC MONEY v11</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
-<script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <!-- Inline Buffer polyfill: @solana/web3.js needs window.Buffer in browsers.
      CDN-loaded CommonJS modules don't work as script tags, so we inline it. -->
 <script>
@@ -1290,243 +1290,106 @@ function populateLobby(){
 const PLAYER_COLORS=['#FFD700','#FF69B4','#00BFFF','#FF4500','#39FF14','#FF1493','#00FFFF','#DA70D6'];
 function colorFromId(id){ let h=0; for(let i=0;i<id.length;i++) h=(h*31+id.charCodeAt(i))&0x7FFFFFFF; return PLAYER_COLORS[h%PLAYER_COLORS.length]; }
 
-let _pkTick=0;       // throttle counter for state sends
-let _pkSentTick=0;   // counts only the packets actually sent (not skipped) — used for full-maze sync
-let _myHelloTs=0; // my join-timestamp, used for host-conflict resolution
+const SIO_URL='https://airport-telephone-commercial-roll.trycloudflare.com';
+let _playerMeta=new Map();
+let _pkTick=0;
+let _pkSentTick=0;
+let _myHelloTs=0;
 
-async function pkConnect(roomId, paidAblyToken){
+async function pkConnect(roomId, gameToken){
   pkRoomId=roomId;
-  const clientId=ST.address||('anon-'+Math.random().toString(36).slice(2,8));
-  myPid=clientId;
+  myPid=ST.address||('anon-'+Math.random().toString(36).slice(2,8));
+  isHost=false;
+  _playerMeta.clear();
+
+  const isPaidLobby=roomId!=='free-lobby';
+  if(isPaidLobby && !gameToken){
+    lg('mm-log','❌ Paid lobby requires a verified deposit — use the lobby buttons to join','lerr');
+    return;
+  }
+
+  const myName=ST.email?ST.email.split('@')[0].slice(0,8).toUpperCase():'';
+  _playerMeta.set(myPid,{color:_mySkin.color,hat:_mySkin.hat,trail:_mySkin.trail||'none',eyes:_mySkin.eyes||'dot',aura:_mySkin.aura||'none',name:myName,sol:ST.wagerSol||0});
+
+  document.getElementById('mm-sub').textContent='Connecting to server…';
+  lg('mm-log','Connecting…','lhi');
+
   try{
-    // ── Step 1: get Ably token ─────────────────────────────────────────────────
-    // Paid lobbies MUST have a token issued by join.js after deposit verification.
-    // Guard here so console-bypass attempts (pkConnect('gold-lobby')) fail immediately
-    // before Ably is even contacted — the Ably capability restriction is a second layer.
-    const isPaidLobby = roomId==='gold-lobby' || roomId==='diamond-lobby';
-    if(isPaidLobby && !paidAblyToken){
-      throw new Error('Paid lobby requires a verified deposit — use the lobby buttons to join');
-    }
-    let ablyToken=paidAblyToken||null;
-    if(!ablyToken){
-      try{
-        const ctrl=new AbortController();
-        const tOut=setTimeout(()=>ctrl.abort(),7000);
-        const tr=await fetch('/api/ably-token?clientId='+encodeURIComponent(clientId),
-                             {signal:ctrl.signal});
-        clearTimeout(tOut);
-        const td=await tr.json();
-        if(td && td.token){ ablyToken=td.token; }
-        else{ throw new Error(td.error||'Token server returned no token'); }
-      }catch(e){
-        const msg=e.message||'unreachable';
-        if(msg.includes('ABLY_KEY')){
-          const isLive=window.location.hostname!=='localhost'&&window.location.hostname!=='127.0.0.1';
-          if(isLive)
-            throw new Error('Ably key missing on server — go to Vercel dashboard → Settings → Environment Variables → add ABLY_KEY, then redeploy');
-          else
-            throw new Error('Ably key missing — open server.py, paste your key on the ABLY_KEY line, then restart LAUNCH.bat');
-        }
-        const isLive=window.location.hostname!=='localhost'&&window.location.hostname!=='127.0.0.1';
-        throw new Error(isLive
-          ? 'Cannot reach Ably token server: '+msg+' — check Vercel deployment and ABLY_KEY env var'
-          : 'Cannot reach token server: '+msg+' — make sure LAUNCH.bat is running');
-      }
-    }
-
-    // ── Step 2: connect with the fetched token (no authUrl, no second round-trip) ──
-    ablyRt=new Ably.Realtime({
-      token: ablyToken,   // short-lived token — master key stays on the server
-      clientId,
-      echoMessages:  false,
-      transports:    ['web_socket'], // skip long-poll fallback — WebSocket is faster and lower-latency
-      closeOnUnload: true,           // clean presence leave when tab closes
-      disconnectedRetryTimeout: 1000,
-      suspendedRetryTimeout:    3000,
-      httpMaxRetryCount: 3,
-      transportParams: { heartbeatInterval: 20000 },
+    _sio=io(SIO_URL,{
+      auth:{
+        pid:myPid, lobbyId:roomId, gameToken:gameToken||null,
+        name:myName, color:_mySkin.color, wagerSol:ST.wagerSol||0
+      },
+      transports:['websocket'],
+      reconnectionAttempts:5,
+      reconnectionDelay:1000,
     });
+
     await new Promise((res,rej)=>{
-      ablyRt.connection.once('connected',res);
-      ablyRt.connection.once('failed',  ()=>rej(new Error('Ably connection failed — key may be wrong or expired. Check ably.com')));
-      ablyRt.connection.once('suspended',()=>rej(new Error('Ably suspended — network may be offline')));
-      setTimeout(()=>rej(new Error('Connection timeout — check internet and try again')),15000);
-    });
-    ablyChannel=ablyRt.channels.get('pac-arena-'+roomId);
-    const sp=rndSpawn();
-    _myHelloTs=Date.now();
-    const myHello={
-      id:myPid, spawn:[sp.x,sp.y], color:_mySkin.color, ts:_myHelloTs,
-      hat:   _mySkin.hat,
-      trail: _mySkin.trail||'none',
-      eyes:  _mySkin.eyes||'dot',
-      aura:  _mySkin.aura||'none',
-      name: ST.email ? ST.email.split('@')[0].slice(0,8).toUpperCase() : '',
-      sol:  ST.wagerSol || 0,
-      et:   ST.entryToken || null  // HMAC proof of payment — verified server-side by host/guests
-    };
-
-    // hellos map: id → {id,spawn,color,ts}  — everyone we know about in this lobby
-    const hellos=new Map();
-    hellos.set(myPid,myHello); // always include ourselves
-
-    // ── hello: another player announced themselves ─────────
-    ablyChannel.subscribe('hello',async(msg)=>{
-      const d=msg.data;
-      if(!d||!d.id||d.id===myPid) return;
-      if(!hellos.has(d.id)) hellos.set(d.id,d);
-      // If game already running and we're host, add player + send roster+maze IMMEDIATELY.
-      // Do NOT await verify-entry first — that fetch takes 300-500ms and freezes all players.
-      // Security: entry token is verified async below; invalid players are removed within ~500ms.
-      // The Ably token itself (issued only by join.js after on-chain verification) is the primary gate.
-      if(G&&!G.over&&isHost){
-        if(!G.players.has(d.id))
-          addPlayer({ id:d.id, num:G.players.size, color:d.color||colorFromId(d.id), hat:d.hat||'none', trail:d.trail||'none', eyes:d.eyes||'dot', aura:d.aura||'none', spawn:d.spawn||[14,18], name:d.name||'', sol:d.sol||0 });
-        const rp=[]; hellos.forEach(h=>rp.push(h));
-        // Include current maze so the late joiner gets powerups immediately (no 2-second wait)
-        ablyChannel.publish('roster',{players:rp, maze:G.maze},()=>{});
-      }
-      // Background verification for paid lobbies — runs after roster is already sent
-      if(ST.lobbyUsd>0&&isHost){
-        if(!d.et){
-          // No entry token at all — kick immediately
-          console.warn('[host] rejected player with no entry token:',d.id.slice(0,8)+'…');
-          removePlayer(d.id); hellos.delete(d.id); return;
-        }
-        try{
-          const ck=await fetch('/api/verify-entry?address='+encodeURIComponent(d.id)+'&lobby='+encodeURIComponent(pkRoomId)+'&token='+encodeURIComponent(d.et));
-          const cd=await ck.json();
-          if(!cd.valid){
-            console.warn('[host] rejected unverified player:',d.id.slice(0,8)+'…');
-            removePlayer(d.id); hellos.delete(d.id);
-          }
-        }catch(_){ /* API down — keep player to avoid blocking legit players */ }
-      }
+      const tOut=setTimeout(()=>rej(new Error('Connection timeout — check internet and try again')),15000);
+      _sio.once('connect',()=>{ clearTimeout(tOut); res(); });
+      _sio.once('connect_error',(e)=>{ clearTimeout(tOut); rej(new Error('Cannot reach game server: '+e.message)); });
+      _sio.once('err',(msg)=>{ clearTimeout(tOut); rej(new Error(msg||'Server rejected connection')); });
     });
 
-    // ── roster: host sends full player list to late joiners ─
-    let _hostVerified=false;
-    ablyChannel.subscribe('roster',async(msg)=>{
-      if(!msg.data||!msg.data.players) return;
-      // Guests verify the host's entry token on first roster receipt.
-      // Prevents a free-rider from being host and collecting kill payouts they didn't pay for.
-      if(!isHost&&ST.lobbyUsd>0&&!_hostVerified){
-        _hostVerified=true;
-        const hostHello=msg.data.players.find(h=>h.id!==myPid&&h.et);
-        if(hostHello){
-          try{
-            const ck=await fetch('/api/verify-entry?address='+encodeURIComponent(hostHello.id)+'&lobby='+encodeURIComponent(pkRoomId)+'&token='+encodeURIComponent(hostHello.et));
-            const cd=await ck.json();
-            if(!cd.valid){
-              addToast('Host payment not verified — leaving lobby','#FF4444');
-              leaveGame();
-              return;
-            }
-          }catch(_){}
-        }
-      }
-      // Capture maze from roster so initGame() can start with correct powerup positions
-      if(msg.data.maze) _rosterMaze=msg.data.maze;
-      msg.data.players.forEach(h=>{
-        if(h.id&&h.id!==myPid&&!hellos.has(h.id)) hellos.set(h.id,h);
-      });
+    ablyChannel={ publish:(type,data,cb)=>{ if(_sio) _sio.emit(type,data); if(cb) cb(); } };
+
+    _sio.on('init',(data)=>{
+      if(!data) return;
+      (data.players||[]).forEach(h=>_playerMeta.set(h.id,{
+        color:h.color||colorFromId(h.id), hat:'none', trail:'none', eyes:'dot', aura:'none',
+        name:h.name||'', sol:h.sol||0
+      }));
+      if(data.maze) _rosterMaze=data.maze;
+      const allPlayers=(data.players||[]).map((h,i)=>({
+        id:h.id, num:i, color:h.color||colorFromId(h.id),
+        spawn:[h.x||14,h.y||18], name:h.name||'', sol:h.sol||0,
+        hat:'none', trail:'none', eyes:'dot', aura:'none'
+      }));
+      initGame(allPlayers);
+      document.getElementById('mm-sub').textContent='Connected!';
+      lg('mm-log','Joined with '+allPlayers.length+' player(s)','lok');
+      setTimeout(()=>launchGame(),300);
     });
 
-    // ── state from host ────────────────────────────────────
-    ablyChannel.subscribe('s',(msg)=>{
+    _sio.on('s',(data)=>{
       if(!G||(G.over&&!isSpectating)) return;
-      // Conflict resolution: if two hosts exist, the one with the higher ts steps down
-      if(isHost&&msg.data.hostTs!==undefined&&msg.data.hostTs<_myHelloTs){
-        isHost=false; stopHostLoop();
-        lg('mm-log','Stepped down — older host found','lwarn');
-      }
-      if(!isHost) _pendingState=msg.data; // queue latest; draw() drains once per frame
+      _pendingState=data;
     });
 
-    // ── input from guests ──────────────────────────────────
-    ablyChannel.subscribe('in',(msg)=>{
-      if(isHost&&G&&!G.over){
-        const p=G.players.get(msg.clientId);
-        if(p){
-          p.nx=msg.data.dx; p.ny=msg.data.dy;
-          // Eagerly commit the turn NOW if the player is already at a valid intersection.
-          // Without this, the turn would wait up to one full tick (~33 ms) for moveP() to run.
-          if((p.nx!==0||p.ny!==0)&&!isWall(p.x,p.y,p.nx,p.ny)){ p.dx=p.nx; p.dy=p.ny; }
-        }
-      }
+    _sio.on('join',(h)=>{
+      if(!h||!h.id) return;
+      _playerMeta.set(h.id,{color:h.color||colorFromId(h.id),hat:'none',trail:'none',eyes:'dot',aura:'none',name:h.name||'',sol:h.sol||0});
+      if(G&&!G.over&&!G.players.has(h.id))
+        addPlayer({id:h.id,num:G.players.size,color:h.color||colorFromId(h.id),
+          hat:'none',trail:'none',eyes:'dot',aura:'none',spawn:[h.x||14,h.y||18],name:h.name||'',sol:h.sol||0});
     });
 
-    // ── elimination ────────────────────────────────────────
-    ablyChannel.subscribe('elim',(msg)=>{
-      if(_hostPid&&msg.clientId!==_hostPid) return; // reject kills not from the authenticated host
-      if(!isHost&&G&&!G.over){
-        if(msg.data.id===myPid){
-          // Local player killed → offer pay-to-rejoin (guest side)
-          _spectateKillerPid=msg.data.killerId||null;
-          G.players.delete(myPid);
-          updateScoreboard();
-          openRejoinOverlay();
-        } else {
-          removePlayer(msg.data.id);
-        }
-        // If I'm the killer (guest-side), instantly claim victim's wager
-        if(msg.data.killerId===myPid && ST.lobbyUsd>0)
-          claimKillReward(msg.data.victimSol, msg.data.id);
-      }
+    _sio.on('leave',(data)=>{
+      if(!data||!data.id) return;
+      if(G&&!G.over) removePlayer(data.id);
+      _playerMeta.delete(data.id);
     });
 
-    // ── player rejoin (paid to re-enter) ──────────────────
-    ablyChannel.subscribe('rejoin',async(msg)=>{
-      if(!isHost||!G||G.over) return;
-      const d=msg.data;
-      if(!d||!d.id||d.id===myPid) return;
-      if(msg.clientId!==d.id) return; // player can only rejoin as their own authenticated address
-      if(G.players.has(d.id)) return; // already in game
-
-      if(ST.lobbyUsd>0){
-        // Verify server-side that pw:{address} exists in KV — written only by join.js
-        // after a verified on-chain payment. Forging this from the browser is impossible.
-        // Retry once: recordWager in doRejoin() and this check run concurrently, so the
-        // first check can arrive before KV is written. A 1.5s retry closes that race.
-        let wagerValid=false;
-        for(let attempt=0;attempt<2;attempt++){
-          if(attempt>0) await new Promise(r=>setTimeout(r,1500));
-          try{
-            const ck=await fetch('/api/verify-entry?check=wager&address='+encodeURIComponent(d.id));
-            const cd=await ck.json();
-            if(cd.valid){ wagerValid=true; break; }
-          }catch(_){
-            // Network error — fail open so a legit rejoin isn't silently blocked.
-            // The KV wager guard in settle.js still prevents any actual financial exploit.
-            console.warn('[rejoin-host] check-wager network error for',d.id,'— allowing (fail-open)');
-            wagerValid=true; break;
-          }
-        }
-        if(!wagerValid){
-          console.warn('[rejoin-host] rejected',d.id,'— no active wager in KV after 2 checks');
-          return;
-        }
+    _sio.on('elim',(data)=>{
+      if(!G||G.over) return;
+      if(data.id===myPid){
+        _spectateKillerPid=data.killerId||null;
+        G.players.delete(myPid);
+        updateScoreboard();
+        openRejoinOverlay();
+      } else {
+        removePlayer(data.id);
       }
-
-      const sp=rndSpawn();
-      G.players.set(d.id,{
-        id:d.id, num:G.players.size, color:d.color||colorFromId(d.id), hat:d.hat||'none',
-        trail:d.trail||'none', eyes:d.eyes||'dot', aura:d.aura||'none', _trail:[],
-        x:sp.x, y:sp.y, dx:0, dy:0, nx:0, ny:0,
-        prevX:sp.x, prevY:sp.y, renderX:sp.x, renderY:sp.y,
-        sc:0, lives:1, pow:false, pt:0, mc:0, pep:false, pet:0, held:[],
-        name:d.name||'', sol:d.sol||0
-      });
-      updateScoreboard();
-      console.log('[rejoin-host] admitted',d.id,'sol=',d.sol);
+      if(data.killerId===myPid&&ST.lobbyUsd>0)
+        claimKillReward(data.victimSol,data.id);
     });
 
-    // ── spectate: player removed themselves from game ──────
-    ablyChannel.subscribe('spectate',(msg)=>{
-      if(!G||!msg.data||!msg.data.id) return;
+    _sio.on('spectate',(data)=>{
+      if(!G||!data||!data.id) return;
       if(!G.spectators) G.spectators=new Set();
-      G.spectators.add(msg.data.id);
-      removePlayer(msg.data.id);
+      G.spectators.add(data.id);
+      removePlayer(data.id);
       const cnt=G.spectators.size;
       const el=document.getElementById('spec-count');
       const box=document.getElementById('spec-count-box');
@@ -1534,95 +1397,42 @@ async function pkConnect(roomId, paidAblyToken){
       if(box) box.style.display=cnt>0?'flex':'none';
     });
 
-    // ── powerup use from guest ─────────────────────────────
-    ablyChannel.subscribe('pow',(msg)=>{
-      if(isHost&&G&&!G.over&&msg.data){
-        const p=G.players.get(msg.clientId); // clientId is Ably-authenticated — ignore data.id to prevent spoofing
-        if(p&&(p.held||[]).includes(msg.data.type)){
-          p.held=(p.held||[]).filter(h=>h!==msg.data.type);
-          if(msg.data.type==='cherry'){ p.pow=true; p.pt=300; }
-          else if(msg.data.type==='pepper'){ p.pep=true; p.pet=390; }
-        }
-      }
+    _sio.on('chat',(data)=>{
+      if(!data||((!G||G.over)&&!isSpectating)) return;
+      addChatMessage((data.name||'???').slice(0,8),(data.text||'').slice(0,60),colorFromId((data.id||'').toString()));
     });
 
-    // ── chat messages ──────────────────────────────────────
-    ablyChannel.subscribe('chat',(msg)=>{
-      if(!msg.data||((!G||G.over)&&!isSpectating)) return;
-      const id=(msg.data.id||'').toString();
-      const name=(msg.data.name||'???').slice(0,8);
-      const text=(msg.data.text||'').slice(0,60);
-      addChatMessage(name, text, colorFromId(id));
+    _sio.on('gameover',()=>{
+      if(isSpectating){ addToast('🏁 GAME OVER — returning to lobby…','#FF6B6B'); setTimeout(leaveSpectate,3000); }
     });
 
-    // ── game ended — notify spectators ─────────────────────
-    ablyChannel.subscribe('gameover',(msg)=>{
-      if(_hostPid&&msg.clientId!==_hostPid) return; // reject game-over signals not from the authenticated host
-      if(isSpectating){
-        addToast('🏁 GAME OVER — returning to lobby…','#FF6B6B');
-        setTimeout(leaveSpectate, 3000);
-      }
+    _sio.on('disconnect',(reason)=>{
+      if(reason==='io client disconnect') return;
+      addToast('Disconnected: '+reason,'#FF4444');
     });
 
-    // ── Presence: used only to detect disconnects ──────────
-    await new Promise((res,rej)=>ablyChannel.presence.enter({},err=>err?rej(err):res()));
-    ablyChannel.presence.subscribe('leave',(m)=>{
-      if(G&&!G.over) removePlayer(m.clientId);
-      hellos.delete(m.clientId);
-      // Check if we should become the new host
-      if(!isHost){
-        const alive=[...hellos.values()].sort((a,b)=>(a.ts-b.ts)||(a.id<b.id?-1:1));
-        if(alive.length){
-          _hostPid=alive[0].id; // keep host tracker in sync with who we expect to be host
-          if(alive[0].id===myPid){
-            isHost=true;
-            if(G&&!G.over&&!_hostRaf) startHostLoop();
-            lg('mm-log','You are now HOST','lwarn');
-          }
-        }
-      }
-    });
-
-    // ── Announce ourselves to lobby ────────────────────────
-    ablyChannel.publish('hello',myHello,()=>{});
     document.getElementById('mm-sub').textContent='Looking for players…';
-    lg('mm-log','Announced — waiting 0.8 s for others…','lhi');
-
-    // ── Collect hellos/rosters for 800 ms (faster player discovery) ───
-    await new Promise(r=>setTimeout(r,800));
-
-    // Sort by join-time; use id as stable tiebreaker
-    const allPlayers=[...hellos.values()]
-      .sort((a,b)=>(a.ts-b.ts)||(a.id<b.id?-1:1))
-      .map((h,i)=>({ id:h.id, num:i, color:h.color||colorFromId(h.id), spawn:h.spawn||[14,18], name:h.name||'', sol:h.sol||0,
-        hat:h.hat||'none', trail:h.trail||'none', eyes:h.eyes||'dot', aura:h.aura||'none' }));
-
-    isHost=allPlayers.length>0&&allPlayers[0].id===myPid;
-    _hostPid=allPlayers.length>0?allPlayers[0].id:myPid;
-    initGame(allPlayers);
-    document.getElementById('mm-sub').textContent=isHost?'You are HOST':'Connected!';
-    lg('mm-log',isHost?('HOST — '+allPlayers.length+' player(s)'):('Joined with '+allPlayers.length+' player(s)'),'lok');
-    setTimeout(()=>launchGame(),300);
+    lg('mm-log','Connected to game server — waiting for init…','lok');
 
   }catch(e){
     lg('mm-log','❌ '+e.message,'lerr');
-    if(e.message.includes('Vercel'))
-      lg('mm-log','→ vercel.com → your project → Settings → Environment Variables → add ABLY_KEY','lwarn');
-    if(e.message.includes('timeout')||e.message.includes('network')||e.message.includes('internet'))
+    if(e.message.includes('timeout')||e.message.includes('internet'))
       lg('mm-log','Tip: check your internet connection and reload','lwarn');
+    if(_sio){ try{ _sio.disconnect(); }catch(_){} _sio=null; }
+    ablyChannel=null;
   }
 }
-
 function pkSend(data){
   if(ablyChannel) ablyChannel.publish(data.t, data, ()=>{});
 }
 
 function pkDisconnect(){
   clearInterval(_guestInputLoop); _guestInputLoop=null;
-  if(ablyChannel){ try{ ablyChannel.presence.leave(); }catch(_){} ablyChannel=null; }
-  if(ablyRt){ try{ ablyRt.close(); }catch(_){} ablyRt=null; }
+  ablyChannel=null;
+  if(_sio){ try{ _sio.disconnect(); }catch(_){} _sio=null; }
   myPid=null; isHost=false; isSpectating=false; pkRoomId=null; _pkTick=0; _pkSentTick=0; _myHelloTs=0;
   _joiningLobby=false; _lobbyIsPaid=false; _hostPid=null;
+  _playerMeta.clear();
   stopPacManMusic();
 }
 
@@ -1648,7 +1458,7 @@ function applyRemoteState(d){
     const heldVal=[]; if(heldN&1) heldVal.push('cherry'); if(heldN&2) heldVal.push('pepper');
     let p=G.players.get(id);
     if(!p){
-      const _sh=hellos.get(id)||{};
+      const _sh=_playerMeta.get(id)||{};
       G.players.set(id,{ id, num:G.players.size, color:_sh.color||colorFromId(id), hat:_sh.hat||'none',
         trail:_sh.trail||'none', eyes:_sh.eyes||'dot', aura:_sh.aura||'none', _trail:[],
         x, y, dx, dy, nx:dx, ny:dy, sc, lives, pow:!!pow, pt, mc:0,
@@ -1746,14 +1556,14 @@ async function joinLobby(usd){
     // join.js also returns a lobby-specific Ably token; without it pkConnect
     // cannot enter presence on the paid channel and game entry is blocked.
     lg('mm-log','Recording wager…','lhi');
-    const roomId=usd===1?'gold-lobby':'diamond-lobby';
+    const roomId=usd===1?'paid-lobby-1':'paid-lobby-25';
     const _pName=ST.email?ST.email.split('@')[0].slice(0,16).toUpperCase():'';
     const joinResult=await recordWager(ST.address, lamps, sig, roomId, _pName);
-    const paidAblyToken=joinResult.ablyToken||null;
-    ST.entryToken=joinResult.entryToken||null; // HMAC proof of payment — included in hello
+    const gameToken=joinResult.gameToken||null;
+    ST.entryToken=gameToken;
     document.getElementById('mm-sub').textContent='Wager locked · Joining live lobby…';
     await refreshBal();
-    pkConnect(roomId, paidAblyToken);
+    pkConnect(roomId, gameToken);
   }catch(e){
     _joiningLobby=false;
     lg('mm-log','Error: '+e.message,'lerr');
@@ -1875,7 +1685,7 @@ function rndPowSpot(){
 // rafDraw is global so instantCashout can restart it
 function rafDraw(){ if(G&&!G.over||isSpectating){ draw(); rafHandle=requestAnimationFrame(rafDraw); } else { rafHandle=null; } }
 let _rcMenu=null; // context-menu listener ref
-let ablyRt=null, ablyChannel=null, pkRoomId=null; // Ably real-time state
+let _sio=null, ablyChannel=null, pkRoomId=null;
 let myPid=null, isHost=false;                     // N-player game identity
 let isSpectating=false;                           // spectate mode flag
 let _spectateKillerPid=null;                      // pid of player who killed us — camera follows them while spectating
@@ -2431,7 +2241,7 @@ async function doRejoin(){
     if(!rafHandle) rafHandle=requestAnimationFrame(rafDraw);
     if(isHost&&!_hostRaf) startHostLoop();
 
-    if(ablyChannel) ablyChannel.publish('rejoin',{id:myPid, name:_rjName, sol:ST.wagerSol||0, et:ST.entryToken||null},()=>{});
+    if(ablyChannel) ablyChannel.publish('rejoin',{id:myPid, name:_rjName, sol:ST.wagerSol||0, gameToken:ST.entryToken||null},()=>{});
     console.log('[rejoin] published rejoin event, entryToken:', !!ST.entryToken);
 
     document.getElementById('rejoin-overlay').style.display='none';

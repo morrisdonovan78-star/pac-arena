@@ -8,13 +8,22 @@ const nacl   = require('tweetnacl');
 const crypto = require('crypto');
 const { kvGet, kvSet, kvSetPerm, kvZadd } = require('../lib/kv');
 
-// Signed entry token — proves this wallet went through join.js with a real deposit.
-// Token is HMAC(SETTLE_SECRET, "entry:{address}:{lobby}:{10-min-window}").
-// The host and guests verify this via /api/verify-entry before admitting a player.
+// Game token — HMAC-signed proof of payment for the Socket.io game server.
+// Format matches server.js makeGameToken() so the server can validate it.
+function makeGameToken(walletAddress, lobbyId) {
+  const secret = process.env.GAME_SECRET || '';
+  if (!secret) return null;
+  const ts = Date.now();
+  const data = `${lobbyId}:${walletAddress}:${ts}`;
+  const sig = crypto.createHmac('sha256', secret).update(data).digest('hex');
+  return Buffer.from(JSON.stringify({ data, sig })).toString('base64url');
+}
+
+// Legacy entry token kept for backwards compatibility with verify-entry endpoint
 function makeEntryToken(walletAddress, lobbyId) {
   const secret = process.env.SETTLE_SECRET || '';
   if (!secret) return null;
-  const w = Math.floor(Date.now() / 600_000); // 10-minute window
+  const w = Math.floor(Date.now() / 600_000);
   return crypto.createHmac('sha256', secret)
     .update('entry:' + walletAddress + ':' + lobbyId + ':' + w)
     .digest('hex').slice(0, 32);
@@ -190,14 +199,13 @@ module.exports = async function handler(req, res) {
       }catch(_){}
     })();
 
-    // Issue a lobby-specific Ably token — capability restricted to just this paid channel.
-    // The client uses this to connect to the lobby instead of the default free-only token.
-    // Without a successful join.js call (verified deposit), the player can't get a paid token.
-    const VALID_LOBBIES = new Set(['gold-lobby', 'diamond-lobby']);
-    const ablyToken  = VALID_LOBBIES.has(lobbyId) ? await issueAblyLobbyToken(walletAddress, lobbyId) : null;
+    // Issue a game token — HMAC-signed proof of payment for the Socket.io server.
+    // The Socket.io server validates this on connection; without it paid lobbies are rejected.
+    const VALID_LOBBIES = new Set(['paid-lobby-1', 'paid-lobby-5', 'paid-lobby-25']);
+    const gameToken  = VALID_LOBBIES.has(lobbyId) ? makeGameToken(walletAddress, lobbyId) : null;
     const entryToken = VALID_LOBBIES.has(lobbyId) ? makeEntryToken(walletAddress, lobbyId) : null;
 
-    return res.status(200).json({ ok: true, recorded: lamps, ablyToken, entryToken });
+    return res.status(200).json({ ok: true, recorded: lamps, gameToken, entryToken });
   } catch (e) {
     console.error('[join]', e.message);
     return res.status(500).json({ error: e.message });
