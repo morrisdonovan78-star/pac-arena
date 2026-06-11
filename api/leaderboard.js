@@ -31,7 +31,7 @@ module.exports = async function handler(req, res) {
     ]);
 
     const players = pairs.map(({ address }, idx) => {
-      let stats = { name: '', earned: 0, wagered: 0, games: 0, kills: 0 };
+      let stats = { name: '', earned: 0, wagered: 0, games: 0, kills: 0, wins: 0, losses: 0 };
       try {
         if (playerResults[idx]) stats = { ...stats, ...JSON.parse(playerResults[idx]) };
       } catch (_) {}
@@ -43,6 +43,8 @@ module.exports = async function handler(req, res) {
         wagered: stats.wagered || 0,
         games: stats.games || 0,
         kills: stats.kills || 0,
+        wins: stats.wins || 0,
+        losses: stats.losses || 0,
       };
     });
 

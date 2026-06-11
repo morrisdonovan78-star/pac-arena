@@ -1,4 +1,4 @@
-<!-- PAC ARENA v2 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v3 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -36,7 +36,7 @@
 // Block stale bfcache (back/forward navigation serving frozen game state)
 window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});
 })();</script>
-<title>PAC MONEY v2</title>
+<title>PAC MONEY v3</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
@@ -254,7 +254,7 @@ body{touch-action:manipulation;}
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
-    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v2</div>
+    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v3</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;">
     <div class="w-strip">
@@ -475,7 +475,7 @@ body{touch-action:manipulation;}
   <div id="lb-search-result" style="display:none;max-width:480px;width:100%;margin:0 auto .85rem;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:10px;padding:14px 16px;"></div>
   <!-- Top players -->
   <div id="lb-list" style="max-width:480px;width:100%;margin:0 auto 1rem;"></div>
-  <button class="btn btn-c btn-sm" onclick="go('scr-lobby')" style="margin:0 auto .5rem;">← BACK</button>
+  <button class="btn btn-c btn-sm" onclick="if(_lbRefreshTimer){clearInterval(_lbRefreshTimer);_lbRefreshTimer=null;}closeLbProfile();go('scr-lobby')" style="margin:0 auto .5rem;">← BACK</button>
   <div style="font-size:9px;color:var(--muted);text-align:center;padding-bottom:1.5rem;" id="lb-updated"></div>
 </div>
 
@@ -569,6 +569,17 @@ body{touch-action:manipulation;}
     <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:var(--muted);margin-top:1rem;">
       Auto-exit in <span id="rjo-timer" style="color:#FFD700;">30</span>s
     </div>
+  </div>
+</div>
+
+<!-- PLAYER PROFILE MODAL — shown when clicking a player name in leaderboard -->
+<div id="lb-profile-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.88);z-index:900;overflow-y:auto;align-items:flex-start;justify-content:center;">
+  <div style="max-width:460px;width:92%;margin:2rem auto;background:#0e0e1a;border:1px solid rgba(255,215,0,0.3);border-radius:16px;padding:1.5rem 1.25rem;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.1rem;">
+      <div style="font-family:'Press Start 2P',monospace;font-size:9px;color:#FFD700;letter-spacing:1px;">PLAYER PROFILE</div>
+      <button onclick="closeLbProfile()" style="background:none;border:none;color:rgba(255,255,255,0.5);font-size:20px;cursor:pointer;line-height:1;">×</button>
+    </div>
+    <div id="lb-profile-content"></div>
   </div>
 </div>
 
@@ -1705,7 +1716,8 @@ async function joinLobby(usd){
     // cannot enter presence on the paid channel and game entry is blocked.
     lg('mm-log','Recording wager…','lhi');
     const roomId=usd===1?'gold-lobby':'diamond-lobby';
-    const joinResult=await recordWager(ST.address, lamps, sig, roomId);
+    const _pName=ST.email?ST.email.split('@')[0].slice(0,16).toUpperCase():'';
+    const joinResult=await recordWager(ST.address, lamps, sig, roomId, _pName);
     const paidAblyToken=joinResult.ablyToken||null;
     ST.entryToken=joinResult.entryToken||null; // HMAC proof of payment — included in hello
     document.getElementById('mm-sub').textContent='Wager locked · Joining live lobby…';
@@ -2260,11 +2272,18 @@ async function doRejoin(){
     await signLocalTx(tx);
     const sig=await ST.conn.sendRawTransaction(tx.serialize());
     await ST.conn.confirmTransaction({signature:sig,blockhash:lb.blockhash,lastValidBlockHeight:lb.lastValidBlockHeight},'confirmed');
-    // Rejoin: record new wager — retry once on failure since money already left wallet.
-    try { await recordWager(ST.address, lamps, sig); }
+    // Rejoin: record new wager exactly like initial join (same security path)
+    const _rjPName=ST.email?ST.email.split('@')[0].slice(0,16).toUpperCase():'';
+    try {
+      const rjResult=await recordWager(ST.address, lamps, sig, pkRoomId, _rjPName);
+      if(rjResult.entryToken) ST.entryToken=rjResult.entryToken; // refresh HMAC proof
+    }
     catch(e){
       await new Promise(r=>setTimeout(r,2000));
-      try { await recordWager(ST.address, lamps, sig); }
+      try {
+        const rjResult2=await recordWager(ST.address, lamps, sig, pkRoomId, _rjPName);
+        if(rjResult2.entryToken) ST.entryToken=rjResult2.entryToken;
+      }
       catch(e2){ addToast('⚠️ Wager recording failed — cashout may not work. Contact support.','#FF8C00'); console.error('[join-rejoin]',e2.message); }
     }
 
@@ -2596,22 +2615,22 @@ function moveP(p){
 function eatCellP(p){
   const v=G.maze[p.y][p.x];
   if(v===3){
-    // 🍒 Cherry: can't pick up while cherry kill mode is active — cell stays for others
-    if(!p.pow){
+    // 🍒 Cherry: blocked if kill mode active OR already stored — pac passes through
+    if(!p.pow && !(p.held||[]).includes('cherry')){
       G.maze[p.y][p.x]=0; _mazeDirty=true; G.eaten++;
       G.eatLog.push([p.y,p.x]);
       if(G.powRespawnQ) G.powRespawnQ.push({type:3, at:frm+405});
-      if(!(p.held||[]).includes('cherry')) p.held=[...(p.held||[]),'cherry'];
+      p.held=[...(p.held||[]),'cherry'];
       if(p.id===myPid){ playCherry(); _updatePowBtns(p); }
     }
   }
   if(v===4){
-    // 🌶 Pepper: can't pick up while pepper speed is active — cell stays for others
-    if(!p.pep){
+    // 🌶 Pepper: blocked if speed active OR already stored — pac passes through
+    if(!p.pep && !(p.held||[]).includes('pepper')){
       G.maze[p.y][p.x]=0; _mazeDirty=true; G.eaten++;
       G.eatLog.push([p.y,p.x]);
       if(G.powRespawnQ) G.powRespawnQ.push({type:4, at:frm+405});
-      if(!(p.held||[]).includes('pepper')) p.held=[...(p.held||[]),'pepper'];
+      p.held=[...(p.held||[]),'pepper'];
       if(p.id===myPid){ playPepper(); _updatePowBtns(p); }
     }
   }
@@ -3216,12 +3235,12 @@ async function endGame(reason){
 // ablyToken  — Ably token with capability only for the paid lobby channel.
 // entryToken — HMAC-signed proof of payment; included in hello so host/guests can
 //              verify each other server-side via /api/verify-entry (can't be forged).
-async function recordWager(walletAddress, wagerLamports, txSig, lobbyId) {
+async function recordWager(walletAddress, wagerLamports, txSig, lobbyId, playerName) {
   const {sig, ts} = signSettleMsg('join', walletAddress, wagerLamports);
   const r = await fetch('/api/join', {
     method: 'POST',
     headers: {'Content-Type':'application/json','x-settle-sig':sig,'x-settle-ts':String(ts)},
-    body: JSON.stringify({walletAddress, wagerLamports, txSig, lobbyId})
+    body: JSON.stringify({walletAddress, wagerLamports, txSig, lobbyId, playerName: playerName||''})
   });
   const d = await r.json().catch(()=>({}));
   if (!r.ok) throw new Error(d.error || 'join failed');
@@ -3326,6 +3345,9 @@ async function fetchHomeLb(){
 
 // LEADERBOARD
 // ═══════════════════════════════════════════════════════════
+let _lbRefreshTimer=null;
+let _lbPlayerCache=[];
+
 async function openLeaderboard(){
   go('scr-leaderboard');
   document.getElementById('lb-updated').textContent='Loading…';
@@ -3335,10 +3357,17 @@ async function openLeaderboard(){
   document.getElementById('lb-global-wagered').textContent='-- SOL';
   document.getElementById('lb-search-result').style.display='none';
   document.getElementById('lb-search-inp').value='';
+  await _fetchAndRenderLb();
+  if(_lbRefreshTimer) clearInterval(_lbRefreshTimer);
+  _lbRefreshTimer=setInterval(_fetchAndRenderLb,30000);
+}
+
+async function _fetchAndRenderLb(){
   try{
     const r=await fetch('/api/leaderboard',{cache:'no-store'});
     if(!r.ok) throw new Error('HTTP '+r.status);
     const d=await r.json();
+    _lbPlayerCache=d.players||[];
     _renderLeaderboard(d);
   }catch(e){
     document.getElementById('lb-list').innerHTML='<div style="text-align:center;color:#FF4444;padding:2rem;font-size:11px;">Failed to load. Try again.</div>';
@@ -3367,30 +3396,105 @@ function _renderLeaderboard(d){
     const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':null;
     const rankCol=i===0?'#FFD700':i===1?'#C0C0C0':i===2?'#CD7F32':'var(--muted)';
     const rank=medal?`<span style="font-size:16px;">${medal}</span>`:`<span style="font-family:'Press Start 2P',monospace;font-size:8px;color:${rankCol};">#${i+1}</span>`;
+    const displayName=p.name?escHtml(p.name.slice(0,16)):'ANON';
+    const kd=((p.kills||0)/Math.max(p.losses||0,1)).toFixed(1);
+    const winRate=p.games>0?((+(p.wins||0)/p.games)*100).toFixed(0)+'%':'–';
     return `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:8px;padding:11px 13px;margin-bottom:7px;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;">
         <div style="display:flex;align-items:center;gap:10px;">${rank}
           <div>
-            <div style="font-family:'Press Start 2P',monospace;font-size:8px;color:var(--txt);">${p.name?escHtml(p.name.slice(0,16).toUpperCase()):'ANON'}</div>
+            <button onclick="openLbProfile(${i})" style="background:none;border:none;padding:0;cursor:pointer;text-align:left;">
+              <div style="font-family:'Press Start 2P',monospace;font-size:8px;color:#FFD700;text-decoration:underline dotted;text-underline-offset:3px;">${displayName}</div>
+            </button>
             <div style="font-size:9px;color:var(--muted);margin-top:2px;font-family:monospace;">${short}</div>
           </div>
         </div>
         <div style="text-align:right;">
           <div style="font-family:'Press Start 2P',monospace;font-size:9px;color:#FFD700;">${earned.toFixed(4)} SOL</div>
-          <div style="font-size:9px;color:var(--muted);margin-top:2px;">${p.games||0} games · ${p.kills||0} kills</div>
+          <div style="font-size:9px;color:var(--muted);margin-top:2px;">${p.games||0}G · ${p.kills||0}K · KD ${kd} · W${winRate}</div>
         </div>
       </div>
       <div style="background:rgba(255,255,255,.06);border-radius:4px;height:5px;overflow:hidden;margin-bottom:7px;">
         <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#FFD700,#FF8C00);border-radius:4px;"></div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-        <span style="font-size:9px;color:var(--muted);">Wagered: ${wagered.toFixed(4)} SOL</span>
-        <button onclick="lbCopyAddr('${addr}')" style="background:none;border:1px solid rgba(255,255,255,.15);border-radius:4px;color:var(--muted);font-size:8px;padding:2px 8px;cursor:pointer;">📋 COPY</button>
+        <span style="font-size:9px;color:var(--muted);">Wagered: ${wagered.toFixed(4)} SOL · Win rate: ${winRate}</span>
+        <button onclick="lbCopyAddr('${addr}')" style="background:none;border:1px solid rgba(255,255,255,.15);border-radius:4px;color:var(--muted);font-size:8px;padding:2px 8px;cursor:pointer;">📋</button>
       </div>
     </div>`;
   });
   document.getElementById('lb-list').innerHTML=rows.join('');
-  document.getElementById('lb-updated').textContent='Updated just now · '+players.length+' players ranked';
+  document.getElementById('lb-updated').textContent='Updated '+new Date().toLocaleTimeString()+' · '+players.length+' players · auto-refreshes every 30s';
+}
+
+function openLbProfile(idx){
+  const p=_lbPlayerCache[idx];
+  if(!p) return;
+  const wins=p.wins||0;
+  const losses=p.losses||0;
+  const kills=p.kills||0;
+  const games=p.games||0;
+  const earned=(+(p.earned||0)/1e9).toFixed(4);
+  const wagered=(+(p.wagered||0)/1e9).toFixed(4);
+  const kd=(kills/Math.max(losses,1)).toFixed(2);
+  const winRate=games>0?((wins/games)*100).toFixed(1)+'%':'0.0%';
+  const addr=p.address||'';
+  const short=addr.length>12?addr.slice(0,6)+'…'+addr.slice(-4):addr;
+  const rank=p.rank;
+  const medal=rank===1?'🥇':rank===2?'🥈':rank===3?'🥉':('#'+rank);
+  const name=p.name||'ANON';
+  document.getElementById('lb-profile-content').innerHTML=`
+    <div style="text-align:center;margin-bottom:1.25rem;padding-bottom:1rem;border-bottom:1px solid rgba(255,255,255,.08);">
+      <div style="font-size:32px;margin-bottom:.5rem;">${typeof medal==='string'&&medal.startsWith('#')?'🎮':medal}</div>
+      <div style="font-family:'Press Start 2P',monospace;font-size:13px;color:var(--txt);margin-bottom:.4rem;">${escHtml(name)}</div>
+      <div style="font-size:8px;color:var(--muted);font-family:monospace;margin-bottom:.25rem;">${short}</div>
+      <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:rgba(255,215,0,.5);">RANK ${typeof medal==='string'&&medal.startsWith('#')?medal:''+rank}</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-bottom:.9rem;">
+      <div style="background:rgba(57,255,20,.06);border:1px solid rgba(57,255,20,.2);border-radius:8px;padding:.7rem;text-align:center;">
+        <div style="font-size:8px;color:rgba(57,255,20,.6);margin-bottom:.35rem;">WIN RATE</div>
+        <div style="font-family:'Press Start 2P',monospace;font-size:14px;color:#39FF14;">${winRate}</div>
+      </div>
+      <div style="background:rgba(255,68,68,.06);border:1px solid rgba(255,68,68,.2);border-radius:8px;padding:.7rem;text-align:center;">
+        <div style="font-size:8px;color:rgba(255,68,68,.6);margin-bottom:.35rem;">K/D RATIO</div>
+        <div style="font-family:'Press Start 2P',monospace;font-size:14px;color:#FF4444;">${kd}</div>
+      </div>
+      <div style="background:rgba(255,140,0,.06);border:1px solid rgba(255,140,0,.2);border-radius:8px;padding:.7rem;text-align:center;">
+        <div style="font-size:8px;color:rgba(255,140,0,.6);margin-bottom:.35rem;">KILLS</div>
+        <div style="font-family:'Press Start 2P',monospace;font-size:14px;color:#FF8C00;">${kills}</div>
+      </div>
+      <div style="background:rgba(0,191,255,.06);border:1px solid rgba(0,191,255,.2);border-radius:8px;padding:.7rem;text-align:center;">
+        <div style="font-size:8px;color:rgba(0,191,255,.6);margin-bottom:.35rem;">GAMES</div>
+        <div style="font-family:'Press Start 2P',monospace;font-size:14px;color:#00BFFF;">${games}</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-bottom:.9rem;">
+      <div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:.7rem;text-align:center;">
+        <div style="font-size:8px;color:var(--muted);margin-bottom:.35rem;">CASHOUTS</div>
+        <div style="font-family:'Press Start 2P',monospace;font-size:12px;color:var(--g);">${wins}</div>
+      </div>
+      <div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:.7rem;text-align:center;">
+        <div style="font-size:8px;color:var(--muted);margin-bottom:.35rem;">LOSSES</div>
+        <div style="font-family:'Press Start 2P',monospace;font-size:12px;color:var(--muted);">${losses}</div>
+      </div>
+    </div>
+    <div style="background:rgba(255,215,0,.04);border:1px solid rgba(255,215,0,.18);border-radius:8px;padding:.85rem;margin-bottom:.9rem;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem;">
+        <div style="font-size:8px;color:rgba(255,215,0,.6);">TOTAL EARNED</div>
+        <div style="font-family:'Press Start 2P',monospace;font-size:11px;color:#FFD700;">${earned} SOL</div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div style="font-size:8px;color:var(--muted);">TOTAL WAGERED</div>
+        <div style="font-family:'Press Start 2P',monospace;font-size:9px;color:var(--muted);">${wagered} SOL</div>
+      </div>
+    </div>
+    <button onclick="lbCopyAddr('${addr}')" class="btn btn-c btn-sm" style="width:100%;">📋 COPY WALLET ADDRESS</button>
+  `;
+  document.getElementById('lb-profile-modal').style.display='flex';
+}
+
+function closeLbProfile(){
+  document.getElementById('lb-profile-modal').style.display='none';
 }
 
 function lbCopyAddr(addr){
@@ -3406,28 +3510,41 @@ async function lbSearch(){
   res.style.display='block';
   res.innerHTML='<div style="text-align:center;color:var(--muted);font-size:11px;">Searching…</div>';
   try{
-    const r=await fetch('/api/leaderboard',{cache:'no-store'});
-    const d=await r.json();
-    const found=(d.players||[]).find(p=>
+    // Use cached data if available, otherwise fetch
+    let players=_lbPlayerCache;
+    if(!players.length){
+      const r=await fetch('/api/leaderboard',{cache:'no-store'});
+      const d=await r.json();
+      players=d.players||[];
+      _lbPlayerCache=players;
+    }
+    const idx=players.findIndex(p=>
       (p.address||'').toLowerCase().includes(q.toLowerCase())||
       (p.name||'').toLowerCase().includes(q.toLowerCase())
     );
-    if(!found){
+    if(idx<0){
       res.innerHTML='<div style="text-align:center;color:var(--muted);font-size:11px;">No player found for "'+escHtml(q)+'"</div>';
       return;
     }
-    const earned=+(found.earned||0)/1e9, wagered=+(found.wagered||0)/1e9;
+    const found=players[idx];
+    const earned=+(found.earned||0)/1e9;
+    const kd=((found.kills||0)/Math.max(found.losses||0,1)).toFixed(2);
+    const winRate=found.games>0?(((found.wins||0)/found.games)*100).toFixed(1)+'%':'0.0%';
     res.innerHTML=`<div>
-      <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:var(--y);margin-bottom:6px;">RANK #${found.rank} · SEARCH RESULT</div>
-      <div style="font-family:'Press Start 2P',monospace;font-size:10px;color:var(--txt);margin-bottom:4px;">${found.name?escHtml(found.name.slice(0,16).toUpperCase()):'ANON'}</div>
+      <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:var(--y);margin-bottom:8px;">RANK #${found.rank} · SEARCH RESULT</div>
+      <div style="font-family:'Press Start 2P',monospace;font-size:10px;color:var(--txt);margin-bottom:4px;">${found.name?escHtml(found.name.slice(0,16)):'ANON'}</div>
       <div style="font-family:monospace;font-size:9px;color:var(--muted);word-break:break-all;margin-bottom:10px;">${found.address}</div>
-      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
         <div><div style="font-size:8px;color:var(--muted);">EARNED</div><div style="font-family:'Press Start 2P',monospace;font-size:10px;color:#FFD700;">${earned.toFixed(4)} SOL</div></div>
-        <div><div style="font-size:8px;color:var(--muted);">WAGERED</div><div style="font-family:'Press Start 2P',monospace;font-size:10px;color:var(--c);">${wagered.toFixed(4)} SOL</div></div>
         <div><div style="font-size:8px;color:var(--muted);">GAMES</div><div style="font-family:'Press Start 2P',monospace;font-size:10px;color:var(--g);">${found.games||0}</div></div>
         <div><div style="font-size:8px;color:var(--muted);">KILLS</div><div style="font-family:'Press Start 2P',monospace;font-size:10px;color:#FF4444;">${found.kills||0}</div></div>
+        <div><div style="font-size:8px;color:var(--muted);">K/D</div><div style="font-family:'Press Start 2P',monospace;font-size:10px;color:#FF8C00;">${kd}</div></div>
+        <div><div style="font-size:8px;color:var(--muted);">WIN RATE</div><div style="font-family:'Press Start 2P',monospace;font-size:10px;color:#39FF14;">${winRate}</div></div>
       </div>
-      <button onclick="lbCopyAddr('${found.address}')" class="btn btn-c btn-sm" style="width:100%;">📋 COPY WALLET ADDRESS</button>
+      <div style="display:flex;gap:8px;">
+        <button onclick="openLbProfile(${idx})" class="btn btn-y btn-sm" style="flex:1;">👤 FULL PROFILE</button>
+        <button onclick="lbCopyAddr('${found.address}')" class="btn btn-c btn-sm" style="flex:1;">📋 COPY ADDR</button>
+      </div>
     </div>`;
   }catch(e){
     res.innerHTML='<div style="color:#FF4444;font-size:11px;">Error loading data</div>';

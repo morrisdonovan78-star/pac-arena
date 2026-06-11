@@ -142,7 +142,7 @@ module.exports = async function handler(req, res) {
     if (typeof body === 'string') try { body = JSON.parse(body); } catch (_) { return res.status(400).json({ error: 'Bad JSON' }); }
     body = body || {};
 
-    const { walletAddress, wagerLamports, txSig, lobbyId } = body;
+    const { walletAddress, wagerLamports, txSig, lobbyId, playerName } = body;
     const sig = req.headers['x-settle-sig'] || '';
     const ts  = req.headers['x-settle-ts']  || '';
     const lamps = Number(wagerLamports) || 0;
@@ -178,7 +178,8 @@ module.exports = async function handler(req, res) {
     (async()=>{
       try{
         const raw=await kvGet('plb:'+walletAddress);
-        const s=raw?{...{name:'',earned:0,wagered:0,games:0,kills:0},...JSON.parse(raw)}:{name:'',earned:0,wagered:0,games:0,kills:0};
+        const s=raw?{...{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0},...JSON.parse(raw)}:{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0};
+        if(playerName&&typeof playerName==='string') s.name=playerName.slice(0,20).toUpperCase();
         s.wagered+=lamps; s.games+=1;
         await kvSetPerm('plb:'+walletAddress,JSON.stringify(s));
         await kvZadd('lb:earned',s.earned,walletAddress);

@@ -346,8 +346,9 @@ module.exports = async function handler(req, res) {
           (async()=>{
             try{
               const raw=await kvGet('plb:'+playerAddress);
-              const s=raw?{...{name:'',earned:0,wagered:0,games:0,kills:0},...JSON.parse(raw)}:{name:'',earned:0,wagered:0,games:0,kills:0};
+              const s=raw?{...{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0},...JSON.parse(raw)}:{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0};
               s.earned+=playerCut;
+              s.wins=(s.wins||0)+1;
               await kvSetPerm('plb:'+playerAddress,JSON.stringify(s));
               await kvZadd('lb:earned',s.earned,playerAddress);
               const gRaw=await kvGet('plb:global');
@@ -449,6 +450,15 @@ module.exports = async function handler(req, res) {
       await kvDel('pw:' + playerAddress);
       // Clear kill rate-limit and count so a new session starts clean
       (async()=>{ try{ await kvDel('krl:'+playerAddress); await kvDel('kc:'+playerAddress); }catch(_){} })();
+      // Track loss stat fire-and-forget
+      (async()=>{
+        try{
+          const raw=await kvGet('plb:'+playerAddress);
+          const s=raw?{...{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0},...JSON.parse(raw)}:{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0};
+          s.losses=(s.losses||0)+1;
+          await kvSetPerm('plb:'+playerAddress,JSON.stringify(s));
+        }catch(_){}
+      })();
       clearTimeout(guard); done = true;
       return res.status(200).json({ sig: loseSig, amount: finalAmt, confirmed: loseConfirmed });
     }
