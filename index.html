@@ -2458,7 +2458,7 @@ function launchGame(){
   ctx=canvas.getContext('2d');
   canvas.width=window.innerWidth;
   canvas.height=window.innerHeight;
-  _camZoom=Math.max(window.innerWidth/(C*T), window.innerHeight/(R*T));
+  _camZoom=Math.max(window.innerWidth/(C*T), window.innerHeight/(R*T))*1.25;
   _camX=(C*T)/2; _camY=(R*T)/2;
   document.getElementById('hpot').textContent=ST.lobbyUsd===0?'FREE':'$'+ST.lobbyUsd*2;
   // initGame() already called from Ably pkConnect
@@ -3263,9 +3263,9 @@ function draw(){
   if(ST.balance>0){
     const bal=ST.balance.toFixed(4)+'◎';
     const usd=ST.solPrice?'≈ $'+(ST.balance*ST.solPrice).toFixed(2):'';
-    const bx=canvas.width-5, wy=5;
+    const bx=canvas.width-5, wy=48;
     ctx.save();
-    ctx.font='bold 9px monospace'; ctx.textAlign='right'; ctx.textBaseline='top';
+    ctx.font='bold 11px monospace'; ctx.textAlign='right'; ctx.textBaseline='top';
     // Only measure text width when the displayed strings change — measureText is slow
     if(_hudBalCache.bal!==bal||_hudBalCache.usd!==usd){
       _hudBalCache.w=Math.max(ctx.measureText(bal).width,usd?ctx.measureText(usd).width:0);
@@ -3276,6 +3276,30 @@ function draw(){
     ctx.strokeStyle='rgba(57,255,20,0.25)'; ctx.lineWidth=1; ctx.strokeRect(bx-bw-9,wy-3,bw+13,bh);
     ctx.fillStyle='#39FF14'; ctx.fillText(bal,bx,wy);
     if(usd){ ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText(usd,bx,wy+13); }
+    ctx.restore();
+  }
+
+  // ── Minimap (top-left, slither.io style) ─────────────────────
+  if(G&&G.maze){
+    const MM_W=154, MM_H=Math.round(MM_W*R/C);
+    const MX=14, MY=14;
+    const msx=MM_W/C, msy=MM_H/R;
+    ctx.save();
+    ctx.fillStyle='rgba(0,0,20,0.78)';
+    ctx.fillRect(MX-3,MY-3,MM_W+6,MM_H+6);
+    ctx.strokeStyle='rgba(57,255,20,0.35)';
+    ctx.lineWidth=1; ctx.strokeRect(MX-3,MY-3,MM_W+6,MM_H+6);
+    for(let r=0;r<R;r++) for(let c=0;c<C;c++){
+      if(G.maze[r][c]===1){ ctx.fillStyle='#08014A'; ctx.fillRect(MX+c*msx,MY+r*msy,msx+0.5,msy+0.5); }
+    }
+    G.players.forEach(p=>{
+      const rx=p.renderX!==undefined?p.renderX:p.x;
+      const ry=p.renderY!==undefined?p.renderY:p.y;
+      ctx.fillStyle=p.id===myPid?'#FFFFFF':(p.color||'#FF69B4');
+      ctx.beginPath();
+      ctx.arc(MX+(rx+0.5)*msx, MY+(ry+0.5)*msy, Math.max(2,msx*0.55), 0, Math.PI*2);
+      ctx.fill();
+    });
     ctx.restore();
   }
 }
