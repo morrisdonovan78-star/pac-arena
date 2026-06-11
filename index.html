@@ -1,4 +1,4 @@
-<!-- PAC ARENA v12 - Mainnet · Client-side wallets · 3 Lobbies -->
+<!-- PAC ARENA v13 - Mainnet · Client-side wallets · 3 Lobbies -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -255,7 +255,7 @@ body{touch-action:manipulation;}
   <div style="text-align:center;margin-bottom:2rem;">
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
-    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v12</div>
+    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v13</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;">
     <div class="w-strip">
@@ -1444,7 +1444,6 @@ async function pkConnect(roomId, paidAblyToken){
     // ── state from host ────────────────────────────────────
     ablyChannel.subscribe('s',(msg)=>{
       if(!G||(G.over&&!isSpectating)) return;
-      if(_hostPid&&msg.clientId!==_hostPid) return; // reject state broadcasts not from the known host
       // Conflict resolution: if two hosts exist, the one with the higher ts steps down
       if(isHost&&msg.data.hostTs!==undefined&&msg.data.hostTs<_myHelloTs){
         isHost=false; stopHostLoop();
@@ -2639,8 +2638,8 @@ function initGame(allPlayers){
   allPlayers.forEach(p=>G.players.set(p.id, mkP(p)));
   // Only place initial powerups when host is starting a fresh game with no pre-existing maze
   if(isHost&&!hadRosterMaze){
-    for(let i=0;i<4;i++){ const s=rndPowSpot(); if(s) G.maze[s.y][s.x]=3; } // 4 cherries
-    for(let i=0;i<4;i++){ const s=rndPowSpot(); if(s) G.maze[s.y][s.x]=4; } // 4 peppers
+    for(let i=0;i<8;i++){ const s=rndPowSpot(); if(s) G.maze[s.y][s.x]=3; } // 8 cherries
+    for(let i=0;i<8;i++){ const s=rndPowSpot(); if(s) G.maze[s.y][s.x]=4; } // 8 peppers
   }
   updateScoreboard();
 }
@@ -3057,11 +3056,11 @@ function draw(){
   const dt=_lastDrawTs?Math.min(now-_lastDrawTs,50):16.67; // ms since last frame, capped at 50ms
   _lastDrawTs=now;
   ctx.fillStyle='#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
-  // Camera follow: track killer while spectating, else track self
-  const _camTarget=(isSpectating&&_spectateKillerPid)?G.players.get(_spectateKillerPid):G.players.get(myPid);
-  if(_camTarget){
-    const _tx=(_camTarget.renderX!==undefined?_camTarget.renderX+0.5:_camTarget.x+0.5)*T;
-    const _ty=(_camTarget.renderY!==undefined?_camTarget.renderY+0.5:_camTarget.y+0.5)*T;
+  // Camera follow: smooth lerp toward local player position
+  const _cme0=G.players.get(myPid);
+  if(_cme0){
+    const _tx=(_cme0.renderX!==undefined?_cme0.renderX+0.5:_cme0.x+0.5)*T;
+    const _ty=(_cme0.renderY!==undefined?_cme0.renderY+0.5:_cme0.y+0.5)*T;
     _camX+=(_tx-_camX)*0.18; _camY+=(_ty-_camY)*0.18;
   }
   // Clamp camera so it never shows black outside the maze edges
