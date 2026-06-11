@@ -1480,26 +1480,41 @@ async function pkConnect(roomId, paidAblyToken){
     });
 
     // ── player rejoin (paid to re-enter) ──────────────────
-    ablyChannel.subscribe('rejoin',(msg)=>{
-      if(isHost&&G&&!G.over){
-        const d=msg.data;
-        if(!G.players.has(d.id)){
-          // Paid lobby: only admit rejoin if the player sent a non-zero sol amount.
-          // A free-rejoining attacker sends sol:0 — host silently drops the event.
-          // This is the server-side enforcement; guests cannot tamper with the host's check.
-          if(ST.lobbyUsd>0 && !(Number(d.sol)>0)) return;
-          const sp=rndSpawn();
-          G.players.set(d.id,{
-            id:d.id, num:G.players.size, color:d.color||colorFromId(d.id), hat:d.hat||'none',
-            trail:d.trail||'none', eyes:d.eyes||'dot', aura:d.aura||'none', _trail:[],
-            x:sp.x, y:sp.y, dx:0, dy:0, nx:0, ny:0,
-            prevX:sp.x, prevY:sp.y, renderX:sp.x, renderY:sp.y,
-            sc:0, lives:1, pow:false, pt:0, mc:0, pep:false, pet:0, held:[],
-            name: d.name||'', sol: d.sol||0
-          });
-          updateScoreboard();
+    ablyChannel.subscribe('rejoin',async(msg)=>{
+      if(!isHost||!G||G.over) return;
+      const d=msg.data;
+      if(!d||!d.id||d.id===myPid) return;
+      if(G.players.has(d.id)) return; // already in game
+
+      if(ST.lobbyUsd>0){
+        // Verify server-side that this player has an active wager in KV.
+        // Client-supplied sol/et fields can be forged from the browser console —
+        // pw:{address} in KV is only written by join.js after a verified on-chain payment.
+        try{
+          const ck=await fetch('/api/check-wager?address='+encodeURIComponent(d.id));
+          const cd=await ck.json();
+          if(!cd.valid){
+            console.warn('[rejoin-host] rejected',d.id,'— no active wager in KV (free-rejoin blocked)');
+            return;
+          }
+        }catch(_){
+          // Network error — fail safe: deny without KV confirmation
+          console.warn('[rejoin-host] check-wager failed for',d.id,'— rejoin denied');
+          return;
         }
       }
+
+      const sp=rndSpawn();
+      G.players.set(d.id,{
+        id:d.id, num:G.players.size, color:d.color||colorFromId(d.id), hat:d.hat||'none',
+        trail:d.trail||'none', eyes:d.eyes||'dot', aura:d.aura||'none', _trail:[],
+        x:sp.x, y:sp.y, dx:0, dy:0, nx:0, ny:0,
+        prevX:sp.x, prevY:sp.y, renderX:sp.x, renderY:sp.y,
+        sc:0, lives:1, pow:false, pt:0, mc:0, pep:false, pet:0, held:[],
+        name:d.name||'', sol:d.sol||0
+      });
+      updateScoreboard();
+      console.log('[rejoin-host] admitted',d.id,'sol=',d.sol);
     });
 
     // ── spectate: player removed themselves from game ──────
@@ -2255,50 +2270,90 @@ async function doRejoin(){
   const giveBtn=document.getElementById('rjo-give-btn');
   const resEl=document.getElementById('rjo-result');
 
+  function _rjStatus(msg, color){
+    resEl.style.background='rgba(255,215,0,.06)';
+    resEl.style.color=color||'#FFD700';
+    resEl.innerHTML=msg;
+    resEl.style.display='block';
+  }
+
   payBtn.disabled=true; payBtn.textContent='PAYING…';
   giveBtn.disabled=true;
-  resEl.style.display='none';
   // Cancel the 30-second countdown immediately — Solana confirmations can take 60+ seconds
   // and the auto-decline would fire mid-payment, hiding the overlay while the TX is in flight.
   if(_rejoinCountdown){ clearInterval(_rejoinCountdown); _rejoinCountdown=null; }
 
   try{
-    // Pay to rejoin: deposit full wager to escrow; server sends 10% to creator
+    // Pay to rejoin: deposit full wager to escrow
     const escPubkey=new solanaWeb3.PublicKey(ESCROW_PUBKEY);
     const from=new solanaWeb3.PublicKey(ST.address);
     const lamps=Math.floor(ST.wagerSol*solanaWeb3.LAMPORTS_PER_SOL);
     // Guard: wagerSol must be positive — catches console tampering
     if(lamps<=0){
-      resEl.style.background='rgba(255,68,68,.08)'; resEl.style.color='#FF4444';
-      resEl.innerHTML='Invalid wager amount. Reload the page and rejoin.';
-      resEl.style.display='block';
+      _rjStatus('Invalid wager amount. Reload the page and rejoin.','#FF4444');
       payBtn.disabled=false; payBtn.textContent='💰 TRY AGAIN'; giveBtn.disabled=false;
       return;
     }
+    _rjStatus('Signing payment transaction…');
     const tx=new solanaWeb3.Transaction().add(
       solanaWeb3.SystemProgram.transfer({fromPubkey:from,toPubkey:escPubkey,lamports:lamps})
     );
     const lb=await ST.conn.getLatestBlockhash('confirmed');
     tx.recentBlockhash=lb.blockhash; tx.feePayer=from;
     await signLocalTx(tx);
+    _rjStatus('Sending TX to Solana… (30-60s, please wait)');
     const sig=await ST.conn.sendRawTransaction(tx.serialize());
+    _rjStatus('Confirming on-chain… do NOT close this window');
+    console.log('[rejoin] TX sent, confirming:', sig);
     await ST.conn.confirmTransaction({signature:sig,blockhash:lb.blockhash,lastValidBlockHeight:lb.lastValidBlockHeight},'confirmed');
-    // Rejoin: record new wager exactly like initial join (same security path)
+    console.log('[rejoin] TX confirmed:', sig);
+
+    // Guard: if the game ended while the TX was confirming, tell the user so they don't lose SOL.
+    // Their deposit is on-chain and pw:{address} will be recorded so they can cashout next time.
+    if(!G||G.over){
+      _rjStatus('Game ended during payment — your SOL was deposited safely.<br>It will be credited to your next game.','#FF8C00');
+      console.warn('[rejoin] G.over after TX confirm — recording wager but not re-entering game');
+      // Still record the wager so they can cashout it next session
+      const _rjPName=ST.email?ST.email.split('@')[0].slice(0,16).toUpperCase():'';
+      try{ await recordWager(ST.address,lamps,sig,pkRoomId,_rjPName); }catch(_){}
+      payBtn.disabled=false; payBtn.textContent='💰 TRY AGAIN'; giveBtn.disabled=false;
+      return;
+    }
+
+    // Record wager server-side (creates pw:{address} in KV so cashout works later)
+    _rjStatus('Recording wager on server…');
     const _rjPName=ST.email?ST.email.split('@')[0].slice(0,16).toUpperCase():'';
     try {
       const rjResult=await recordWager(ST.address, lamps, sig, pkRoomId, _rjPName);
       if(rjResult.entryToken) ST.entryToken=rjResult.entryToken; // refresh HMAC proof
+      console.log('[rejoin] wager recorded, entryToken:', !!rjResult.entryToken);
     }
     catch(e){
+      console.warn('[rejoin] recordWager attempt 1 failed:', e.message, '— retrying in 2s');
+      _rjStatus('Server busy — retrying…');
       await new Promise(r=>setTimeout(r,2000));
       try {
         const rjResult2=await recordWager(ST.address, lamps, sig, pkRoomId, _rjPName);
         if(rjResult2.entryToken) ST.entryToken=rjResult2.entryToken;
+        console.log('[rejoin] wager recorded on retry');
       }
-      catch(e2){ addToast('⚠️ Wager recording failed — cashout may not work. Contact support.','#FF8C00'); console.error('[join-rejoin]',e2.message); }
+      catch(e2){
+        // TX is on-chain so the deposit exists — log but don't block the rejoin.
+        // Cashout will fall back to checking escrow balance.
+        addToast('⚠️ Wager server sync failed — cashout support may be needed.','#FF8C00');
+        console.error('[rejoin] recordWager failed twice:', e2.message);
+      }
+    }
+
+    // Re-check game state after async operations — game might have ended
+    if(!G||G.over){
+      _rjStatus('Game ended — your deposit is safe. Start a new game to continue.','#FF8C00');
+      payBtn.disabled=false; payBtn.textContent='💰 TRY AGAIN'; giveBtn.disabled=false;
+      return;
     }
 
     // Add self back to the game at a random spawn
+    _rjStatus('Joining game…');
     const sp=rndSpawn();
     const _rjName=ST.email?ST.email.split('@')[0].slice(0,8).toUpperCase():'';
     G.players.set(myPid,{
@@ -2326,7 +2381,9 @@ async function doRejoin(){
     if(isHost&&!_hostRaf) startHostLoop();
 
     // Tell host (and all other guests via broadcast) that we're back
-    if(ablyChannel) ablyChannel.publish('rejoin',{id:myPid, name:_rjName, sol:ST.wagerSol||0},()=>{});
+    // Include entryToken so host can verify we actually paid (closes free-rejoin exploit)
+    if(ablyChannel) ablyChannel.publish('rejoin',{id:myPid, name:_rjName, sol:ST.wagerSol||0, et:ST.entryToken||null},()=>{});
+    console.log('[rejoin] published rejoin event');
 
     // Restore full in-game UI
     document.getElementById('rejoin-overlay').style.display='none';
@@ -2338,9 +2395,10 @@ async function doRejoin(){
     addToast('✅ BACK IN THE GAME!','#00FF7F');
     await refreshBal();
   }catch(e){
+    console.error('[rejoin] FAILED:', e.message);
     resEl.style.background='rgba(255,68,68,.08)';
     resEl.style.color='#FF4444';
-    resEl.innerHTML='Payment failed:<br>'+e.message;
+    resEl.innerHTML='Payment failed:<br>'+e.message+'<br><small style="color:#aaa">Check browser console for details</small>';
     resEl.style.display='block';
     payBtn.disabled=false; payBtn.textContent='💰 TRY AGAIN';
     giveBtn.disabled=false;
