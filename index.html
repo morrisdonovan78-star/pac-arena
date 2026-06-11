@@ -1296,7 +1296,8 @@ function populateLobby(){
 const PLAYER_COLORS=['#FFD700','#FF69B4','#00BFFF','#FF4500','#39FF14','#FF1493','#00FFFF','#DA70D6'];
 function colorFromId(id){ let h=0; for(let i=0;i<id.length;i++) h=(h*31+id.charCodeAt(i))&0x7FFFFFFF; return PLAYER_COLORS[h%PLAYER_COLORS.length]; }
 
-let _pkTick=0;    // throttle counter for state sends
+let _pkTick=0;       // throttle counter for state sends
+let _pkSentTick=0;   // counts only the packets actually sent (not skipped) — used for full-maze sync
 let _myHelloTs=0; // my join-timestamp, used for host-conflict resolution
 
 async function pkConnect(roomId, paidAblyToken){
@@ -1379,29 +1380,33 @@ async function pkConnect(roomId, paidAblyToken){
     ablyChannel.subscribe('hello',async(msg)=>{
       const d=msg.data;
       if(!d||!d.id||d.id===myPid) return;
-      // In paid lobbies, host verifies the new player's signed entry token before admitting them.
-      // Entry tokens are issued by join.js only after a verified on-chain deposit — unforgeable.
-      if(ST.lobbyUsd>0&&isHost){
-        try{
-          if(!d.et){
-            console.warn('[host] rejected player with no entry token:',d.id.slice(0,8)+'…');
-            return;
-          }
-          const ck=await fetch('/api/verify-entry?address='+encodeURIComponent(d.id)+'&lobby='+encodeURIComponent(pkRoomId)+'&token='+encodeURIComponent(d.et));
-          const cd=await ck.json();
-          if(!cd.valid){
-            console.warn('[host] rejected unverified player:',d.id.slice(0,8)+'…');
-            return;
-          }
-        }catch(_){ /* API down — allow to avoid blocking legit players */ }
-      }
       if(!hellos.has(d.id)) hellos.set(d.id,d);
-      // If game already running and we're host, add them + reply with full roster
+      // If game already running and we're host, add player + send roster+maze IMMEDIATELY.
+      // Do NOT await verify-entry first — that fetch takes 300-500ms and freezes all players.
+      // Security: entry token is verified async below; invalid players are removed within ~500ms.
+      // The Ably token itself (issued only by join.js after on-chain verification) is the primary gate.
       if(G&&!G.over&&isHost){
         if(!G.players.has(d.id))
           addPlayer({ id:d.id, num:G.players.size, color:d.color||colorFromId(d.id), hat:d.hat||'none', trail:d.trail||'none', eyes:d.eyes||'dot', aura:d.aura||'none', spawn:d.spawn||[14,18], name:d.name||'', sol:d.sol||0 });
         const rp=[]; hellos.forEach(h=>rp.push(h));
-        ablyChannel.publish('roster',{players:rp},()=>{});
+        // Include current maze so the late joiner gets powerups immediately (no 2-second wait)
+        ablyChannel.publish('roster',{players:rp, maze:G.maze},()=>{});
+      }
+      // Background verification for paid lobbies — runs after roster is already sent
+      if(ST.lobbyUsd>0&&isHost){
+        if(!d.et){
+          // No entry token at all — kick immediately
+          console.warn('[host] rejected player with no entry token:',d.id.slice(0,8)+'…');
+          removePlayer(d.id); hellos.delete(d.id); return;
+        }
+        try{
+          const ck=await fetch('/api/verify-entry?address='+encodeURIComponent(d.id)+'&lobby='+encodeURIComponent(pkRoomId)+'&token='+encodeURIComponent(d.et));
+          const cd=await ck.json();
+          if(!cd.valid){
+            console.warn('[host] rejected unverified player:',d.id.slice(0,8)+'…');
+            removePlayer(d.id); hellos.delete(d.id);
+          }
+        }catch(_){ /* API down — keep player to avoid blocking legit players */ }
       }
     });
 
@@ -1426,6 +1431,8 @@ async function pkConnect(roomId, paidAblyToken){
           }catch(_){}
         }
       }
+      // Capture maze from roster so initGame() can start with correct powerup positions
+      if(msg.data.maze) _rosterMaze=msg.data.maze;
       msg.data.players.forEach(h=>{
         if(h.id&&h.id!==myPid&&!hellos.has(h.id)) hellos.set(h.id,h);
       });
@@ -1590,7 +1597,7 @@ function pkDisconnect(){
   clearInterval(_guestInputLoop); _guestInputLoop=null;
   if(ablyChannel){ try{ ablyChannel.presence.leave(); }catch(_){} ablyChannel=null; }
   if(ablyRt){ try{ ablyRt.close(); }catch(_){} ablyRt=null; }
-  myPid=null; isHost=false; isSpectating=false; pkRoomId=null; _pkTick=0; _myHelloTs=0;
+  myPid=null; isHost=false; isSpectating=false; pkRoomId=null; _pkTick=0; _pkSentTick=0; _myHelloTs=0;
   _joiningLobby=false; _lobbyIsPaid=false;
   stopPacManMusic();
 }
@@ -1745,6 +1752,7 @@ const _TRAIL_ICE  =Array.from({length:16},(_,i)=>{const f=(i+1)/16,b=Math.floor(
 const _TRAIL_GHOST=Array.from({length:16},(_,i)=>{const f=(i+1)/16;return`rgba(200,220,255,${(0.08+f*0.35).toFixed(2)})`;});
 let _hudBalCache={bal:'',usd:'',w:0}; // cached HUD text width — only re-measured on balance change
 let _pendingState=null; // throttle: hold latest remote state, apply once per draw() frame
+let _rosterMaze=null;  // maze snapshot piggybacked on roster — used by initGame() on late join
 let _mazeOC=null,_mazeDirty=true; // offscreen maze canvas — only rebuilt when cells change (~huge FPS win)
 // ── Drift-free host loop (rAF replaces setInterval) ──────────
 let _hostRaf=null, _lastTickTs=0;
@@ -2502,8 +2510,13 @@ function mkP(info){
 }
 
 function initGame(allPlayers){
+  // Use the maze snapshot from the host's roster if available (late-join with powerups already placed).
+  // Otherwise start fresh — host will place powerups below.
+  const hadRosterMaze=!!_rosterMaze;
+  const startMaze=_rosterMaze||cloneMaze();
+  _rosterMaze=null; // consume it
   G={
-    maze:cloneMaze(),
+    maze:startMaze,
     players:new Map(),        // id → player object
     eaten:0, over:false,
     p1CashedOut:false,
@@ -2512,8 +2525,8 @@ function initGame(allPlayers){
   };
   _mazeDirty=true; _mazeOC=null; _lastSbSig=''; // invalidate caches on new game
   allPlayers.forEach(p=>G.players.set(p.id, mkP(p)));
-  // Host places initial powerups at random spots
-  if(isHost){
+  // Only place initial powerups when host is starting a fresh game with no pre-existing maze
+  if(isHost&&!hadRosterMaze){
     for(let i=0;i<4;i++){ const s=rndPowSpot(); if(s) G.maze[s.y][s.x]=3; } // 4 cherries
     for(let i=0;i<4;i++){ const s=rndPowSpot(); if(s) G.maze[s.y][s.x]=4; } // 4 peppers
   }
@@ -2667,6 +2680,7 @@ function tick(){
     // Cutting from 30→20 publishes/sec reduces Ably main-thread overhead by 33%,
     // which was the main cause of stutters for both host and guests.
     if(_pkTick%3!==0){
+      _pkSentTick++;
       const ps=[];
       G.players.forEach((p,id)=>{
         const held=p.held;
@@ -2674,8 +2688,9 @@ function tick(){
         ps.push([id,p.x,p.y,p.dx,p.dy,p.sc,p.lives,p.pow?1:0,p.pt,p.pep?1:0,p.pet||0,hN]);
       });
       const spec=G.spectators?G.spectators.size:0;
-      // Delta encoding: send full maze every ~3s, otherwise just the cells that changed.
-      const fullSync=(_pkTick%60===0);
+      // Full maze sync every 40 sent packets (~2s at 20pps) — uses sent-counter, not raw tick,
+      // because _pkTick%60===0 always coincides with the skip condition (%3===0) and never fires.
+      const fullSync=(_pkSentTick%40===0);
       const msg={t:'s',ps,hostTs:_myHelloTs,spec};
       if(fullSync)             msg.maze=G.maze;
       else if(G.eatLog.length) msg.eat=G.eatLog;
