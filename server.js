@@ -299,7 +299,7 @@ io.on('connection', socket => {
       id: pid, socketId: socket.id,
       name: name || 'Player', color: color || '#FFD700',
       x: spawn.x, y: spawn.y,
-      dx: 1, dy: 0, nx: 0, ny: 0,
+      dx: 0, dy: 0, nx: 0, ny: 0,
       prevX: spawn.x, prevY: spawn.y,
       sc: 0, alive: true, mc: 0,
       pow: false, pt: 0, pep: false, pet: 0,
@@ -379,6 +379,9 @@ io.on('connection', socket => {
 
   // ── Disconnect ────────────────────────────────────────────────
   socket.on('disconnect', () => {
+    // Clear the entry token so a brief drop can reconnect without "Token already used".
+    if (isPaid && gameToken) room.usedTokens.delete(gameToken);
+
     room.players.delete(pid);
     io.to(lobbyId).emit('leave', { id: pid });
     console.log(`[${lobbyId}] ${name} left — ${room.players.size} remaining`);

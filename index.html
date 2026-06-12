@@ -1384,7 +1384,7 @@ async function pkConnect(roomId, gameToken){
       if(data.maze) _rosterMaze=data.maze;
       const allPlayers=(data.players||[]).map((h,i)=>({
         id:h.id, num:i, color:h.color||colorFromId(h.id),
-        spawn:[h.x||14,h.y||18], name:h.name||'', sol:h.sol||0,
+        spawn:[h.x||14,h.y||18], dx:h.dx||0, dy:h.dy||0, name:h.name||'', sol:h.sol||0,
         hat:'none', trail:'none', eyes:'dot', aura:'none'
       }));
       const _alreadyLive=!!rafHandle; // reconnect: game loop already running
@@ -2574,7 +2574,7 @@ function mkP(info){
   return {
     id:info.id, num:info.num, color:info.color||'#FFD700', hat:info.hat||'none',
     trail:info.trail||'none', eyes:info.eyes||'dot', aura:info.aura||'none', _trail:[],
-    x:sp[0], y:sp[1], dx:0, dy:0, nx:0, ny:0,  // stationary until first key press
+    x:sp[0], y:sp[1], dx:info.dx||0, dy:info.dy||0, nx:info.dx||0, ny:info.dy||0,
     prevX:sp[0], prevY:sp[1],
     renderX:sp[0], renderY:sp[1], // smooth float position for 60fps draw
     sc:0, lives:2, pow:false, pt:0, mc:0,
