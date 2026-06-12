@@ -2999,46 +2999,43 @@ function draw(){
   if(_mazeOC) ctx.drawImage(_mazeOC,0,0);
 
   // ── Smooth position interpolation (runs every frame at 60fps) ─
-  // renderX/renderY are float tile coords used only for drawing.
-  // Game truth (integer p.x, p.y) is unchanged.
-  // Cap at 2 ticks-worth so a briefly backgrounded tab doesn't jump players
   const frameFrac=Math.min(dt/TICK_MS, 2);
   G.players.forEach(p=>{
     if(p.renderX===undefined){ p.renderX=p.x; p.renderY=p.y; return; }
-    // Correct speed that matches the game tick (pep=+55%, cherry=+25%, base -8%)
     const pspd=(p.pep?0.2185*1.55:p.pow?0.2185*1.25:0.2185)*frameFrac;
     if(p.id===myPid&&!isHost){
-      // ── Guest local player: full client-side prediction ──────────
-      // Use server integer position for wall checks (prevents tile-boundary stutter)
+      // ── Guest local player: client-side prediction ───────────────
       if((p.nx!==0||p.ny!==0)&&!isWall(p.x,p.y,p.nx,p.ny)){ p.dx=p.nx; p.dy=p.ny; }
-      // Advance render in current direction
-      if((p.dx!==0||p.dy!==0)&&!isWall(p.x,p.y,p.dx,p.dy)){
-        p.renderX=((p.renderX+p.dx*pspd)+C)%C;
-        p.renderY=((p.renderY+p.dy*pspd)+R)%R;
-      }
-      // Gently correct toward host truth to absorb any network drift
+      const _cm=(p.dx!==0||p.dy!==0)&&!isWall(p.x,p.y,p.dx,p.dy);
+      if(_cm){ p.renderX=((p.renderX+p.dx*pspd)+C)%C; p.renderY=((p.renderY+p.dy*pspd)+R)%R; }
       let ddx=p.x-p.renderX, ddy=p.y-p.renderY;
       if(ddx>C/2) ddx-=C; else if(ddx<-C/2) ddx+=C;
       if(ddy>R/2) ddy-=R; else if(ddy<-R/2) ddy+=R;
-      if(Math.abs(ddx)>6||Math.abs(ddy)>6){ p.renderX=p.x; p.renderY=p.y; } // snap only on huge gap (reconnect etc)
-      else{ p.renderX=((p.renderX+ddx*0.28)+C)%C; p.renderY=((p.renderY+ddy*0.28)+R)%R; }
-    } else {
-      // ── Remote players + host's own player: dead-reckoning ───────
-      // Use server integer position for wall checks (prevents tile-boundary stutter)
-      if((p.dx!==0||p.dy!==0)&&!isWall(p.x,p.y,p.dx,p.dy)){
-        p.renderX=((p.renderX+p.dx*pspd)+C)%C;
-        p.renderY=((p.renderY+p.dy*pspd)+R)%R;
+      if(Math.abs(ddx)>5||Math.abs(ddy)>5){ p.renderX=p.x; p.renderY=p.y; } // teleport snap
+      else if(!_cm){ p.renderX=((p.renderX+ddx*0.22)+C)%C; p.renderY=((p.renderY+ddy*0.22)+R)%R; } // stopped: ease to grid
+      else{
+        // Running: only catch up if BEHIND in movement dir — never pull back when ahead
+        if(ddx*p.dx>0.25) p.renderX=((p.renderX+ddx*0.12)+C)%C;
+        if(ddy*p.dy>0.25) p.renderY=((p.renderY+ddy*0.12)+R)%R;
+        // Snap cross-axis to grid so turns stay clean
+        if(p.dx===0&&Math.abs(ddx)>0.05) p.renderX=((p.renderX+ddx*0.22)+C)%C;
+        if(p.dy===0&&Math.abs(ddy)>0.05) p.renderY=((p.renderY+ddy*0.22)+R)%R;
       }
-      // Correct accumulated drift toward host truth
+    } else {
+      // ── Remote players + host's own player ───────────────────────
+      const _cm=(p.dx!==0||p.dy!==0)&&!isWall(p.x,p.y,p.dx,p.dy);
+      if(_cm){ p.renderX=((p.renderX+p.dx*pspd)+C)%C; p.renderY=((p.renderY+p.dy*pspd)+R)%R; }
       let ddx=p.x-p.renderX, ddy=p.y-p.renderY;
       if(ddx>C/2) ddx-=C; else if(ddx<-C/2) ddx+=C;
       if(ddy>R/2) ddy-=R; else if(ddy<-R/2) ddy+=R;
       const gap=Math.abs(ddx)+Math.abs(ddy);
-      if(gap>6){ p.renderX=p.x; p.renderY=p.y; } // snap only on huge gap (reconnect etc)
-      else {
-        const cf=p.id===myPid?0.55:0.10; // host's own: strong snap; remotes: gentle
-        p.renderX=((p.renderX+ddx*cf)+C)%C;
-        p.renderY=((p.renderY+ddy*cf)+R)%R;
+      if(gap>5){ p.renderX=p.x; p.renderY=p.y; } // teleport snap
+      else if(!_cm){ p.renderX=((p.renderX+ddx*0.22)+C)%C; p.renderY=((p.renderY+ddy*0.22)+R)%R; } // stopped: ease to grid
+      else{
+        if(ddx*p.dx>0.25) p.renderX=((p.renderX+ddx*0.12)+C)%C;
+        if(ddy*p.dy>0.25) p.renderY=((p.renderY+ddy*0.12)+R)%R;
+        if(p.dx===0&&Math.abs(ddx)>0.05) p.renderX=((p.renderX+ddx*0.22)+C)%C;
+        if(p.dy===0&&Math.abs(ddy)>0.05) p.renderY=((p.renderY+ddy*0.22)+R)%R;
       }
     }
   });
