@@ -276,6 +276,17 @@ body{touch-action:manipulation;}
     </div>
     <div class="copy-row"><div class="addr-box" id="h-addr-full">--</div><button class="copy-btn" onclick="copyAddr()">📋 COPY</button></div>
     <div style="margin-bottom:.75rem;display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;"><span class="net-badge">◉ MAINNET</span><span style="font-size:11px;color:var(--muted);" id="h-email"></span></div>
+    <div style="background:rgba(255,215,0,.05);border:1px solid rgba(255,215,0,.25);border-radius:10px;padding:10px 14px;margin-bottom:.75rem;">
+      <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:var(--y);margin-bottom:8px;">DISPLAY NAME</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input id="name-input" maxlength="14" placeholder="Enter name…" autocomplete="off" spellcheck="false"
+          style="flex:1;background:rgba(0,0,0,.4);border:1px solid rgba(255,215,0,.3);border-radius:6px;color:#fff;font-family:'Press Start 2P',monospace;font-size:9px;padding:7px 10px;outline:none;"
+          oninput="this.value=this.value.toUpperCase()"
+          onkeydown="if(event.key==='Enter')saveDisplayName()"/>
+        <button class="copy-btn" onclick="saveDisplayName()" style="flex-shrink:0;background:rgba(255,215,0,.15);border-color:rgba(255,215,0,.4);color:var(--y);">SAVE</button>
+      </div>
+      <div id="name-saved-msg" style="font-size:9px;color:#39FF14;margin-top:5px;display:none;">✓ Saved! Shows in-game &amp; leaderboard.</div>
+    </div>
     <div class="warn-box">⚠ Your wallet is stored in this browser. Back up your private key below before clearing browser data.</div>
     <div class="warn-box" style="background:rgba(255,68,68,.06);border-color:rgba(255,68,68,.3);color:#cc4444;">🎮 GAME WALLET ONLY — Never keep more SOL here than you're willing to bet in a single day. Fund it, play, and withdraw winnings to a secure wallet (Phantom, Solflare, etc.) after each session.</div>
     <button class="export-btn" onclick="exportWallet()">🔑 SHOW / BACKUP PRIVATE KEY</button>
@@ -862,7 +873,8 @@ function updateUI(){
   ['h-usd','n-usd'].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent='≈ $'+(ST.balance*ST.solPrice).toFixed(2);});
   const af=document.getElementById('h-addr-full'); if(af) af.textContent=a||'--';
   const em=document.getElementById('h-email'); if(em) em.textContent=ST.email;
-  _cachedMyName=ST.email?ST.email.split('@')[0].slice(0,8).toUpperCase():'YOU';
+  _cachedMyName=getMyName();
+  const ni=document.getElementById('name-input'); if(ni&&!ni.matches(':focus')) ni.value=_cachedMyName;
   updateExplorerLink();
   updateCashoutBal();
 }
@@ -1308,7 +1320,8 @@ async function pkConnect(roomId, gameToken){
     return;
   }
 
-  const myName=ST.email?ST.email.split('@')[0].slice(0,8).toUpperCase():'';
+  const myName=getMyName();
+  _cachedMyName=myName;
   _playerMeta.set(myPid,{color:_mySkin.color,hat:_mySkin.hat,trail:_mySkin.trail||'none',eyes:_mySkin.eyes||'dot',aura:_mySkin.aura||'none',name:myName,sol:ST.wagerSol||0});
 
   document.getElementById('mm-sub').textContent='Connecting to server…';
@@ -1766,6 +1779,27 @@ let _audioCtx=null, _musicStop=false;
 let _lastDrawTs=0; // used by draw() for frame-delta interpolation
 let _lastSbSig='';  // scoreboard change-detection — skip DOM rebuild when nothing changed
 let _cachedMyName='YOU'; // cached once — avoids string ops inside 60fps draw loop
+
+function _nameKey(){ return 'pa_name_'+(ST.address||ST.email||'anon'); }
+function getMyName(){
+  const saved=localStorage.getItem(_nameKey());
+  if(saved&&saved.trim()) return saved.trim().slice(0,14).toUpperCase();
+  if(ST.email) return ST.email.split('@')[0].slice(0,12).toUpperCase();
+  return 'YOU';
+}
+function saveDisplayName(){
+  const inp=document.getElementById('name-input');
+  if(!inp) return;
+  const raw=inp.value.replace(/[^A-Za-z0-9_\- ]/g,'').trim().slice(0,14).toUpperCase();
+  if(!raw){ inp.value=''; return; }
+  inp.value=raw;
+  localStorage.setItem(_nameKey(),raw);
+  _cachedMyName=raw;
+  // update live playerMeta so in-game name reflects change immediately
+  const me=_playerMeta.get(myPid); if(me) me.name=raw;
+  const msg=document.getElementById('name-saved-msg');
+  if(msg){ msg.style.display='block'; setTimeout(()=>msg.style.display='none',3000); }
+}
 const _collisionBuf=[]; // pre-allocated — avoids new array every tick in checkAllCollisions
 const _elimBuf=[];      // same
 let _chatTyping=false, _chatFadeTimer=null; // chat input state
