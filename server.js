@@ -155,16 +155,21 @@ function movePlayer(p, room) {
   // Try to turn if requested
   if (p.nx !== 0 || p.ny !== 0) {
     const tnx = p.x + p.nx, tny = p.y + p.ny;
-    if (tnx >= 0 && tnx < C && tny >= 0 && tny < R && room.maze[tny][tnx] !== 1) {
+    const tunnelTurn = p.y === 17 && tny === 17 && (tnx < 0 || tnx >= C);
+    if (tunnelTurn || (tnx >= 0 && tnx < C && tny >= 0 && tny < R && room.maze[tny][tnx] !== 1)) {
       p.dx = p.nx; p.dy = p.ny;
     }
   }
   // Move in current direction
   const tx = p.x + p.dx, ty = p.y + p.dy;
-  if (tx >= 0 && tx < C && ty >= 0 && ty < R && room.maze[ty][tx] !== 1) {
+  if (p.y === 17 && ty === 17 && (tx < 0 || tx >= C)) {
+    // Tunnel wrap: row 17 horizontal exit
+    p.prevX = p.x; p.prevY = p.y;
+    p.x = tx < 0 ? C - 1 : 0;
+    p.y = 17;
+  } else if (tx >= 0 && tx < C && ty >= 0 && ty < R && room.maze[ty][tx] !== 1) {
     p.prevX = p.x; p.prevY = p.y;
     p.x = tx; p.y = ty;
-    if (ty === 17) { if (p.x < 0) p.x = C - 1; else if (p.x >= C) p.x = 0; }
   }
   // Powerup timers
   if (p.pow && p.pt > 0 && --p.pt <= 0) p.pow = false;
@@ -177,12 +182,16 @@ function eatCell(p, room) {
     room.maze[p.y][p.x] = 0; p.sc += 10;
     room.eatLog.push([p.y, p.x, 0]);
   } else if (v === 3 || v === 4) {
-    room.maze[p.y][p.x] = 0; p.sc += 50;
     const type = v === 3 ? 'cherry' : 'pepper';
+    const isActive = type === 'cherry' ? p.pow : p.pep;
     if (!p.held) p.held = [];
-    if (p.held.length < 2 && !p.held.includes(type)) p.held.push(type);
-    room.eatLog.push([p.y, p.x, 0]);
-    room.powRespawnQ.push({ type: v, at: room.frm + (v === 3 ? CHERRY_RESPAWN : PEPPER_RESPAWN) });
+    const canPickup = !isActive && !p.held.includes(type) && p.held.length < 2;
+    if (canPickup) {
+      room.maze[p.y][p.x] = 0; p.sc += 50;
+      p.held.push(type);
+      room.eatLog.push([p.y, p.x, 0]);
+      room.powRespawnQ.push({ type: v, at: room.frm + (v === 3 ? CHERRY_RESPAWN : PEPPER_RESPAWN) });
+    }
   }
 }
 
