@@ -36,7 +36,25 @@
 // Block stale bfcache (back/forward navigation serving frozen game state)
 window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(true);});
 })();</script>
-<title>PAC MONEY v11</title>
+<title>PAC ARENA — PVP Pac-Man on Solana</title>
+<meta name="description" content="Wager real SOL in competitive Pac-Man battles. $1 &amp; $5 lobbies. Winner takes 90%. No download required — plays instantly in your browser."/>
+
+<!-- Open Graph (Facebook, Discord, Reddit, iMessage) -->
+<meta property="og:type"        content="website"/>
+<meta property="og:url"         content="https://pac-arena.vercel.app/"/>
+<meta property="og:title"       content="PAC ARENA — PVP Pac-Man on Solana"/>
+<meta property="og:description" content="Wager real SOL in competitive Pac-Man battles. $1 &amp; $5 lobbies. Winner takes 90%. No download — plays in any browser."/>
+<meta property="og:image"       content="https://pac-arena.vercel.app/og"/>
+<meta property="og:image:width"  content="1200"/>
+<meta property="og:image:height" content="630"/>
+<meta property="og:site_name"   content="PAC ARENA"/>
+
+<!-- Twitter / X Card -->
+<meta name="twitter:card"        content="summary_large_image"/>
+<meta name="twitter:title"       content="PAC ARENA — PVP Pac-Man on Solana"/>
+<meta name="twitter:description" content="Wager real SOL in competitive Pac-Man battles. $1 &amp; $5 lobbies. Winner takes 90%. No download — plays in any browser."/>
+<meta name="twitter:image"       content="https://pac-arena.vercel.app/og"/>
+
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
@@ -265,7 +283,7 @@ body{touch-action:manipulation;}
     <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:#FF8C00;letter-spacing:1px;margin-top:4px;margin-bottom:2px;">SKILL-BASED BETTING · BEST PLAYER WINS</div>
     <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v1</div>
   </div>
-  <div id="home-on" class="card" style="display:none;text-align:center;">
+  <div id="home-on" class="card" style="display:none;text-align:center;max-width:880px;">
     <div class="w-strip">
       <div style="text-align:left;"><div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:4px;">WALLET</div><div class="w-addr" id="h-addr">--</div></div>
       <div style="text-align:right;"><div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:4px;">BALANCE</div><div class="w-bal" id="h-bal">-- SOL</div><div style="font-size:11px;color:var(--muted);margin-top:2px;" id="h-usd">≈ $--</div></div>
@@ -276,50 +294,59 @@ body{touch-action:manipulation;}
     </div>
     <div class="copy-row"><div class="addr-box" id="h-addr-full">--</div><button class="copy-btn" onclick="copyAddr()">📋 COPY</button></div>
     <div style="margin-bottom:.75rem;display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;"><span class="net-badge">◉ MAINNET</span><span style="font-size:11px;color:var(--muted);" id="h-email"></span></div>
-    <div style="background:rgba(255,215,0,.05);border:1px solid rgba(255,215,0,.25);border-radius:10px;padding:10px 14px;margin-bottom:.75rem;">
-      <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:var(--y);margin-bottom:8px;">DISPLAY NAME</div>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <input id="name-input" maxlength="14" placeholder="Enter name…" autocomplete="off" spellcheck="false"
-          style="flex:1;background:rgba(0,0,0,.4);border:1px solid rgba(255,215,0,.3);border-radius:6px;color:#fff;font-family:'Press Start 2P',monospace;font-size:9px;padding:7px 10px;outline:none;"
-          oninput="this.value=this.value.toUpperCase()"
-          onkeydown="if(event.key==='Enter')saveDisplayName()"/>
-        <button class="copy-btn" onclick="saveDisplayName()" style="flex-shrink:0;background:rgba(255,215,0,.15);border-color:rgba(255,215,0,.4);color:var(--y);">SAVE</button>
+    <!-- two-column layout: left = main actions, right = controls/customize -->
+    <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;">
+      <!-- LEFT COLUMN -->
+      <div style="flex:1;min-width:240px;">
+        <div style="background:rgba(255,215,0,.05);border:1px solid rgba(255,215,0,.25);border-radius:10px;padding:10px 14px;margin-bottom:.75rem;">
+          <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:var(--y);margin-bottom:8px;">DISPLAY NAME</div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input id="name-input" maxlength="14" placeholder="Enter name…" autocomplete="off" spellcheck="false"
+              style="flex:1;background:rgba(0,0,0,.4);border:1px solid rgba(255,215,0,.3);border-radius:6px;color:#fff;font-family:'Press Start 2P',monospace;font-size:9px;padding:7px 10px;outline:none;"
+              oninput="this.value=this.value.toUpperCase()"
+              onkeydown="if(event.key==='Enter')saveDisplayName()"/>
+            <button class="copy-btn" onclick="saveDisplayName()" style="flex-shrink:0;background:rgba(255,215,0,.15);border-color:rgba(255,215,0,.4);color:var(--y);">SAVE</button>
+          </div>
+          <div id="name-saved-msg" style="font-size:9px;color:#39FF14;margin-top:5px;display:none;">✓ Saved! Shows in-game &amp; leaderboard.</div>
+        </div>
+        <div class="warn-box">⚠ Your wallet is stored in this browser. Back up your private key below before clearing browser data.</div>
+        <div class="warn-box" style="background:rgba(255,68,68,.06);border-color:rgba(255,68,68,.3);color:#cc4444;">🎮 GAME WALLET ONLY — Never keep more SOL here than you're willing to bet in a single day. Fund it, play, and withdraw winnings to a secure wallet (Phantom, Solflare, etc.) after each session.</div>
+        <button class="export-btn" onclick="exportWallet()">🔑 SHOW / BACKUP PRIVATE KEY</button>
+        <button class="btn btn-g" onclick="go('scr-lobby');populateLobby();" style="margin-bottom:.5rem;">▶ ENTER ARENA</button>
+        <button class="btn btn-y btn-sm" onclick="openLeaderboard()" style="margin-bottom:.75rem;width:100%;">🏆 LEADERBOARD</button>
+        <div style="background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:.75rem;text-align:left;">
+          <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:var(--y);margin-bottom:8px;text-align:center;">🎮 CONTROLS</div>
+          <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);line-height:2.6;">
+            ↑↓←→ &nbsp;MOVE<br>
+            V &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;USE CHERRY 🍒 (KILL MODE)<br>
+            C &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;USE <svg xmlns="http://www.w3.org/2000/svg" width="10" height="14" viewBox="-7 -11 14 22" style="display:inline-block;vertical-align:middle;overflow:visible"><g transform="rotate(-30)"><ellipse cy="1.5" rx="2.4" ry="5.2" fill="#AA3300"/><ellipse cy="1.2" rx="2" ry="4.6" fill="#E85000"/><ellipse cx="-0.8" cy="-0.5" rx="0.8" ry="2.4" fill="#FF8C00"/><ellipse cy="-4.5" rx="1.6" ry="0.9" fill="#228B22"/><line x1="0.4" y1="-5.1" x2="2" y2="-7" stroke="#228B22" stroke-width="1.2" stroke-linecap="round"/></g></svg> (SPEED BOOST)<br>
+            Z / X &nbsp;&nbsp;ZOOM IN / OUT<br>
+            T &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CHAT<br>
+            SPACE &nbsp;CASH OUT
+          </div>
+        </div>
       </div>
-      <div id="name-saved-msg" style="font-size:9px;color:#39FF14;margin-top:5px;display:none;">✓ Saved! Shows in-game &amp; leaderboard.</div>
-    </div>
-    <div class="warn-box">⚠ Your wallet is stored in this browser. Back up your private key below before clearing browser data.</div>
-    <div class="warn-box" style="background:rgba(255,68,68,.06);border-color:rgba(255,68,68,.3);color:#cc4444;">🎮 GAME WALLET ONLY — Never keep more SOL here than you're willing to bet in a single day. Fund it, play, and withdraw winnings to a secure wallet (Phantom, Solflare, etc.) after each session.</div>
-    <button class="export-btn" onclick="exportWallet()">🔑 SHOW / BACKUP PRIVATE KEY</button>
-    <button class="btn btn-g" onclick="go('scr-lobby');populateLobby();" style="margin-bottom:.5rem;">▶ ENTER ARENA</button>
-    <button class="btn btn-y btn-sm" onclick="openLeaderboard()" style="margin-bottom:.75rem;width:100%;">🏆 LEADERBOARD</button>
-    <div style="background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:.75rem;text-align:left;">
-      <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:var(--y);margin-bottom:8px;text-align:center;">🎮 CONTROLS</div>
-      <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);line-height:2.6;">
-        ↑↓←→ &nbsp;MOVE<br>
-        V &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;USE CHERRY 🍒 (KILL MODE)<br>
-        C &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;USE <svg xmlns="http://www.w3.org/2000/svg" width="10" height="14" viewBox="-7 -11 14 22" style="display:inline-block;vertical-align:middle;overflow:visible"><g transform="rotate(-30)"><ellipse cy="1.5" rx="2.4" ry="5.2" fill="#AA3300"/><ellipse cy="1.2" rx="2" ry="4.6" fill="#E85000"/><ellipse cx="-0.8" cy="-0.5" rx="0.8" ry="2.4" fill="#FF8C00"/><ellipse cy="-4.5" rx="1.6" ry="0.9" fill="#228B22"/><line x1="0.4" y1="-5.1" x2="2" y2="-7" stroke="#228B22" stroke-width="1.2" stroke-linecap="round"/></g></svg> (SPEED BOOST)<br>
-        Z / X &nbsp;&nbsp;ZOOM IN / OUT<br>
-        T &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CHAT<br>
-        SPACE &nbsp;CASH OUT
+      <!-- RIGHT COLUMN -->
+      <div style="flex:1;min-width:240px;">
+        <button class="btn btn-sm" onclick="document.getElementById('tos-modal').classList.add('open')" style="background:rgba(255,99,71,.08);border-color:rgba(255,99,71,.4);color:#FF6347;font-family:'Press Start 2P',monospace;font-size:7px;width:100%;margin-bottom:.75rem;">📋 TERMS OF SERVICE · 18+ ONLY</button>
+        <button class="btn" style="background:rgba(57,255,20,.12);color:var(--g);border-color:var(--g);font-family:'Press Start 2P',monospace;font-size:9px;margin-bottom:.75rem;" onclick="openCashout()">💸 CASHOUT / WITHDRAW</button>
+        <div style="background:rgba(255,215,0,.05);border:1px solid rgba(255,215,0,.25);border-radius:10px;padding:12px 14px;margin-bottom:.75rem;text-align:center;">
+          <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:#FFD700;margin-bottom:10px;">🎨 CUSTOMIZE PAC</div>
+          <canvas id="cust-preview" width="72" height="72" style="display:block;margin:0 auto 10px;border-radius:50%;border:2px solid rgba(255,215,0,.3);background:#000;"></canvas>
+          <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:6px;">BODY COLOR</div>
+          <div id="cust-colors" style="display:flex;gap:7px;flex-wrap:wrap;justify-content:center;margin-bottom:10px;"></div>
+          <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:6px;">HAT</div>
+          <div id="cust-hats" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:10px;"></div>
+          <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:6px;">TRAIL</div>
+          <div id="cust-trails" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:10px;"></div>
+          <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:6px;">EYES</div>
+          <div id="cust-eyes" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:10px;"></div>
+          <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:6px;">AURA</div>
+          <div id="cust-aura" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;"></div>
+        </div>
+        <button class="btn btn-r btn-sm" onclick="doLogout()" style="margin:0 auto;">LOG OUT</button>
       </div>
     </div>
-    <button class="btn btn-sm" onclick="document.getElementById('tos-modal').classList.add('open')" style="background:rgba(255,99,71,.08);border-color:rgba(255,99,71,.4);color:#FF6347;font-family:'Press Start 2P',monospace;font-size:7px;width:100%;margin-bottom:.75rem;">📋 TERMS OF SERVICE · 18+ ONLY</button>
-    <button class="btn" style="background:rgba(57,255,20,.12);color:var(--g);border-color:var(--g);font-family:'Press Start 2P',monospace;font-size:9px;margin-bottom:.75rem;" onclick="openCashout()">💸 CASHOUT / WITHDRAW</button>
-    <div style="background:rgba(255,215,0,.05);border:1px solid rgba(255,215,0,.25);border-radius:10px;padding:12px 14px;margin-bottom:.75rem;text-align:center;">
-      <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:#FFD700;margin-bottom:10px;">🎨 CUSTOMIZE PAC</div>
-      <canvas id="cust-preview" width="72" height="72" style="display:block;margin:0 auto 10px;border-radius:50%;border:2px solid rgba(255,215,0,.3);background:#000;"></canvas>
-      <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:6px;">BODY COLOR</div>
-      <div id="cust-colors" style="display:flex;gap:7px;flex-wrap:wrap;justify-content:center;margin-bottom:10px;"></div>
-      <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:6px;">HAT</div>
-      <div id="cust-hats" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:10px;"></div>
-      <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:6px;">TRAIL</div>
-      <div id="cust-trails" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:10px;"></div>
-      <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:6px;">EYES</div>
-      <div id="cust-eyes" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:10px;"></div>
-      <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:6px;">AURA</div>
-      <div id="cust-aura" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;"></div>
-    </div>
-    <button class="btn btn-r btn-sm" onclick="doLogout()" style="margin:0 auto;">LOG OUT</button>
   </div>
   <div id="home-off" class="card" style="text-align:center;">
     <div style="font-family:'Press Start 2P',monospace;font-size:9px;color:var(--muted);margin-bottom:.75rem;letter-spacing:2px;">SIGN IN / SIGN UP</div>
@@ -1302,7 +1329,7 @@ function populateLobby(){
 const PLAYER_COLORS=['#FFD700','#FF69B4','#00BFFF','#FF4500','#39FF14','#FF1493','#00FFFF','#DA70D6'];
 function colorFromId(id){ let h=0; for(let i=0;i<id.length;i++) h=(h*31+id.charCodeAt(i))&0x7FFFFFFF; return PLAYER_COLORS[h%PLAYER_COLORS.length]; }
 
-const SIO_URL='https://airport-telephone-commercial-roll.trycloudflare.com';
+const SIO_URL='https://pac-arena.duckdns.org';
 let _playerMeta=new Map();
 let _pkTick=0;
 let _pkSentTick=0;
@@ -1360,10 +1387,13 @@ async function pkConnect(roomId, gameToken){
         spawn:[h.x||14,h.y||18], name:h.name||'', sol:h.sol||0,
         hat:'none', trail:'none', eyes:'dot', aura:'none'
       }));
+      const _alreadyLive=!!rafHandle; // reconnect: game loop already running
       initGame(allPlayers);
-      document.getElementById('mm-sub').textContent='Connected!';
-      lg('mm-log','Joined with '+allPlayers.length+' player(s)','lok');
-      setTimeout(()=>launchGame(),300);
+      if(!_alreadyLive){
+        document.getElementById('mm-sub').textContent='Connected!';
+        lg('mm-log','Joined with '+allPlayers.length+' player(s)','lok');
+        setTimeout(()=>launchGame(),300);
+      }
     });
 
     _sio.on('s',(data)=>{
@@ -1437,11 +1467,14 @@ async function pkConnect(roomId, gameToken){
       addToast('Could not reconnect — check your internet','#FF4444');
     });
 
-    // Ping measurement — send timestamp, server echoes it back
-    _sio.on('pong_res',(ts)=>{ _ping=Date.now()-ts; });
-    const _doPing=()=>{ if(_sio&&_sio.connected) _sio.emit('ping_req',Date.now()); };
+    // Ping measurement — performance.now() for sub-ms accuracy; EMA smoothing kills spike noise
+    _sio.on('pong_res',(ts)=>{
+      const raw=performance.now()-ts;
+      _ping=_ping>0?Math.round(_ping*0.8+raw*0.2):Math.round(raw);
+    });
+    const _doPing=()=>{ if(_sio&&_sio.connected) _sio.emit('ping_req',performance.now()); };
     _doPing();
-    _pingInterval=setInterval(_doPing,2000);
+    _pingInterval=setInterval(_doPing,1000); // 1 s: more samples → smoother average
 
     document.getElementById('mm-sub').textContent='Looking for players…';
     lg('mm-log','Connected to game server — waiting for init…','lok');
@@ -1721,6 +1754,9 @@ let _rafLastTs=0;
 const _RAF_MIN_MS=_isMobile?16.7:0; // cap mobile to ~60 fps to save battery/GPU
 function rafDraw(ts=0){
   if(G&&!G.over||isSpectating){
+    _fpsCount++;
+    if(!_fpsLastTs) _fpsLastTs=ts;
+    if(ts-_fpsLastTs>=1000){ _fpsVal=Math.round(_fpsCount*1000/(ts-_fpsLastTs)); _fpsCount=0; _fpsLastTs=ts; }
     if(ts-_rafLastTs>=_RAF_MIN_MS){ _rafLastTs=ts; draw(); }
     rafHandle=requestAnimationFrame(rafDraw);
   } else { rafHandle=null; }
@@ -1735,7 +1771,8 @@ let _cashoutInProgress=false;                     // debounce: prevent duplicate
 let _zoomSliderEl=null;                           // cached zoom slider element — updated each frame
 let _joyDrawFn=null;                              // joystick draw function — called from main game loop
 let _guestInputLoop=null;                         // guest → host input heartbeat
-let _pingInterval=null, _ping=0;                  // round-trip latency to Socket.io server
+let _pingInterval=null, _ping=0;                  // round-trip latency to Socket.io server (EMA-smoothed)
+let _fpsCount=0, _fpsLastTs=0, _fpsVal=0;         // FPS counter
 let _killFeed=[];                                 // [{killerName,killerColor,victimName,victimColor,ts}]
 
 // ── Kill reward — 90% of victim's wager to killer, 10% to creator ─
@@ -1787,18 +1824,31 @@ function getMyName(){
   if(ST.email) return ST.email.split('@')[0].slice(0,12).toUpperCase();
   return 'YOU';
 }
-function saveDisplayName(){
+async function saveDisplayName(){
   const inp=document.getElementById('name-input');
   if(!inp) return;
   const raw=inp.value.replace(/[^A-Za-z0-9_\- ]/g,'').trim().slice(0,14).toUpperCase();
   if(!raw){ inp.value=''; return; }
   inp.value=raw;
+  const msg=document.getElementById('name-saved-msg');
+  const btn=document.querySelector('[onclick="saveDisplayName()"]');
+  if(ST.address){
+    if(btn) btn.disabled=true;
+    try{
+      const r=await fetch('/api/leaderboard',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'setname',address:ST.address,name:raw})});
+      const d=await r.json();
+      if(d.error==='taken'){
+        if(msg){ msg.style.color='#FF4444'; msg.textContent='❌ Name already in use — choose another'; msg.style.display='block'; setTimeout(()=>{ msg.style.display='none'; msg.style.color='#39FF14'; msg.textContent='✓ Saved! Shows in-game & leaderboard.'; },3500); }
+        if(btn) btn.disabled=false;
+        return;
+      }
+    }catch(_){}
+    if(btn) btn.disabled=false;
+  }
   localStorage.setItem(_nameKey(),raw);
   _cachedMyName=raw;
-  // update live playerMeta so in-game name reflects change immediately
   const me=_playerMeta.get(myPid); if(me) me.name=raw;
-  const msg=document.getElementById('name-saved-msg');
-  if(msg){ msg.style.display='block'; setTimeout(()=>msg.style.display='none',3000); }
+  if(msg){ msg.style.color='#39FF14'; msg.style.display='block'; setTimeout(()=>msg.style.display='none',3000); }
 }
 const _collisionBuf=[]; // pre-allocated — avoids new array every tick in checkAllCollisions
 const _elimBuf=[];      // same
@@ -1975,7 +2025,7 @@ function sendChat(){
   const text=(inp.value||'').trim().slice(0,60);
   closeChat();
   if(!text||!ablyChannel) return;
-  const myName=ST.email?ST.email.split('@')[0].slice(0,8).toUpperCase():'???';
+  const myName=getMyName()||'???';
   const cid=myPid||'unk';
   ablyChannel.publish('chat',{id:cid,name:myName,text},()=>{});
   addChatMessage(myName, text, colorFromId(cid)); // show locally (echoMessages:false)
@@ -2156,7 +2206,7 @@ function _doFreeRejoin(){
   if(_lobbyIsPaid){ addToast('❌ Paid lobby — use the REJOIN button to pay','#FF4444'); return; }
   if(_rejoinCountdown){ clearInterval(_rejoinCountdown); _rejoinCountdown=null; }
   const sp=rndSpawn();
-  const rjName=ST.email?ST.email.split('@')[0].slice(0,8).toUpperCase():'';
+  const rjName=getMyName();
   G.players.set(myPid,{
     id:myPid, num:G.players.size, color:_mySkin.color, hat:_mySkin.hat,
     trail:_mySkin.trail||'none', eyes:_mySkin.eyes||'dot', aura:_mySkin.aura||'none', _trail:[],
@@ -3039,8 +3089,10 @@ function draw(){
     const pspd=(p.pep?0.2185*1.55:p.pow?0.2185*1.25:0.2185)*frameFrac;
     if(p.id===myPid&&!isHost){
       // ── Guest local player: client-side prediction ───────────────
+      const _pdx=p.dx, _pdy=p.dy; // direction before applying queued turn
       if((p.nx!==0||p.ny!==0)&&!isWall(p.x,p.y,p.nx,p.ny)){ p.dx=p.nx; p.dy=p.ny; }
       const _cm=(p.dx!==0||p.dy!==0)&&!isWall(p.x,p.y,p.dx,p.dy);
+      const _turned=p.dx!==_pdx||p.dy!==_pdy;
       if(_cm){ p.renderX=((p.renderX+p.dx*pspd)+C)%C; p.renderY=((p.renderY+p.dy*pspd)+R)%R; }
       let ddx=p.x-p.renderX, ddy=p.y-p.renderY;
       if(ddx>C/2) ddx-=C; else if(ddx<-C/2) ddx+=C;
@@ -3051,13 +3103,20 @@ function draw(){
         // Running: only catch up if BEHIND in movement dir — never pull back when ahead
         if(ddx*p.dx>0.25) p.renderX=((p.renderX+ddx*0.12)+C)%C;
         if(ddy*p.dy>0.25) p.renderY=((p.renderY+ddy*0.12)+R)%R;
-        // Snap cross-axis to grid so turns stay clean
-        if(p.dx===0&&Math.abs(ddx)>0.05) p.renderX=((p.renderX+ddx*0.22)+C)%C;
-        if(p.dy===0&&Math.abs(ddy)>0.05) p.renderY=((p.renderY+ddy*0.22)+R)%R;
+        // On a turn: snap idle axis to server position instantly (no gradual multi-frame drift)
+        if(_turned){
+          if(p.dx===0) p.renderX=p.x;
+          if(p.dy===0) p.renderY=p.y;
+        } else {
+          if(p.dx===0&&Math.abs(ddx)>0.05) p.renderX=((p.renderX+ddx*0.22)+C)%C;
+          if(p.dy===0&&Math.abs(ddy)>0.05) p.renderY=((p.renderY+ddy*0.22)+R)%R;
+        }
       }
     } else {
       // ── Remote players + host's own player ───────────────────────
+      const _pdx=p.dx, _pdy=p.dy;
       const _cm=(p.dx!==0||p.dy!==0)&&!isWall(p.x,p.y,p.dx,p.dy);
+      const _turned=p.dx!==_pdx||p.dy!==_pdy;
       if(_cm){ p.renderX=((p.renderX+p.dx*pspd)+C)%C; p.renderY=((p.renderY+p.dy*pspd)+R)%R; }
       let ddx=p.x-p.renderX, ddy=p.y-p.renderY;
       if(ddx>C/2) ddx-=C; else if(ddx<-C/2) ddx+=C;
@@ -3068,8 +3127,13 @@ function draw(){
       else{
         if(ddx*p.dx>0.25) p.renderX=((p.renderX+ddx*0.12)+C)%C;
         if(ddy*p.dy>0.25) p.renderY=((p.renderY+ddy*0.12)+R)%R;
-        if(p.dx===0&&Math.abs(ddx)>0.05) p.renderX=((p.renderX+ddx*0.22)+C)%C;
-        if(p.dy===0&&Math.abs(ddy)>0.05) p.renderY=((p.renderY+ddy*0.22)+R)%R;
+        if(_turned){
+          if(p.dx===0) p.renderX=p.x;
+          if(p.dy===0) p.renderY=p.y;
+        } else {
+          if(p.dx===0&&Math.abs(ddx)>0.05) p.renderX=((p.renderX+ddx*0.22)+C)%C;
+          if(p.dy===0&&Math.abs(ddy)>0.05) p.renderY=((p.renderY+ddy*0.22)+R)%R;
+        }
       }
     }
   });
@@ -3365,16 +3429,27 @@ function draw(){
     }
   }
 
-  // ── Ping display (bottom-right) ──────────────────────────────
-  if(_sio&&_sio.connected&&_ping>0){
-    const pCol=_ping<80?'#39FF14':_ping<150?'#FFD700':'#FF4444';
-    const pTxt=_ping+'ms';
+  // ── Ping + FPS display (bottom-right) ───────────────────────
+  {
     ctx.save();
     ctx.font='bold 14px monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom';
-    const pw=ctx.measureText(pTxt).width;
-    const px2=canvas.width-10, py2=canvas.height-10;
-    ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fillRect(px2-pw-6,py2-18,pw+12,21);
-    ctx.fillStyle=pCol; ctx.fillText(pTxt,px2,py2);
+    const px2=canvas.width-10;
+    let py2=canvas.height-10;
+    if(_sio&&_sio.connected&&_ping>0){
+      const pCol=_ping<60?'#39FF14':_ping<120?'#FFD700':'#FF4444';
+      const pTxt=_ping+' ms';
+      const pw=ctx.measureText(pTxt).width;
+      ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fillRect(px2-pw-6,py2-18,pw+12,21);
+      ctx.fillStyle=pCol; ctx.fillText(pTxt,px2,py2);
+      py2-=24;
+    }
+    if(_fpsVal>0){
+      const fCol=_fpsVal>=55?'#39FF14':_fpsVal>=30?'#FFD700':'#FF4444';
+      const fTxt=_fpsVal+' fps';
+      const fw=ctx.measureText(fTxt).width;
+      ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fillRect(px2-fw-6,py2-18,fw+12,21);
+      ctx.fillStyle=fCol; ctx.fillText(fTxt,px2,py2);
+    }
     ctx.restore();
   }
 
