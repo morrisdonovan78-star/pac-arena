@@ -1361,12 +1361,15 @@ async function pkConnect(roomId, gameToken){
   lg('mm-log','Connecting…','lhi');
 
   try{
+    // WebSocket-first for all browsers (best latency, works with nginx).
+    // On first connect_error, auto-switch to polling for Brave/restrictive environments
+    // where Brave Shields block the cross-origin WebSocket upgrade.
     _sio=io(SIO_URL,{
       auth:{
         pid:myPid, lobbyId:roomId, gameToken:gameToken||null,
         name:myName, color:_mySkin.color, wagerSol:ST.wagerSol||0
       },
-      transports:['polling','websocket'], // polling first — Brave shields block WS upgrade on cross-origin domains; polling handshake succeeds then WS upgrades silently
+      transports:['websocket','polling'],
       reconnectionAttempts:Infinity,
       reconnectionDelay:1000,
       reconnectionDelayMax:5000,
@@ -1374,12 +1377,20 @@ async function pkConnect(roomId, gameToken){
 
     await new Promise((res,rej)=>{
       const tOut=setTimeout(()=>rej(new Error('Connection timeout — check internet and try again')),15000);
+      let _wsRetried=false;
       _sio.once('connect',()=>{ clearTimeout(tOut); res(); });
-      _sio.once('connect_error',(e)=>{
+      _sio.on('connect_error',(e)=>{
+        if(!_wsRetried){
+          // First failure: WebSocket likely blocked (Brave shields, corporate proxy).
+          // Switch to polling so the HTTP handshake succeeds, then WebSocket upgrades.
+          _wsRetried=true;
+          _sio.io.opts.transports=['polling','websocket'];
+          return; // let Socket.io auto-reconnect with new transport
+        }
+        // Still failing after polling retry — give up
         clearTimeout(tOut);
-        const isBrave=navigator.brave&&navigator.brave.isBrave||false;
-        const hint=isBrave?' — try lowering Brave Shields for this site (brave://settings/shields)':'';
-        rej(new Error('Cannot reach game server: '+e.message+hint));
+        _sio.off('connect_error');
+        rej(new Error('Cannot reach game server: '+e.message));
       });
       _sio.once('err',(msg)=>{ clearTimeout(tOut); rej(new Error(msg||'Server rejected connection')); });
     });
