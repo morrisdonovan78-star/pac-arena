@@ -1366,7 +1366,7 @@ async function pkConnect(roomId, gameToken){
         pid:myPid, lobbyId:roomId, gameToken:gameToken||null,
         name:myName, color:_mySkin.color, wagerSol:ST.wagerSol||0
       },
-      transports:['websocket','polling'], // polling fallback prevents full drop on WebSocket hiccup
+      transports:['polling','websocket'], // polling first — Brave shields block WS upgrade on cross-origin domains; polling handshake succeeds then WS upgrades silently
       reconnectionAttempts:Infinity,
       reconnectionDelay:1000,
       reconnectionDelayMax:5000,
@@ -1375,7 +1375,12 @@ async function pkConnect(roomId, gameToken){
     await new Promise((res,rej)=>{
       const tOut=setTimeout(()=>rej(new Error('Connection timeout — check internet and try again')),15000);
       _sio.once('connect',()=>{ clearTimeout(tOut); res(); });
-      _sio.once('connect_error',(e)=>{ clearTimeout(tOut); rej(new Error('Cannot reach game server: '+e.message)); });
+      _sio.once('connect_error',(e)=>{
+        clearTimeout(tOut);
+        const isBrave=navigator.brave&&navigator.brave.isBrave||false;
+        const hint=isBrave?' — try lowering Brave Shields for this site (brave://settings/shields)':'';
+        rej(new Error('Cannot reach game server: '+e.message+hint));
+      });
       _sio.once('err',(msg)=>{ clearTimeout(tOut); rej(new Error(msg||'Server rejected connection')); });
     });
 
