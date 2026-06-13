@@ -349,15 +349,11 @@ module.exports = async function handler(req, res) {
                 const s=raw?{...{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0},...JSON.parse(raw)}:{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0};
                 s.earned+=playerCut;
                 s.wins=(s.wins||0)+1;
-                s.games=(s.games||0)+1;
-                s.wagered=(s.wagered||0)+wagerLamports;
                 await kvSetPerm('plb:'+playerAddress,JSON.stringify(s));
                 await kvZadd('lb:earned',s.earned,playerAddress);
                 const gRaw=await kvGet('plb:global');
                 const gd=gRaw?{...{totalEarned:0,totalWagered:0,gamesPlayed:0},...JSON.parse(gRaw)}:{totalEarned:0,totalWagered:0,gamesPlayed:0};
                 gd.totalEarned+=playerCut;
-                gd.gamesPlayed=(gd.gamesPlayed||0)+1;
-                gd.totalWagered=(gd.totalWagered||0)+wagerLamports;
                 await kvSetPerm('plb:global',JSON.stringify(gd));
               }catch(_){}
             })();
@@ -452,6 +448,16 @@ module.exports = async function handler(req, res) {
           if (vaBody && vaBody !== playerAddress && vaBody.length > 20) {
             try { await kvDel('pw:' + vaBody); } catch (_) {}
           }
+          (async()=>{
+            try{
+              const raw=await kvGet('plb:'+playerAddress);
+              const s=raw?{...{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0},...JSON.parse(raw)}:{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0};
+              s.kills=(s.kills||0)+1;
+              s.earned+=(killerCut||0);
+              await kvSetPerm('plb:'+playerAddress,JSON.stringify(s));
+              await kvZadd('lb:earned',s.earned,playerAddress);
+            }catch(_){}
+          })();
           break;
         } catch (e) {
           const isOnChainFail = e.message.includes('TX rejected') || e.message.includes('insufficient') || e.message.includes('0x1') || e.message.includes('-32002') || e.message.includes('Send failed');
@@ -497,14 +503,7 @@ module.exports = async function handler(req, res) {
             const raw=await kvGet('plb:'+playerAddress);
             const s=raw?{...{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0},...JSON.parse(raw)}:{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0};
             s.losses=(s.losses||0)+1;
-            s.games=(s.games||0)+1;
-            s.wagered=(s.wagered||0)+kvLoseWager;
             await kvSetPerm('plb:'+playerAddress,JSON.stringify(s));
-            const gRaw=await kvGet('plb:global');
-            const gd=gRaw?{...{totalEarned:0,totalWagered:0,gamesPlayed:0},...JSON.parse(gRaw)}:{totalEarned:0,totalWagered:0,gamesPlayed:0};
-            gd.gamesPlayed=(gd.gamesPlayed||0)+1;
-            gd.totalWagered=(gd.totalWagered||0)+kvLoseWager;
-            await kvSetPerm('plb:global',JSON.stringify(gd));
           }catch(_){}
         })();
         clearTimeout(guard); done = true;

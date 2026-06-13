@@ -50,6 +50,20 @@ module.exports = async function handler(req, res) {
 
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
+  // ── GET ?address= — single player profile (used to restore name on login) ──
+  if (req.query && req.query.address) {
+    try {
+      const addr = String(req.query.address).trim();
+      const raw = await kvGet('plb:' + addr);
+      if (!raw) return res.status(200).json({ player: null });
+      const stats = { name: '', earned: 0, wagered: 0, games: 0, kills: 0, wins: 0, losses: 0, ...JSON.parse(raw) };
+      return res.status(200).json({ player: { address: addr, ...stats } });
+    } catch (err) {
+      console.error('[leaderboard/player]', err);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+
   // ── GET — top-20 leaderboard ────────────────────────────────────────────────
   try {
     // ZREVRANGE returns a flat array: [addr0, score0, addr1, score1, ...]

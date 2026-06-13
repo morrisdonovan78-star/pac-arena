@@ -1234,6 +1234,12 @@ async function finishLogin(kp){
   ST.conn=makeConnection();
   await fetchPrice();
   await refreshBal().catch(e=>console.warn('[finishLogin] bal:',e.message));
+  const _nk='pa_name_'+ST.address;
+  if(!localStorage.getItem(_nk)){
+    fetch('/api/leaderboard?address='+encodeURIComponent(ST.address)).then(r=>r.json()).then(d=>{
+      if(d&&d.player&&d.player.name){ localStorage.setItem(_nk,d.player.name); updateUI(); }
+    }).catch(()=>{});
+  }
   await new Promise(r=>setTimeout(r,400));
   showStep('email');
   document.getElementById('home-off').style.display='none';
