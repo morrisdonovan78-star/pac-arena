@@ -1708,6 +1708,7 @@ const _TRAIL_ICE  =Array.from({length:16},(_,i)=>{const f=(i+1)/16,b=Math.floor(
 const _TRAIL_GHOST=Array.from({length:16},(_,i)=>{const f=(i+1)/16;return`rgba(200,220,255,${(0.08+f*0.35).toFixed(2)})`;});
 let _hudBalCache={bal:'',usd:'',w:0}; // cached HUD text width — only re-measured on balance change
 let _pendingState=null; // throttle: hold latest remote state, apply once per draw() frame
+let _lastSentDx=0,_lastSentDy=0; // dedup: skip pkSend when direction unchanged
 let _rosterMaze=null;  // maze snapshot piggybacked on roster — used by initGame() on late join
 let _mazeOC=null,_mazeDirty=true; // offscreen maze canvas — only rebuilt when cells change (~huge FPS win)
 // ── Drift-free host loop (rAF replaces setInterval) ──────────
@@ -2727,9 +2728,13 @@ function p1d(dx,dy){
   // Pressing into a wall previously killed all momentum; this fix preserves it.
   if(!isHost){
     if(!isWall(me.x, me.y, dx, dy)){ me.dx=dx; me.dy=dy; }
+    // Only send when direction changed — prevents socket flooding from key-repeat
+    // events and rapid alternating presses tripping out the renderer.
+    if(dx!==_lastSentDx||dy!==_lastSentDy){
+      _lastSentDx=dx; _lastSentDy=dy;
+      pkSend({t:'in',id:myPid,dx,dy});
+    }
   }
-  // Non-host players relay their input to the host
-  if(!isHost) pkSend({t:'in',id:myPid,dx,dy});
 }
 function p2d(dx,dy){ p1d(dx,dy); } // both d-pads control local player
 function onKey(e){
@@ -2740,6 +2745,12 @@ function onKey(e){
   if(!G||G.over) return;
   if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA') return;
   // Arrow keys — movement
+  // Skip browser key-repeat: direction is set once per physical press; the server
+  // tick loop handles continuous movement. Repeat events flood the socket and
+  // cause the character to visually trip out when keys are spammed.
+  if(e.repeat&&(e.key==='ArrowUp'||e.key==='ArrowDown'||e.key==='ArrowLeft'||e.key==='ArrowRight')){
+    e.preventDefault(); return;
+  }
   switch(e.key){
     case'ArrowUp':    p1d(0,-1);  e.preventDefault(); break;
     case'ArrowDown':  p1d(0,1);   e.preventDefault(); break;
