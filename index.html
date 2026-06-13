@@ -228,7 +228,7 @@ html,body{background:var(--dark);color:var(--txt);font-family:'Exo 2',sans-serif
 /* Controls — fixed at bottom corners */
 #joy-canvas{position:fixed;bottom:10px;left:10px;z-index:100;display:none;touch-action:none;}
 #pow-btns{position:fixed;bottom:8px;right:8px;z-index:100;}
-#cash-btn-wrap{position:fixed;top:70px;right:8px;z-index:200;}
+#cash-btn-wrap{position:fixed;bottom:170px;right:8px;z-index:200;}
 #zoom-slider{position:fixed;left:175px;top:14px;width:26px;height:116px;writing-mode:vertical-lr;direction:rtl;opacity:0.55;z-index:110;display:none;accent-color:#39FF14;touch-action:none;cursor:pointer;}
 .otp-box{width:44px;height:52px;background:rgba(255,255,255,.04);border:2px solid var(--border);border-radius:8px;font-family:'Press Start 2P',monospace;font-size:20px;text-align:center;color:var(--y);outline:none;}
 .otp-box:focus{border-color:var(--y);box-shadow:0 0 0 3px rgba(255,215,0,.1);}
@@ -281,7 +281,7 @@ body{touch-action:manipulation;}
     <div class="logo">PAC MONEY</div>
     <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
     <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:#FF8C00;letter-spacing:1px;margin-top:4px;margin-bottom:2px;">SKILL-BASED BETTING · BEST PLAYER WINS</div>
-    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v1</div>
+    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v3</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;max-width:880px;">
     <div class="w-strip">
@@ -573,7 +573,7 @@ body{touch-action:manipulation;}
   <!-- Joystick: wired in launchGame() -->
   <canvas id="joy-canvas" width="140" height="140"></canvas>
   <!-- Cashout button — top-right, separated from powerup buttons to prevent accidental taps -->
-  <div id="cash-btn-wrap" style="position:fixed;top:70px;right:8px;z-index:200;display:none;">
+  <div id="cash-btn-wrap" style="position:fixed;bottom:170px;right:8px;z-index:200;display:none;">
     <button id="cash-use-btn" class="pow-use-btn" style="background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.65);color:#FFD700;font-size:6px;">💸<br>CASHOUT</button>
   </div>
   <!-- Zoom slider — vertical, next to minimap top-left -->
@@ -1375,6 +1375,18 @@ async function pkConnect(roomId, gameToken){
 
     ablyChannel={ publish:(type,data,cb)=>{ if(_sio) _sio.emit(type,data); if(cb) cb(); } };
 
+    // Persistent handler: catches server rejections (invalid token, token-already-used, etc.)
+    // that arrive AFTER the connect event fires. Without this, the err event is silently
+    // swallowed and the player is stuck on "waiting for init" while Socket.io auto-reconnects.
+    _sio.on('err',(msg)=>{
+      lg('mm-log','❌ '+(msg||'Server rejected connection'),'lerr');
+      if(_sio){ try{ _sio.disconnect(); }catch(_){} _sio=null; }
+      ablyChannel=null;
+      _joiningLobby=false;
+      _lobbyIsPaid=false;
+      setTimeout(()=>{ try{ go('scr-lobby'); }catch(_){} },3000);
+    });
+
     _sio.on('init',(data)=>{
       if(!data) return;
       (data.players||[]).forEach(h=>_playerMeta.set(h.id,{
@@ -1432,7 +1444,7 @@ async function pkConnect(roomId, gameToken){
         removePlayer(data.id);
       }
       if(data.killerId===myPid&&ST.lobbyUsd>0)
-        claimKillReward(data.victimSol,data.id);
+        claimKillReward(data.victimSol,data.id,data.killProof,data.killTs);
     });
 
     _sio.on('spectate',(data)=>{
@@ -1475,6 +1487,17 @@ async function pkConnect(roomId, gameToken){
     const _doPing=()=>{ if(_sio&&_sio.connected) _sio.emit('ping_req',performance.now()); };
     _doPing();
     _pingInterval=setInterval(_doPing,1000); // 1 s: more samples → smoother average
+
+    // Snap players to server-confirmed spawn on rejoin — prevents hitch caused by
+    // client using rndSpawn() while server uses nextSpawn() (almost always different).
+    _sio.on('rejoin',(data)=>{
+      if(!data||!data.id||!G||data.x===undefined) return;
+      const p=G.players.get(data.id);
+      if(!p) return;
+      p.x=data.x; p.y=data.y; p.dx=0; p.dy=0; p.nx=0; p.ny=0;
+      p.prevX=data.x; p.prevY=data.y; p.renderX=data.x; p.renderY=data.y;
+      p.alive=true; p.sc=0; p._waitSnap=false;
+    });
 
     document.getElementById('mm-sub').textContent='Looking for players…';
     lg('mm-log','Connected to game server — waiting for init…','lok');
@@ -1525,6 +1548,7 @@ function applyRemoteState(d){
     const heldVal=[]; if(heldN&1) heldVal.push('cherry'); if(heldN&2) heldVal.push('pepper');
     let p=G.players.get(id);
     if(!p){
+      if(!lives) return; // server still broadcasts dead players for rejoin; don't re-add them
       const _sh=_playerMeta.get(id)||{};
       G.players.set(id,{ id, num:G.players.size, color:_sh.color||colorFromId(id), hat:_sh.hat||'none',
         trail:_sh.trail||'none', eyes:_sh.eyes||'dot', aura:_sh.aura||'none', _trail:[],
@@ -1535,16 +1559,23 @@ function applyRemoteState(d){
         renderX:x, renderY:y }); // snap to exact position for new players
       changed=true; return;
     }
+    // State arrived before elim event — remove dead remote players proactively
+    if(!lives && id!==myPid){ G.players.delete(id); changed=true; return; }
     p.prevX=p.x; p.prevY=p.y;
     p.x=x; p.y=y;
     // Do NOT overwrite dx/dy for the local guest player — we set it immediately on keypress
     // in p1d() for instant visual response. Overwriting with the host's (possibly stale)
     // direction every 67 ms creates a snap-back that makes inputs look dropped.
     // Position (x, y) is always authoritative from the host; facing direction is local.
-    if(id!==myPid || isHost){ p.dx=dx; p.dy=dy; }
+    if(id!==myPid || isHost){ p.dx=dx; p.dy=dy; p.nx=dx; p.ny=dy; }
     p.sc=sc; p.lives=lives;
-    p.pow=!!pow; p.pt=pt;
-    p.pep=!!pep; p.pet=pet||0; p.held=heldVal;
+    // Don't let a stale server broadcast override a powerup the local player just activated.
+    // The pow event takes up to one tick (~33ms) to round-trip; without this guard the
+    // server's pre-activation state arrives and immediately cancels the effect.
+    if(id!==myPid || Date.now()>=_localPowUntil){
+      p.pow=!!pow; p.pt=pt;
+      p.pep=!!pep; p.pet=pet||0; p.held=heldVal;
+    }
     // Update mobile powerup buttons for local player
     if(id===myPid && !isHost) _updatePowBtns(p);
     // Init renderX/Y if somehow missing (old client reconnect)
@@ -1776,7 +1807,7 @@ let _fpsCount=0, _fpsLastTs=0, _fpsVal=0;         // FPS counter
 let _killFeed=[];                                 // [{killerName,killerColor,victimName,victimColor,ts}]
 
 // ── Kill reward — 90% of victim's wager to killer, 10% to creator ─
-async function claimKillReward(victimSol, victimAddress){
+async function claimKillReward(victimSol, victimAddress, killProof, killTs){
   if(!ST.address) return;
   const rewardSol = (typeof victimSol === 'number' && victimSol > 0) ? victimSol : (ST.wagerSol || 0);
   if(!rewardSol) return;
@@ -1789,7 +1820,7 @@ async function claimKillReward(victimSol, victimAddress){
     const r=await fetch('/api/settle',{
       method:'POST',
       headers:{'Content-Type':'application/json','x-settle-sig':_kSig,'x-settle-ts':String(_kTs)},
-      body:JSON.stringify({action:'kill',playerAddress:ST.address,wagerLamports,victimAddress:victimAddress||null})
+      body:JSON.stringify({action:'kill',playerAddress:ST.address,wagerLamports,victimAddress:victimAddress||null,killProof:killProof||null,killTs:killTs||null})
     });
     let d; try{ d=await r.json(); }catch(_){ throw new Error('Server error (not JSON) — try again'); }
     if(!r.ok||d.error) throw new Error(d.error||'Server error '+r.status);
@@ -2127,6 +2158,7 @@ function playPepper(){
 }
 
 // ── Powerup use ───────────────────────────────────────────────
+let _localPowUntil=0; // protect local pow/pep state from stale server broadcasts for 500ms after use
 function usePow(type){
   if(!G||G.over) return;
   const me=G.players.get(myPid);
@@ -2134,9 +2166,8 @@ function usePow(type){
   me.held=(me.held||[]).filter(h=>h!==type);
   if(type==='cherry'){ me.pow=true; me.pt=300; playCherry(); }
   else if(type==='pepper'){ me.pep=true; me.pet=390; playPepper(); }
-  // Tell host if we're a guest
-  if(!isHost&&ablyChannel) ablyChannel.publish('pow',{id:myPid,type},()=>{});
-  // Update mobile button states
+  _localPowUntil=Date.now()+500; // ignore server's stale pow=false for the next 500ms
+  if(ablyChannel) ablyChannel.publish('pow',{id:myPid,type},()=>{});
   _updatePowBtns(me);
 }
 
@@ -2212,7 +2243,7 @@ function _doFreeRejoin(){
     trail:_mySkin.trail||'none', eyes:_mySkin.eyes||'dot', aura:_mySkin.aura||'none', _trail:[],
     x:sp.x, y:sp.y, dx:0, dy:0, nx:0, ny:0,
     prevX:sp.x, prevY:sp.y, renderX:sp.x, renderY:sp.y,
-    sc:0, lives:1, pow:false, pt:0, mc:0, pep:false, pet:0, held:[],
+    sc:0, lives:1, pow:false, pt:0, mc:0, pep:false, pet:0, held:['cherry','pepper'],
     name:rjName, sol:0
   });
   isSpectating=false;
@@ -2222,7 +2253,7 @@ function _doFreeRejoin(){
   document.getElementById('rejoin-overlay').style.display='none';
   const _sp=document.getElementById('spectate-panel'); if(_sp) _sp.style.display='none';
   const _pb=document.getElementById('pow-btns'); if(_pb) _pb.style.display='flex';
-  const _cw=document.getElementById('cash-btn-wrap'); if(_cw) _cw.style.display='none'; // free lobby has no cashout
+  const _cw=document.getElementById('cash-btn-wrap'); if(_cw) _cw.style.display='block';
   _updatePowBtns(G.players.get(myPid));
   addToast('✅ BACK IN THE GAME!','#00FF7F');
 }
@@ -2291,10 +2322,10 @@ async function doRejoin(){
     let wagerRecorded=false;
     try {
       const rjResult=await recordWager(ST.address, lamps, sig, pkRoomId, _rjPName);
-      if(rjResult.entryToken) ST.entryToken=rjResult.entryToken;
+      if(rjResult.gameToken) ST.entryToken=rjResult.gameToken;
       wagerRecorded=true;
       _rjPendingTxSig=null;
-      console.log('[rejoin] wager recorded, entryToken:', !!rjResult.entryToken);
+      console.log('[rejoin] wager recorded, gameToken:', !!rjResult.gameToken);
     }
     catch(e){
       console.warn('[rejoin] recordWager attempt 1 failed:', e.message, '— retrying in 2s');
@@ -2302,7 +2333,7 @@ async function doRejoin(){
       await new Promise(r=>setTimeout(r,2000));
       try {
         const rjResult2=await recordWager(ST.address, lamps, sig, pkRoomId, _rjPName);
-        if(rjResult2.entryToken) ST.entryToken=rjResult2.entryToken;
+        if(rjResult2.gameToken) ST.entryToken=rjResult2.gameToken;
         wagerRecorded=true;
         _rjPendingTxSig=null;
         console.log('[rejoin] wager recorded on retry');
@@ -2330,14 +2361,13 @@ async function doRejoin(){
       return;
     }
 
-    const sp=rndSpawn();
     const _rjName=ST.email?ST.email.split('@')[0].slice(0,8).toUpperCase():'';
     G.players.set(myPid,{
       id:myPid, num:G.players.size, color:_mySkin.color, hat:_mySkin.hat,
       trail:_mySkin.trail||'none', eyes:_mySkin.eyes||'dot', aura:_mySkin.aura||'none', _trail:[],
-      x:sp.x, y:sp.y, dx:0, dy:0, nx:0, ny:0,
-      prevX:sp.x, prevY:sp.y, renderX:sp.x, renderY:sp.y,
-      sc:0, lives:1, pow:false, pt:0, mc:0, pep:false, pet:0, held:[],
+      x:0, y:0, dx:0, dy:0, nx:0, ny:0,
+      prevX:0, prevY:0, renderX:0, renderY:0,
+      sc:0, lives:1, _waitSnap:true, pow:false, pt:0, mc:0, pep:false, pet:0, held:['cherry','pepper'],
       name:_rjName, sol:ST.wagerSol||0
     });
     isSpectating=false;
@@ -2356,7 +2386,13 @@ async function doRejoin(){
     if(isHost&&!_hostRaf) startHostLoop();
 
     if(ablyChannel) ablyChannel.publish('rejoin',{id:myPid, name:_rjName, sol:ST.wagerSol||0, gameToken:ST.entryToken||null},()=>{});
-    console.log('[rejoin] published rejoin event, entryToken:', !!ST.entryToken);
+    console.log('[rejoin] published rejoin event, gameToken:', !!ST.entryToken);
+    // Fallback: if server snap doesn't arrive within 2s, show player at a safe spawn position.
+    // Prevents permanent invisibility if the socket drop or token issue means snap never fires.
+    setTimeout(()=>{
+      const _wp=G&&G.players.get(myPid);
+      if(_wp&&_wp._waitSnap){ const _fs=rndSpawn(); _wp.x=_fs.x; _wp.y=_fs.y; _wp.renderX=_fs.x; _wp.renderY=_fs.y; _wp._waitSnap=false; }
+    },2000);
 
     document.getElementById('rejoin-overlay').style.display='none';
     const _sp=document.getElementById('spectate-panel'); if(_sp) _sp.style.display='none';
@@ -2492,7 +2528,7 @@ function launchGame(){
   const powPanel=document.getElementById('pow-btns');
   if(powPanel) powPanel.style.display='flex';
   const cashWrap=document.getElementById('cash-btn-wrap');
-  if(cashWrap) cashWrap.style.display=_lobbyIsPaid?'block':'none';
+  if(cashWrap) cashWrap.style.display='block';
   const cBtn=document.getElementById('cherry-use-btn');
   const pBtn=document.getElementById('pepper-use-btn');
   if(cBtn){
@@ -2578,7 +2614,7 @@ function mkP(info){
     prevX:sp[0], prevY:sp[1],
     renderX:sp[0], renderY:sp[1], // smooth float position for 60fps draw
     sc:0, lives:2, pow:false, pt:0, mc:0,
-    pep:false, pet:0, held:[],
+    pep:false, pet:0, held:['cherry','pepper'],
     name: info.name||'', sol: info.sol||0
   };
 }
@@ -2623,7 +2659,7 @@ function respawnPlayer(p){
   p.x=sp.x; p.y=sp.y; p.prevX=sp.x; p.prevY=sp.y;
   p.renderX=sp.x; p.renderY=sp.y; // snap render position on respawn
   p.dx=0; p.dy=0; p.nx=0; p.ny=0; p.mc=0;
-  p.pow=false; p.pt=0; p.pep=false; p.pet=0; p.held=[]; // lose all powerups on death
+  p.pow=false; p.pt=0; p.pep=false; p.pet=0; p.held=['cherry','pepper'];
 }
 
 function eliminatePlayer(id, killerId){
@@ -2724,7 +2760,7 @@ function eatCellP(p){
     if(!p.pow && !(p.held||[]).includes('cherry')){
       G.maze[p.y][p.x]=0; _mazeDirty=true; G.eaten++;
       G.eatLog.push([p.y,p.x]);
-      if(G.powRespawnQ) G.powRespawnQ.push({type:3, at:frm+405});
+      if(G.powRespawnQ) G.powRespawnQ.push({type:3, at:frm+200});
       p.held=[...(p.held||[]),'cherry'];
       if(p.id===myPid){ playCherry(); _updatePowBtns(p); }
     }
@@ -2734,7 +2770,7 @@ function eatCellP(p){
     if(!p.pep && !(p.held||[]).includes('pepper')){
       G.maze[p.y][p.x]=0; _mazeDirty=true; G.eaten++;
       G.eatLog.push([p.y,p.x]);
-      if(G.powRespawnQ) G.powRespawnQ.push({type:4, at:frm+405});
+      if(G.powRespawnQ) G.powRespawnQ.push({type:4, at:frm+200});
       p.held=[...(p.held||[]),'pepper'];
       if(p.id===myPid){ playPepper(); _updatePowBtns(p); }
     }
@@ -3064,7 +3100,7 @@ function draw(){
   ctx.fillStyle='#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
   // Camera follow: smooth lerp toward local player position
   const _cme0=G.players.get(myPid);
-  if(_cme0){
+  if(_cme0&&!_cme0._waitSnap){
     const _tx=(_cme0.renderX!==undefined?_cme0.renderX+0.5:_cme0.x+0.5)*T;
     const _ty=(_cme0.renderY!==undefined?_cme0.renderY+0.5:_cme0.y+0.5)*T;
     _camX+=(_tx-_camX)*0.18; _camY+=(_ty-_camY)*0.18;
@@ -3228,6 +3264,7 @@ function draw(){
   // ── Draw all players ────────────────────────────────────────
   const myName=_cachedMyName;
   G.players.forEach(p=>{
+    if(p._waitSnap) return; // invisible until server confirms spawn position
     const isMe=p.id===myPid;
     // LEFT of name = powerup being carried (held, ready to use)
     // RIGHT of name = powerup currently active (in use right now)

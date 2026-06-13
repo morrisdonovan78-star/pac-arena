@@ -5,13 +5,14 @@ const { Server } = require('socket.io');
 const crypto = require('crypto');
 
 const PORT = process.env.PORT || 3001;
-const GAME_SECRET = process.env.GAME_SECRET || '';
+const GAME_SECRET = (process.env.GAME_SECRET || '').trim();
+const _usedGameTokens = new Set(); // server-level: survives room deletion, never cleared on disconnect
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 
 // ── Game constants ────────────────────────────────────────────────────────────
 const C=48,R=36,TICK_MS=33;
 const CHERRY_TICKS=300, PEPPER_TICKS=390;
-const CHERRY_RESPAWN=600, PEPPER_RESPAWN=480;
+const CHERRY_RESPAWN=300, PEPPER_RESPAWN=240;
 
 // ── Maze ──────────────────────────────────────────────────────────────────────
 const MAZE_BASE=[
@@ -79,7 +80,6 @@ function makeGameToken(lobbyId, pid) {
 }
 
 function validateGameToken(token, lobbyId, pid) {
-  if (!GAME_SECRET) return true; // dev: no secret set, allow all
   try {
     const { data, sig } = JSON.parse(Buffer.from(token, 'base64url').toString());
     const expected = crypto.createHmac('sha256', GAME_SECRET).update(data).digest('hex');
@@ -125,7 +125,6 @@ function getOrCreateRoom(lobbyId) {
     rooms.set(lobbyId, {
       lobbyId, maze,
       players: new Map(),   // pid → player
-      usedTokens: new Set(),
       powRespawnQ: [],
       eatLog: [],
       frm: 0, pkTick: 0, pkSent: 0,
@@ -212,7 +211,12 @@ function checkCollisions(room, io) {
 
 function elim(victim, killerId, room, io) {
   victim.alive = false;
-  io.to(room.lobbyId).emit('elim', { id: victim.id, killerId, victimSol: victim.sol || 0 });
+  // Sign the kill so settle.js can verify it came from the real game server, not a console call
+  const killTs = Date.now();
+  const killProof = GAME_SECRET
+    ? crypto.createHmac('sha256', GAME_SECRET).update(`${killerId}:${victim.id}:${killTs}`).digest('hex')
+    : null;
+  io.to(room.lobbyId).emit('elim', { id: victim.id, killerId, victimSol: victim.sol || 0, killProof, killTs });
 }
 
 function tick(room, io) {
@@ -266,29 +270,36 @@ io.on('connection', socket => {
   if (!lobbyId) { socket.disconnect(); return; }
   const isPaid = lobbyId !== 'free-lobby';
 
-  // Validate token for paid lobbies
-  if (isPaid && GAME_SECRET) {
-    if (!validateGameToken(gameToken, lobbyId, pid)) {
-      socket.emit('err', 'Invalid entry token — pay to join');
-      socket.disconnect(); return;
-    }
-  }
-
   const room = getOrCreateRoom(lobbyId);
+  const existing = room.players.get(pid);
 
-  // Reject reused tokens (prevent double-join on paid lobbies)
-  if (isPaid && gameToken) {
-    if (room.usedTokens.has(gameToken)) {
-      socket.emit('err', 'Token already used');
+  // Paid lobby gate — fail CLOSED: no GAME_SECRET means misconfigured server, deny entry
+  if (isPaid) {
+    console.log(`[${lobbyId}] connection pid=${pid&&pid.slice(0,8)} hasToken=${!!gameToken} existing=${!!existing} gsSet=${!!GAME_SECRET}`);
+    if (!GAME_SECRET) {
+      socket.emit('err', 'Server not configured for paid lobbies — contact admin');
       socket.disconnect(); return;
     }
-    room.usedTokens.add(gameToken);
+    // Reconnecting players (already in room) skip token re-check — their token was validated on first join
+    if (!existing) {
+      const tokenValid = validateGameToken(gameToken, lobbyId, pid);
+      console.log(`[${lobbyId}] token valid=${tokenValid} alreadyUsed=${_usedGameTokens.has(gameToken)}`);
+      if (!tokenValid) {
+        socket.emit('err', 'Invalid entry token — pay to join');
+        socket.disconnect(); return;
+      }
+      if (_usedGameTokens.has(gameToken)) {
+        // Same player reconnecting after a drop — allow re-entry (token is HMAC-tied to this pid)
+        console.log(`[${lobbyId}] allowing reconnect for pid=${pid&&pid.slice(0,8)} with previously-used token`);
+      } else {
+        _usedGameTokens.add(gameToken);
+      }
+    }
   }
 
   socket.join(lobbyId);
 
   // Reconnect: if pid already in room, just update socketId and keep all game state
-  const existing = room.players.get(pid);
   let player;
   if (existing) {
     existing.socketId = socket.id;
@@ -303,7 +314,7 @@ io.on('connection', socket => {
       prevX: spawn.x, prevY: spawn.y,
       sc: 0, alive: true, mc: 0,
       pow: false, pt: 0, pep: false, pet: 0,
-      held: [], sol: wagerSol || 0,
+      held: ['cherry', 'pepper'], sol: wagerSol || 0,
       num: room.players.size
     };
     room.players.set(pid, player);
@@ -359,9 +370,10 @@ io.on('connection', socket => {
     const p = room.players.get(pid);
     if (!p) return;
     const s = nextSpawn();
-    p.x = s.x; p.y = s.y; p.alive = true; p.sc = 0;
-    p.pow = false; p.pt = 0; p.pep = false; p.pet = 0; p.held = [];
-    io.to(lobbyId).emit('rejoin', { id: pid });
+    p.x = s.x; p.y = s.y; p.dx = 0; p.dy = 0; p.alive = true; p.sc = 0;
+    p.pow = false; p.pt = 0; p.pep = false; p.pet = 0; p.held = ['cherry', 'pepper'];
+    // Include spawn coords so clients snap immediately instead of waiting for the next state tick
+    io.to(lobbyId).emit('rejoin', { id: pid, x: s.x, y: s.y });
   });
 
   // ── Chat ──────────────────────────────────────────────────────
@@ -379,9 +391,6 @@ io.on('connection', socket => {
 
   // ── Disconnect ────────────────────────────────────────────────
   socket.on('disconnect', () => {
-    // Clear the entry token so a brief drop can reconnect without "Token already used".
-    if (isPaid && gameToken) room.usedTokens.delete(gameToken);
-
     room.players.delete(pid);
     io.to(lobbyId).emit('leave', { id: pid });
     console.log(`[${lobbyId}] ${name} left — ${room.players.size} remaining`);

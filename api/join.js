@@ -6,12 +6,12 @@
 
 const nacl   = require('tweetnacl');
 const crypto = require('crypto');
-const { kvGet, kvSet, kvSetPerm, kvZadd } = require('../lib/kv');
+const { kvGet, kvSet, kvDel, kvSetPerm, kvZadd } = require('../lib/kv');
 
 // Game token — HMAC-signed proof of payment for the Socket.io game server.
 // Format matches server.js makeGameToken() so the server can validate it.
 function makeGameToken(walletAddress, lobbyId) {
-  const secret = process.env.GAME_SECRET || '';
+  const secret = (process.env.GAME_SECRET || '').trim();
   if (!secret) return null;
   const ts = Date.now();
   const data = `${lobbyId}:${walletAddress}:${ts}`;
@@ -182,6 +182,10 @@ module.exports = async function handler(req, res) {
     await kvSet(txKey, '1', 86400);
     // Store for 4 hours — more than enough for any game session
     await kvSet('pw:' + walletAddress, lamps, 14400);
+    // Clear any stale cashout lock from a previous session (e.g. Vercel function was killed
+    // before finally{kvDel} could run). Safe to delete here because the player just proved
+    // they paid a new wager — no concurrent cashout can be legitimately in-flight.
+    kvDel('lock:co:' + walletAddress).catch(() => {});
 
     // Fire-and-forget leaderboard join stat (wagered + games count)
     (async()=>{

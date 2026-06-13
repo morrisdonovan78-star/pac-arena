@@ -1,7 +1,9 @@
 // api/settle.js — tweetnacl only, no @solana/web3.js (ESM/runtime issues)
 'use strict';
-const nacl = require('tweetnacl');
-const { kvGet, kvSet, kvDel, kvSetPerm, kvZadd } = require('../lib/kv');
+const nacl    = require('tweetnacl');
+const crypto  = require('crypto');
+const GAME_SECRET = (process.env.GAME_SECRET || '').trim();
+const { kvGet, kvSet, kvSetNX, kvDel, kvSetPerm, kvZadd } = require('../lib/kv');
 
 // ── Ed25519 wallet signature verification ─────────────────────────────────────
 // The client signs: "pac-arena:{action}:{playerAddress}:{wagerLamports}:{unixTs}"
@@ -300,79 +302,80 @@ module.exports = async function handler(req, res) {
       if (!playerAddress) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'playerAddress required' }); }
       const playerPubkey = b58Decode(playerAddress);
       if (playerPubkey.length !== 32) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'playerAddress must be a 32-byte Solana address' }); }
-      // Cashout requires a KV-recorded wager — no fallback to client-supplied value.
-      // Without this, anyone who enters the lobby without paying (JS console bypass) could
-      // claim any amount they sign and drain the escrow.
-      const kvWager = Number(await kvGet('pw:' + playerAddress)) || 0;
-      if (kvWager <= 0) {
-        clearTimeout(guard); done = true;
-        return res.status(403).json({ error: 'No wager on record — deposit via the game client before cashing out' });
-      }
-      const wagerLamports = kvWager;
-      console.log('[settle] cashout kv=' + kvWager + ' using=' + wagerLamports);
 
-      // Retry once if on-chain execution fails — a concurrent kill tx may have changed the
-      // balance between our balance check and our tx submission. Re-fetching fixes it.
-      let sig, playerCut, creatorCut, txConfirmed = false;
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        if (attempt > 1) await sleep(1200);
-        // Single batched HTTP call for balance + blockhash (was 2 separate calls)
-        const { bal, blockhash } = await fetchBalAndHash(esc.pubkeyB58);
-        console.log('[settle] cashout attempt=' + attempt + ' bal=' + bal + ' blockhash=' + blockhash.slice(0,8) + '… player=' + playerAddress.slice(0,8) + '…');
-        // Reserve only the exact TX fee (not RENT_MIN — players no longer deposit it)
-        const avail = bal - TX_FEE;
-        if (avail <= 0) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'Escrow balance too low to cashout — try again shortly' }); }
-        let payout = wagerLamports > 0 ? Math.min(wagerLamports, avail) : avail;
-        // Sub-rent safety check: Solana rejects txs that would leave an account with
-        // a balance between 0 and RENT_MIN. If the remainder after payout falls in that
-        // forbidden range, bump the payout to drain the escrow all the way to 0 instead.
-        const remaining = avail - payout;
-        if (remaining > 0 && remaining < RENT_MIN) { payout = avail; }
-        creatorCut = Math.floor(payout * CREATOR_FEE_PCT);
-        playerCut  = payout - creatorCut;
-        console.log('[settle] cashout payout=' + payout + ' (wager=' + wagerLamports + ' avail=' + avail + ' remaining=' + remaining + ') player=' + playerCut + ' creator=' + creatorCut);
-        // If creatorCut rounds to 0 (micro-wager), skip the creator transfer
-        const transfers = creatorCut > 0
-          ? [{ to: playerPubkey, lamports: playerCut }, { to: b58Decode(CREATOR_WALLET), lamports: creatorCut }]
-          : [{ to: playerPubkey, lamports: payout }];
-        try {
-          const tx = buildTx(esc, blockhash, transfers);
-          const result = await sendAndConfirm(tx);
-          sig = result.sig; txConfirmed = result.confirmed;
-          await kvDel('pw:' + playerAddress); // wager claimed — remove so it can't be replayed
-          // Clear kill rate-limit so next session isn't throttled from previous
-          (async()=>{ try{ await kvDel('krl:'+playerAddress); }catch(_){} })();
-          // Fire-and-forget leaderboard stat update (never block cashout on this)
-          (async()=>{
-            try{
-              const raw=await kvGet('plb:'+playerAddress);
-              const s=raw?{...{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0},...JSON.parse(raw)}:{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0};
-              s.earned+=playerCut;
-              s.wins=(s.wins||0)+1;
-              s.games=(s.games||0)+1;
-              s.wagered=(s.wagered||0)+wagerLamports;
-              await kvSetPerm('plb:'+playerAddress,JSON.stringify(s));
-              await kvZadd('lb:earned',s.earned,playerAddress);
-              const gRaw=await kvGet('plb:global');
-              const gd=gRaw?{...{totalEarned:0,totalWagered:0,gamesPlayed:0},...JSON.parse(gRaw)}:{totalEarned:0,totalWagered:0,gamesPlayed:0};
-              gd.totalEarned+=playerCut;
-              gd.gamesPlayed=(gd.gamesPlayed||0)+1;
-              gd.totalWagered=(gd.totalWagered||0)+wagerLamports;
-              await kvSetPerm('plb:global',JSON.stringify(gd));
-            }catch(_){}
-          })();
-          break; // success — exit retry loop
-        } catch (e) {
-          const isOnChainFail = e.message.includes('TX rejected') || e.message.includes('insufficient') || e.message.includes('0x1') || e.message.includes('-32002') || e.message.includes('Send failed');
-          if (attempt < 2 && isOnChainFail) {
-            console.warn('[settle] cashout attempt ' + attempt + ' fail (' + e.message.slice(0, 80) + ') — retrying with fresh balance');
-            continue;
-          }
-          throw e;
-        }
+      // NX lock: only one cashout can run at a time per wallet.
+      // Prevents two concurrent requests from both reading kvWager > 0 and both sending txs.
+      const coLockKey = 'lock:co:' + playerAddress;
+      const coLock = await kvSetNX(coLockKey, '1', 20);
+      if (!coLock) {
+        clearTimeout(guard); done = true;
+        return res.status(429).json({ error: 'Cashout already in progress — wait a moment and try again' });
       }
-      clearTimeout(guard); done = true;
-      return res.status(200).json({ sig, playerCut, creatorCut, confirmed: txConfirmed });
+
+      try {
+        const kvWager = Number(await kvGet('pw:' + playerAddress)) || 0;
+        if (kvWager <= 0) {
+          clearTimeout(guard); done = true;
+          return res.status(403).json({ error: 'No wager on record — deposit via the game client before cashing out' });
+        }
+        const wagerLamports = kvWager;
+        console.log('[settle] cashout kv=' + kvWager + ' using=' + wagerLamports);
+
+        let sig, playerCut, creatorCut, txConfirmed = false;
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          if (attempt > 1) await sleep(1200);
+          const { bal, blockhash } = await fetchBalAndHash(esc.pubkeyB58);
+          console.log('[settle] cashout attempt=' + attempt + ' bal=' + bal + ' blockhash=' + blockhash.slice(0,8) + '… player=' + playerAddress.slice(0,8) + '…');
+          const avail = bal - TX_FEE;
+          if (avail <= 0) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'Escrow balance too low to cashout — try again shortly' }); }
+          let payout = wagerLamports > 0 ? Math.min(wagerLamports, avail) : avail;
+          const remaining = avail - payout;
+          if (remaining > 0 && remaining < RENT_MIN) { payout = avail; }
+          creatorCut = Math.floor(payout * CREATOR_FEE_PCT);
+          playerCut  = payout - creatorCut;
+          console.log('[settle] cashout payout=' + payout + ' (wager=' + wagerLamports + ' avail=' + avail + ' remaining=' + remaining + ') player=' + playerCut + ' creator=' + creatorCut);
+          const transfers = creatorCut > 0
+            ? [{ to: playerPubkey, lamports: playerCut }, { to: b58Decode(CREATOR_WALLET), lamports: creatorCut }]
+            : [{ to: playerPubkey, lamports: payout }];
+          try {
+            const tx = buildTx(esc, blockhash, transfers);
+            const result = await sendAndConfirm(tx);
+            sig = result.sig; txConfirmed = result.confirmed;
+            await kvDel('pw:' + playerAddress);
+            (async()=>{ try{ await kvDel('krl:'+playerAddress); }catch(_){} })();
+            (async()=>{
+              try{
+                const raw=await kvGet('plb:'+playerAddress);
+                const s=raw?{...{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0},...JSON.parse(raw)}:{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0};
+                s.earned+=playerCut;
+                s.wins=(s.wins||0)+1;
+                s.games=(s.games||0)+1;
+                s.wagered=(s.wagered||0)+wagerLamports;
+                await kvSetPerm('plb:'+playerAddress,JSON.stringify(s));
+                await kvZadd('lb:earned',s.earned,playerAddress);
+                const gRaw=await kvGet('plb:global');
+                const gd=gRaw?{...{totalEarned:0,totalWagered:0,gamesPlayed:0},...JSON.parse(gRaw)}:{totalEarned:0,totalWagered:0,gamesPlayed:0};
+                gd.totalEarned+=playerCut;
+                gd.gamesPlayed=(gd.gamesPlayed||0)+1;
+                gd.totalWagered=(gd.totalWagered||0)+wagerLamports;
+                await kvSetPerm('plb:global',JSON.stringify(gd));
+              }catch(_){}
+            })();
+            break;
+          } catch (e) {
+            const isOnChainFail = e.message.includes('TX rejected') || e.message.includes('insufficient') || e.message.includes('0x1') || e.message.includes('-32002') || e.message.includes('Send failed');
+            if (attempt < 2 && isOnChainFail) {
+              console.warn('[settle] cashout attempt ' + attempt + ' fail (' + e.message.slice(0, 80) + ') — retrying with fresh balance');
+              continue;
+            }
+            throw e;
+          }
+        }
+        clearTimeout(guard); done = true;
+        return res.status(200).json({ sig, playerCut, creatorCut, confirmed: txConfirmed });
+      } finally {
+        await kvDel(coLockKey);
+      }
     }
 
     // ── kill ──────────────────────────────────────────────────────────────────
@@ -381,17 +384,44 @@ module.exports = async function handler(req, res) {
       const killPubkey = b58Decode(playerAddress);
       if (killPubkey.length !== 32) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'playerAddress must be 32 bytes' }); }
 
-      // ── Rate limiter: one kill reward per 30 s per wallet ────────────────────
-      // Prevents rapid-fire console calls from draining escrow instantly.
-      // The escrow balance is the only ceiling on total kill rewards.
-      const rlKey = 'krl:' + playerAddress;
-      const isRateLimited = await kvGet(rlKey);
-      if (isRateLimited) {
+      // Fail CLOSED: if GAME_SECRET is missing the kill proof cannot be verified —
+      // deny the claim entirely rather than skipping the gate and allowing console drains.
+      if (!GAME_SECRET) {
         clearTimeout(guard); done = true;
-        return res.status(429).json({ error: 'Kill reward already claimed recently — wait before claiming again' });
+        return res.status(503).json({ error: 'Kill rewards not available — server configuration error' });
       }
 
-      // Retry once on on-chain fail — concurrent kills can race on the shared escrow
+      const kpBody = typeof body.killProof === 'string' ? body.killProof : '';
+      const ktBody = Number(body.killTs) || 0;
+      const vaBody = typeof body.victimAddress === 'string' ? body.victimAddress : '';
+
+      // Validate proof format and freshness before touching KV
+      const proofAge = Date.now() - ktBody;
+      if (!kpBody || kpBody.length !== 64 || !ktBody || !vaBody || proofAge > 300000 || proofAge < 0) {
+        clearTimeout(guard); done = true;
+        return res.status(403).json({ error: 'Kill proof required — must originate from an active game' });
+      }
+
+      // Verify HMAC first (cheap CPU check before any KV writes)
+      const expectedProof = crypto.createHmac('sha256', GAME_SECRET).update(`${playerAddress}:${vaBody}:${ktBody}`).digest('hex');
+      let proofOk = false;
+      try { proofOk = crypto.timingSafeEqual(Buffer.from(expectedProof), Buffer.from(kpBody)); } catch (_) {}
+      if (!proofOk) {
+        clearTimeout(guard); done = true;
+        return res.status(403).json({ error: 'Invalid kill proof' });
+      }
+
+      // Atomically claim this proof via NX — only the first request wins even under concurrent load.
+      // Eliminates the read-then-write race in the old pattern.
+      // No per-wallet rate limit: each kill event has a unique proof (killerId:victimId:timestamp),
+      // so back-to-back kills each get their own proof and are all paid immediately.
+      const proofClaimed = await kvSetNX('kpu:' + kpBody, '1', 300);
+      if (!proofClaimed) {
+        clearTimeout(guard); done = true;
+        return res.status(403).json({ error: 'Kill proof already redeemed' });
+      }
+
+      // Retry once on on-chain fail — concurrent kills can race on the shared escrow balance
       let sig, killerCut, creatorCut, txConfirmed2 = false;
       for (let attempt = 1; attempt <= 2; attempt++) {
         if (attempt > 1) await sleep(1200);
@@ -399,15 +429,13 @@ module.exports = async function handler(req, res) {
         console.log('[settle] kill attempt=' + attempt + ' bal=' + killBal + ' blockhash=' + killHash.slice(0,8) + '… killer=' + playerAddress.slice(0,8) + '… wager=' + body.wagerLamports);
         const killAvail = killBal - TX_FEE;
         if (killAvail <= 0) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'Escrow empty' }); }
-        // Kill reward is strictly capped by the killer's KV-recorded wager.
-        // Requiring a KV entry prevents anyone without an active deposit from draining escrow.
+        // Kill reward capped by killer's KV-recorded wager — prevents anyone without an active deposit from draining escrow
         const kvKillWager = Number(await kvGet('pw:' + playerAddress)) || 0;
         if (kvKillWager <= 0) {
           clearTimeout(guard); done = true;
           return res.status(403).json({ error: 'No active wager on record — must join with a deposit before claiming kill rewards' });
         }
         let total = Math.min(kvKillWager, killAvail);
-        // Sub-rent safety check: if remaining after payout would be between 0 and RENT_MIN, drain to 0
         const killRemaining = killAvail - total;
         if (killRemaining > 0 && killRemaining < RENT_MIN) { total = killAvail; }
         creatorCut = Math.floor(total * CREATOR_FEE_PCT);
@@ -420,13 +448,9 @@ module.exports = async function handler(req, res) {
           const tx = buildTx(esc, killHash, transfers);
           const result2 = await sendAndConfirm(tx);
           sig = result2.sig; txConfirmed2 = result2.confirmed;
-          await kvSet(rlKey, '1', 30); // rate-limit key: blocks next call for 30 s
-          // Delete victim's wager entry so they can't free-rejoin after being killed.
-          // victimAddress is public game state (wallet address visible to all players) —
-          // we guard against self-deletion and invalid addresses.
-          const va = body.victimAddress;
-          if (va && typeof va === 'string' && va !== playerAddress && va.length > 20) {
-            try { await kvDel('pw:' + va); } catch (_) {}
+          // Delete victim's wager so they can't cashout after being killed
+          if (vaBody && vaBody !== playerAddress && vaBody.length > 20) {
+            try { await kvDel('pw:' + vaBody); } catch (_) {}
           }
           break;
         } catch (e) {
@@ -444,41 +468,50 @@ module.exports = async function handler(req, res) {
 
     // ── lose ──────────────────────────────────────────────────────────────────
     if (action === 'lose') {
-      const kvLoseWager = Number(await kvGet('pw:' + playerAddress)) || 0;
-      // Require KV entry — prevents draining escrow to creator for players not in an active game.
-      if (kvLoseWager <= 0) {
+      // NX lock: prevents two concurrent lose requests from both sending txs
+      const loLockKey = 'lock:lo:' + playerAddress;
+      const loLock = await kvSetNX(loLockKey, '1', 20);
+      if (!loLock) {
         clearTimeout(guard); done = true;
-        return res.status(200).json({ sig: null, amount: 0, confirmed: true }); // nothing to do
+        return res.status(429).json({ error: 'Payout already in progress — wait a moment' });
       }
-      const { bal: loseBal, blockhash: loseHash } = await fetchBalAndHash(esc.pubkeyB58);
-      const loseAvail = loseBal - TX_FEE;
-      if (loseAvail <= 0) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'Escrow empty' }); }
-      const loseAmt = Math.min(kvLoseWager, loseAvail);
-      const remaining = loseAvail - loseAmt;
-      const finalAmt  = (remaining > 0 && remaining < RENT_MIN) ? loseAvail : loseAmt;
-      const tx = buildTx(esc, loseHash, [{ to: b58Decode(CREATOR_WALLET), lamports: finalAmt }]);
-      const { sig: loseSig, confirmed: loseConfirmed } = await sendAndConfirm(tx);
-      await kvDel('pw:' + playerAddress);
-      // Clear kill rate-limit and count so a new session starts clean
-      (async()=>{ try{ await kvDel('krl:'+playerAddress); await kvDel('kc:'+playerAddress); }catch(_){} })();
-      // Track loss stat fire-and-forget
-      (async()=>{
-        try{
-          const raw=await kvGet('plb:'+playerAddress);
-          const s=raw?{...{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0},...JSON.parse(raw)}:{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0};
-          s.losses=(s.losses||0)+1;
-          s.games=(s.games||0)+1;
-          s.wagered=(s.wagered||0)+kvLoseWager;
-          await kvSetPerm('plb:'+playerAddress,JSON.stringify(s));
-          const gRaw=await kvGet('plb:global');
-          const gd=gRaw?{...{totalEarned:0,totalWagered:0,gamesPlayed:0},...JSON.parse(gRaw)}:{totalEarned:0,totalWagered:0,gamesPlayed:0};
-          gd.gamesPlayed=(gd.gamesPlayed||0)+1;
-          gd.totalWagered=(gd.totalWagered||0)+kvLoseWager;
-          await kvSetPerm('plb:global',JSON.stringify(gd));
-        }catch(_){}
-      })();
-      clearTimeout(guard); done = true;
-      return res.status(200).json({ sig: loseSig, amount: finalAmt, confirmed: loseConfirmed });
+
+      try {
+        const kvLoseWager = Number(await kvGet('pw:' + playerAddress)) || 0;
+        if (kvLoseWager <= 0) {
+          clearTimeout(guard); done = true;
+          return res.status(200).json({ sig: null, amount: 0, confirmed: true });
+        }
+        const { bal: loseBal, blockhash: loseHash } = await fetchBalAndHash(esc.pubkeyB58);
+        const loseAvail = loseBal - TX_FEE;
+        if (loseAvail <= 0) { clearTimeout(guard); done = true; return res.status(400).json({ error: 'Escrow empty' }); }
+        const loseAmt = Math.min(kvLoseWager, loseAvail);
+        const remaining = loseAvail - loseAmt;
+        const finalAmt  = (remaining > 0 && remaining < RENT_MIN) ? loseAvail : loseAmt;
+        const tx = buildTx(esc, loseHash, [{ to: b58Decode(CREATOR_WALLET), lamports: finalAmt }]);
+        const { sig: loseSig, confirmed: loseConfirmed } = await sendAndConfirm(tx);
+        await kvDel('pw:' + playerAddress);
+        (async()=>{ try{ await kvDel('krl:'+playerAddress); await kvDel('kc:'+playerAddress); }catch(_){} })();
+        (async()=>{
+          try{
+            const raw=await kvGet('plb:'+playerAddress);
+            const s=raw?{...{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0},...JSON.parse(raw)}:{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0};
+            s.losses=(s.losses||0)+1;
+            s.games=(s.games||0)+1;
+            s.wagered=(s.wagered||0)+kvLoseWager;
+            await kvSetPerm('plb:'+playerAddress,JSON.stringify(s));
+            const gRaw=await kvGet('plb:global');
+            const gd=gRaw?{...{totalEarned:0,totalWagered:0,gamesPlayed:0},...JSON.parse(gRaw)}:{totalEarned:0,totalWagered:0,gamesPlayed:0};
+            gd.gamesPlayed=(gd.gamesPlayed||0)+1;
+            gd.totalWagered=(gd.totalWagered||0)+kvLoseWager;
+            await kvSetPerm('plb:global',JSON.stringify(gd));
+          }catch(_){}
+        })();
+        clearTimeout(guard); done = true;
+        return res.status(200).json({ sig: loseSig, amount: finalAmt, confirmed: loseConfirmed });
+      } finally {
+        await kvDel(loLockKey);
+      }
     }
 
     clearTimeout(guard); done = true;

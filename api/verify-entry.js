@@ -37,15 +37,21 @@ module.exports = async function handler(req, res) {
   if (!lobby || !token) return res.status(400).json({ error: 'address, lobby, token required' });
 
   const secret = process.env.SETTLE_SECRET || '';
-  if (!secret) return res.status(200).json({ valid: true }); // graceful: if no secret, don't block
+  if (!secret) return res.status(200).json({ valid: false }); // fail closed: misconfigured server denies entry
 
   const now = Math.floor(Date.now() / 600_000);
-  // Accept current and previous window to handle boundary edge cases
+  // Accept current and previous window to handle boundary edge cases.
+  // timingSafeEqual prevents timing attacks that could leak the HMAC byte-by-byte.
   for (let delta = 0; delta <= 1; delta++) {
     const expected = crypto.createHmac('sha256', secret)
       .update('entry:' + address + ':' + lobby + ':' + (now - delta))
       .digest('hex').slice(0, 32);
-    if (expected === token) return res.status(200).json({ valid: true });
+    try {
+      if (expected.length === token.length &&
+          crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(token))) {
+        return res.status(200).json({ valid: true });
+      }
+    } catch (_) {}
   }
   return res.status(200).json({ valid: false });
 };
