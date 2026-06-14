@@ -1530,8 +1530,10 @@ async function pkConnect(roomId, gameToken){
       _voiceHandleSignal(from,type,sdp,candidate);
     });
     _sio.on('voice-ready',({from})=>{
+      if(!from||from===myPid) return;
+      _voiceReadyPids.add(from);
       // Higher-sorted pid is always the offerer — prevents simultaneous offer glare
-      if(_voiceEnabled&&from&&from!==myPid&&myPid>from) _voiceOffer(from);
+      if(_voiceEnabled&&myPid>from) _voiceOffer(from);
     });
 
     _sio.on('elim',(data)=>{
@@ -1938,6 +1940,7 @@ let _voiceEnabled=false;
 let _voiceAnalysers=new Map();  // pid → AnalyserNode (speaking detection)
 let _voiceLocalAnalyser=null;
 let _voiceSpeaking=new Set();   // pids currently speaking (rebuilt each frame)
+let _voiceReadyPids=new Set();  // pids that have sent voice-ready (mic enabled)
 let _sio=null, ablyChannel=null, pkRoomId=null;
 let myPid=null, isHost=false;                     // N-player game identity
 let isSpectating=false;                           // spectate mode flag
@@ -4502,6 +4505,9 @@ async function _voiceOffer(remotePid){
 async function _voiceHandleSignal(from,type,sdp,candidate){
   try{
     if(type==='offer'){
+      // Don't answer until our own mic is ready — offerer's PC will reach 'failed',
+      // get cleaned up via onconnectionstatechange, and retry when we emit voice-ready
+      if(!_voiceEnabled) return;
       let pc=_voicePcs.get(from);
       if(!pc) pc=_voiceCreatePc(from);
       await pc.setRemoteDescription({type:'offer',sdp});
@@ -4569,8 +4575,9 @@ async function voiceToggle(){
       if(btn){btn.textContent='🎤';btn.style.borderColor='rgba(57,255,20,0.6)';}
       addToast('🎤 Voice ON — press Y to mute/unmute','#39FF14');
       if(_sio) _sio.emit('voice-ready',{});
-      // Only offer peers where we are the higher-sorted pid — prevents offer glare
-      if(G?.players) for(const[pid] of G.players) if(pid!==myPid&&myPid>pid) _voiceOffer(pid);
+      // Offer only peers who have already sent voice-ready (both sides have mic enabled)
+      // Higher-sorted pid is the offerer — prevents offer glare
+      _voiceReadyPids.forEach(pid=>{ if(myPid>pid) _voiceOffer(pid); });
     }catch(e){
       addToast('Microphone access denied — check browser settings','#FF4444');
     }
@@ -4587,7 +4594,7 @@ function voiceCleanup(){
   _voicePcs.clear();
   _voiceAudios.forEach(el=>{try{el.srcObject=null;el.remove();}catch(_){}});
   _voiceAudios.clear();
-  _voiceAnalysers.clear(); _voiceSpeaking.clear(); _voiceLocalAnalyser=null;
+  _voiceAnalysers.clear(); _voiceSpeaking.clear(); _voiceLocalAnalyser=null; _voiceReadyPids.clear();
   if(_voiceStream){_voiceStream.getTracks().forEach(t=>t.stop());_voiceStream=null;}
   _voiceEnabled=false;
   const btn=document.getElementById('voice-btn');
