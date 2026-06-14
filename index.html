@@ -1530,8 +1530,8 @@ async function pkConnect(roomId, gameToken){
       _voiceHandleSignal(from,type,sdp,candidate);
     });
     _sio.on('voice-ready',({from})=>{
-      // Another player enabled their mic — send them an offer so they hear us too
-      if(_voiceEnabled&&from&&from!==myPid) _voiceOffer(from);
+      // Higher-sorted pid is always the offerer — prevents simultaneous offer glare
+      if(_voiceEnabled&&from&&from!==myPid&&myPid>from) _voiceOffer(from);
     });
 
     _sio.on('elim',(data)=>{
@@ -4463,10 +4463,12 @@ function _voiceCreatePc(remotePid){
   const pc=new RTCPeerConnection(_VOICE_ICE);
   _voicePcs.set(remotePid,pc);
   if(_voiceStream) _voiceStream.getTracks().forEach(t=>pc.addTrack(t,_voiceStream));
-  pc.ontrack=({streams:[stream]})=>{
+  pc.ontrack=(event)=>{
+    const stream=event.streams[0]||new MediaStream([event.track]);
     let el=_voiceAudios.get(remotePid);
     if(!el){ el=new Audio(); el.autoplay=true; document.body.appendChild(el); _voiceAudios.set(remotePid,el); }
     el.srcObject=stream;
+    el.play().catch(()=>{});
     try{
       const ctx=new(window.AudioContext||window.webkitAudioContext)();
       const src=ctx.createMediaStreamSource(stream);
@@ -4567,7 +4569,8 @@ async function voiceToggle(){
       if(btn){btn.textContent='🎤';btn.style.borderColor='rgba(57,255,20,0.6)';}
       addToast('🎤 Voice ON — press Y to mute/unmute','#39FF14');
       if(_sio) _sio.emit('voice-ready',{});
-      if(G?.players) for(const[pid] of G.players) if(pid!==myPid) _voiceOffer(pid);
+      // Only offer peers where we are the higher-sorted pid — prevents offer glare
+      if(G?.players) for(const[pid] of G.players) if(pid!==myPid&&myPid>pid) _voiceOffer(pid);
     }catch(e){
       addToast('Microphone access denied — check browser settings','#FF4444');
     }
