@@ -26,3 +26,5 @@ Thumbs.db
 # Vercel & Claude local config (machine-specific, not needed in repo)
 .vercel
 .claude
+
+.vercel

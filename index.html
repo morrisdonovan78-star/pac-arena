@@ -257,6 +257,8 @@ body{touch-action:manipulation;}
 .rbtns .btn{flex:1;min-width:130px;}
 .warn-box{background:rgba(255,215,0,.06);border:1px solid rgba(255,215,0,.25);border-radius:8px;padding:10px 14px;margin-bottom:.75rem;font-size:11px;color:#ccaa00;line-height:1.6;text-align:left;}
 .export-btn{font-family:'Press Start 2P',monospace;font-size:7px;padding:7px 12px;border-radius:6px;border:1px solid rgba(255,215,0,.3);background:rgba(255,215,0,.05);color:var(--y);cursor:pointer;width:100%;margin-bottom:.5rem;}
+.srv-btn{font-family:'Press Start 2P',monospace;font-size:7px;padding:7px 14px;border-radius:6px;border:1px solid rgba(0,255,255,.25);background:rgba(0,255,255,.05);color:var(--muted);cursor:pointer;transition:all .15s;}
+.srv-btn.srv-active{border-color:var(--c);background:rgba(0,255,255,.15);color:var(--c);}
 /* ToS modal */
 #tos-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:9999;align-items:center;justify-content:center;}
 #tos-modal.open{display:flex;}
@@ -312,6 +314,13 @@ body{touch-action:manipulation;}
         <div class="warn-box">⚠ Your wallet is stored in this browser. Back up your private key below before clearing browser data.</div>
         <div class="warn-box" style="background:rgba(255,68,68,.06);border-color:rgba(255,68,68,.3);color:#cc4444;">🎮 GAME WALLET ONLY — Never keep more SOL here than you're willing to bet in a single day. Fund it, play, and withdraw winnings to a secure wallet (Phantom, Solflare, etc.) after each session.</div>
         <button class="export-btn" onclick="exportWallet()">🔑 SHOW / BACKUP PRIVATE KEY</button>
+        <div style="background:rgba(0,255,255,.05);border:1px solid rgba(0,255,255,.2);border-radius:10px;padding:10px 14px;margin-bottom:.75rem;text-align:center;">
+          <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:var(--c);margin-bottom:8px;">🌍 GAME SERVER</div>
+          <div style="display:flex;gap:8px;justify-content:center;">
+            <button id="srv-na" class="srv-btn" onclick="setGameServer('NA')">🇺🇸 CHICAGO</button>
+            <button id="srv-eu" class="srv-btn" onclick="setGameServer('EU')">🇩🇪 FRANKFURT</button>
+          </div>
+        </div>
         <button class="btn btn-g" onclick="go('scr-lobby');populateLobby();" style="margin-bottom:.5rem;">▶ ENTER ARENA</button>
         <button class="btn btn-y btn-sm" onclick="openLeaderboard()" style="margin-bottom:.75rem;width:100%;">🏆 LEADERBOARD</button>
         <div style="background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:.75rem;text-align:left;">
@@ -1245,6 +1254,7 @@ async function finishLogin(kp){
   document.getElementById('home-off').style.display='none';
   document.getElementById('home-on').style.display='block';
   const rsel=document.getElementById('region-sel'); if(rsel) rsel.value=REGION;
+  syncServerBtns();
   initCustomizePanel();
 }
 
@@ -1271,6 +1281,7 @@ async function checkSession(){
     document.getElementById('home-off').style.display='none';
     document.getElementById('home-on').style.display='block';
     const rsel=document.getElementById('region-sel'); if(rsel) rsel.value=REGION;
+    syncServerBtns();
     initCustomizePanel();
   }catch(e){ localStorage.removeItem('pa_last'); }
 }
@@ -1335,7 +1346,22 @@ function populateLobby(){
 const PLAYER_COLORS=['#FFD700','#FF69B4','#00BFFF','#FF4500','#39FF14','#FF1493','#00FFFF','#DA70D6'];
 function colorFromId(id){ let h=0; for(let i=0;i<id.length;i++) h=(h*31+id.charCodeAt(i))&0x7FFFFFFF; return PLAYER_COLORS[h%PLAYER_COLORS.length]; }
 
-const SIO_URL='https://pac-arena.duckdns.org';
+const GAME_SERVERS={
+  NA:{url:'https://pac-arena.duckdns.org',    label:'🇺🇸 Chicago, US'},
+  EU:{url:'https://pac-arena-eu.duckdns.org', label:'🇩🇪 Frankfurt, EU'},
+};
+let GAME_SERVER=localStorage.getItem('pa_server')||'NA';
+function getSioUrl(){return GAME_SERVERS[GAME_SERVER].url;}
+function setGameServer(r){
+  GAME_SERVER=r;
+  localStorage.setItem('pa_server',r);
+  syncServerBtns();
+}
+function syncServerBtns(){
+  document.querySelectorAll('.srv-btn').forEach(b=>b.classList.remove('srv-active'));
+  const el=document.getElementById('srv-'+GAME_SERVER.toLowerCase());
+  if(el) el.classList.add('srv-active');
+}
 let _playerMeta=new Map();
 let _pkTick=0;
 let _pkSentTick=0;
@@ -1364,7 +1390,7 @@ async function pkConnect(roomId, gameToken){
     // WebSocket-first for all browsers (best latency, works with nginx).
     // On first connect_error, auto-switch to polling for Brave/restrictive environments
     // where Brave Shields block the cross-origin WebSocket upgrade.
-    _sio=io(SIO_URL,{
+    _sio=io(getSioUrl(),{
       auth:{
         pid:myPid, lobbyId:roomId, gameToken:gameToken||null,
         name:myName, color:_mySkin.color, wagerSol:ST.wagerSol||0
@@ -1375,26 +1401,73 @@ async function pkConnect(roomId, gameToken){
       reconnectionDelayMax:5000,
     });
 
+    // Track whether 'init' has been received, and a guard timer that force-switches
+    // to HTTP polling if init doesn't arrive within 4s of connecting.
+    // Covers Firefox silently dropping WebSocket data frames after a successful handshake.
+    let _initRecv=false, _initGuard=null;
+
+    // Register BEFORE the await: Firefox can deliver 'init' in the same WebSocket
+    // frame as the connect ack, before handlers registered after the await exist.
+    _sio.on('init',(data)=>{
+      _initRecv=true;
+      if(_initGuard){ clearTimeout(_initGuard); _initGuard=null; }
+      if(!data) return;
+      try{
+        (data.players||[]).forEach(h=>_playerMeta.set(h.id,{
+          color:h.color||colorFromId(h.id), hat:'none', trail:'none', eyes:'dot', aura:'none',
+          name:h.name||'', sol:h.sol||0
+        }));
+        if(data.maze) _rosterMaze=data.maze;
+        const allPlayers=(data.players||[]).map((h,i)=>({
+          id:h.id, num:i, color:h.color||colorFromId(h.id),
+          spawn:[h.x||14,h.y||18], dx:h.dx||0, dy:h.dy||0, name:h.name||'', sol:h.sol||0,
+          hat:'none', trail:'none', eyes:'dot', aura:'none'
+        }));
+        const _alreadyLive=!!rafHandle;
+        initGame(allPlayers);
+        if(!_alreadyLive){
+          document.getElementById('mm-sub').textContent='Connected!';
+          lg('mm-log','Joined with '+allPlayers.length+' player(s)','lok');
+          setTimeout(()=>launchGame(),300);
+        }
+      }catch(e){
+        lg('mm-log','❌ Game init error: '+e.message,'lerr');
+        console.error('[init]',e);
+      }
+    });
+
     await new Promise((res,rej)=>{
       const tOut=setTimeout(()=>rej(new Error('Connection timeout — check internet and try again')),15000);
       let _wsRetried=false;
-      _sio.once('connect',()=>{ clearTimeout(tOut); res(); });
+      _sio.once('connect',()=>{
+        clearTimeout(tOut);
+        // If init hasn't arrived 4s after connect, the WebSocket data channel is
+        // likely broken (common in Firefox). Switch to HTTP polling and reconnect.
+        _initGuard=setTimeout(()=>{
+          if(!_initRecv&&_sio){
+            lg('mm-log','No server response — switching to HTTP polling…','lwarn');
+            _sio.io.opts.transports=['polling','websocket'];
+            _sio.disconnect();
+            _sio.connect();
+          }
+        },4000);
+        res();
+      });
       _sio.on('connect_error',(e)=>{
         if(!_wsRetried){
-          // First failure: WebSocket likely blocked (Brave shields, corporate proxy).
+          // First failure: WebSocket blocked (Brave, Firefox ETP, corporate proxy).
           // Switch to polling so the HTTP handshake succeeds, then WebSocket upgrades.
           _wsRetried=true;
           _sio.io.opts.transports=['polling','websocket'];
-          return; // let Socket.io auto-reconnect with new transport
+          return;
         }
-        // Still failing after polling retry — give up
         clearTimeout(tOut);
-        _sio.off('connect_error');
         rej(new Error('Cannot reach game server: '+e.message));
       });
       _sio.once('err',(msg)=>{ clearTimeout(tOut); rej(new Error(msg||'Server rejected connection')); });
     });
 
+    _sio.off('connect_error'); // remove connection-phase fallback; reconnects handled by transport order
     ablyChannel={ publish:(type,data,cb)=>{ if(_sio) _sio.emit(type,data); if(cb) cb(); } };
 
     // Persistent handler: catches server rejections (invalid token, token-already-used, etc.)
@@ -1407,27 +1480,6 @@ async function pkConnect(roomId, gameToken){
       _joiningLobby=false;
       _lobbyIsPaid=false;
       setTimeout(()=>{ try{ go('scr-lobby'); }catch(_){} },3000);
-    });
-
-    _sio.on('init',(data)=>{
-      if(!data) return;
-      (data.players||[]).forEach(h=>_playerMeta.set(h.id,{
-        color:h.color||colorFromId(h.id), hat:'none', trail:'none', eyes:'dot', aura:'none',
-        name:h.name||'', sol:h.sol||0
-      }));
-      if(data.maze) _rosterMaze=data.maze;
-      const allPlayers=(data.players||[]).map((h,i)=>({
-        id:h.id, num:i, color:h.color||colorFromId(h.id),
-        spawn:[h.x||14,h.y||18], dx:h.dx||0, dy:h.dy||0, name:h.name||'', sol:h.sol||0,
-        hat:'none', trail:'none', eyes:'dot', aura:'none'
-      }));
-      const _alreadyLive=!!rafHandle; // reconnect: game loop already running
-      initGame(allPlayers);
-      if(!_alreadyLive){
-        document.getElementById('mm-sub').textContent='Connected!';
-        lg('mm-log','Joined with '+allPlayers.length+' player(s)','lok');
-        setTimeout(()=>launchGame(),300);
-      }
     });
 
     _sio.on('s',(data)=>{
