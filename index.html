@@ -577,6 +577,8 @@ body{touch-action:manipulation;}
   <!-- Voice chat toggle — below mute button -->
   <button id="voice-btn" onclick="voiceToggle()" title="Voice chat (click to enable mic)"
     style="position:fixed;top:46px;right:10px;z-index:200;background:rgba(7,7,15,0.85);border:1px solid rgba(255,215,0,0.2);border-radius:6px;color:var(--y);font-size:16px;width:34px;height:34px;cursor:pointer;display:none;align-items:center;justify-content:center;padding:0;touch-action:manipulation;">🎙️</button>
+  <!-- Voice speaking indicator — bottom-left, shows who's talking -->
+  <div id="voice-speakers" style="position:fixed;bottom:16px;left:12px;z-index:200;display:none;flex-direction:column;gap:4px;pointer-events:none;"></div>
   <!-- Spectate panel — shown only while spectating, bottom-center -->
   <div id="spectate-panel" style="display:none;position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:200;display:none;flex-direction:column;align-items:center;gap:8px;pointer-events:auto;">
     <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:rgba(255,255,255,0.5);margin-bottom:2px;letter-spacing:1px;">👁 SPECTATING</div>
@@ -4520,6 +4522,20 @@ function _voiceUpdateSpeaking(){
   const rms=an=>{ an.getByteFrequencyData(buf); return buf.reduce((s,v)=>s+v,0)/buf.length; };
   _voiceAnalysers.forEach((an,pid)=>{ if(rms(an)>18) _voiceSpeaking.add(pid); });
   if(_voiceLocalAnalyser&&myPid&&rms(_voiceLocalAnalyser)>18) _voiceSpeaking.add(myPid);
+  // Update floating speaker overlay
+  const vs=document.getElementById('voice-speakers');
+  if(!vs) return;
+  if(_voiceSpeaking.size>0){
+    vs.style.display='flex';
+    vs.innerHTML=[..._voiceSpeaking].map(pid=>{
+      const p=G?.players?.get(pid);
+      const label=pid===myPid?'YOU':(p?'P'+(p.num+1):pid.slice(0,4));
+      const color=p?p.color:'#FFD700';
+      return `<div style="font-family:'Press Start 2P',monospace;font-size:7px;color:${color};background:rgba(0,0,0,0.75);border:1px solid ${color}88;border-radius:5px;padding:3px 8px;letter-spacing:.5px;">🎤 ${label}</div>`;
+    }).join('');
+  } else {
+    vs.style.display='none';
+  }
 }
 
 async function voiceToggle(){
@@ -4573,6 +4589,7 @@ function voiceCleanup(){
   _voiceEnabled=false;
   const btn=document.getElementById('voice-btn');
   if(btn){btn.textContent='🎙️';btn.style.display='none';btn.style.borderColor='rgba(255,215,0,0.2)';}
+  const vs=document.getElementById('voice-speakers'); if(vs) vs.style.display='none';
 }
 
 // ═══ BOOT ═══════════════════════════════════════════════════
