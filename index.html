@@ -1690,6 +1690,8 @@ let _joiningLobby=false;
 let _lobbyIsPaid=false;
 async function joinLobby(usd){
   if(!ST.address){ alert('Log in first'); return; }
+  // If a previous join was abandoned (B-press during connect), _sio is null but flag may still be set
+  if(_joiningLobby && !_sio) _joiningLobby=false;
   if(_joiningLobby){ return; }
   _joiningLobby=true;
   ST.lobbyUsd=usd;
@@ -2312,6 +2314,8 @@ function openRejoinOverlay(){
   isSpectating=true;
   go('scr-game');
   if(!rafHandle) rafHandle=requestAnimationFrame(rafDraw);
+  // Force fresh edge detection for LB (button 4) in pollGamepad so first press always fires
+  _gpPrev[4]=false;
   if(!_rejoinFromCashout) playDeath(); // death sound only when actually killed
 
   // Update overlay text based on how they got here
@@ -2875,7 +2879,7 @@ function _gpBack(scrId){
       stopHostLoop(); pkDisconnect(); G={};
       go('scr-lobby'); populateLobby();
     }
-    else if(scrId==='scr-lobby'){ go('scr-home'); }
+    else if(scrId==='scr-lobby'){ pkDisconnect(); go('scr-home'); }
     else if(scrId==='scr-result'){ go('scr-lobby'); populateLobby(); }
     else if(scrId==='scr-cashout'){ go('scr-home'); }
     else if(scrId==='scr-leaderboard'){ if(typeof _lbRefreshTimer!=='undefined'&&_lbRefreshTimer){clearInterval(_lbRefreshTimer);_lbRefreshTimer=null;} try{closeLbProfile();}catch(_){} go('scr-lobby'); }
@@ -2905,7 +2909,11 @@ function _menuGpRaf(){
           // Handled here (not in pollGamepad) so it fires regardless of G.players state
           if(rejoinUp){
             const RJO=['rjo-pay-btn','rjo-give-btn'];
-            if(_mPrevScr!=='_rjo'){_mFocusIdx=0;_mPrevScr='_rjo';}
+            if(_mPrevScr!=='_rjo'){
+              _mFocusIdx=0;_mPrevScr='_rjo';
+              // Clear stale button state frozen during active game so first LB/RB/A press fires
+              _mPrev[0]=false;_mPrev[4]=false;_mPrev[5]=false;
+            }
             // LB (4), RB (5), A (0) = confirm focused button (default idx 0 = PAY & REJOIN)
             if(rose(4)||rose(5)||rose(0)){
               const el=document.getElementById(RJO[_mFocusIdx]);
