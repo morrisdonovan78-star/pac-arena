@@ -4375,8 +4375,11 @@ async function doCashout(){
     showRes('Amount exceeds balance.<br>Max: $'+maxUsd+' USD',false);
     return;
   }
+  // Solana requires accounts to be either 0 or ≥890880 lamports (rent-exempt minimum).
+  // If the requested amount would leave 0 < X < 890880 remaining, auto-drain to 0 instead.
+  const sendLamps=(available-totalLamps>0&&available-totalLamps<890880)?available:totalLamps;
 
-  const solAmt=(totalLamps/solanaWeb3.LAMPORTS_PER_SOL).toFixed(6);
+  const solAmt=(sendLamps/solanaWeb3.LAMPORTS_PER_SOL).toFixed(6);
   if(!confirm(
     'WITHDRAW '+solAmt+' SOL\n\n'+
     '→ To: '+dest.slice(0,8)+'…'+dest.slice(-8)+'\n'+
@@ -4390,7 +4393,7 @@ async function doCashout(){
   try{
     const fromPk=new solanaWeb3.PublicKey(ST.address);
     const tx=new solanaWeb3.Transaction().add(
-      solanaWeb3.SystemProgram.transfer({fromPubkey:fromPk,toPubkey:destPk,lamports:totalLamps})
+      solanaWeb3.SystemProgram.transfer({fromPubkey:fromPk,toPubkey:destPk,lamports:sendLamps})
     );
     const lb=await ST.conn.getLatestBlockhash('confirmed');
     tx.recentBlockhash=lb.blockhash;
