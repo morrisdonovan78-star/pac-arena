@@ -2865,7 +2865,9 @@ function _menuGpRaf(){
   try{
     const rjo=document.getElementById('rejoin-overlay');
     const rejoinUp=rjo&&rjo.style.display!=='none';
-    const inActiveGame=G.players&&!G.over&&!isSpectating&&!rejoinUp;
+    const scrId0=_activeScr();
+    const onGameScr=scrId0==='scr-game';
+    const inActiveGame=onGameScr&&G.players&&!G.over&&!isSpectating&&!rejoinUp;
     if(!inActiveGame){
       const pads=navigator.getGamepads?navigator.getGamepads():[];
       let gp=null;
