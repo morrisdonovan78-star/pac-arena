@@ -160,6 +160,7 @@ html,body{background:var(--dark);color:var(--txt);font-family:'Exo 2',sans-serif
 .btn-g{background:var(--g);color:#001500;border-color:var(--g);}
 .btn-r{color:var(--r);border-color:var(--r);}
 .btn-pk{color:var(--pk);border-color:var(--pk);}
+.gp-focus{outline:2px solid #FFD700!important;outline-offset:3px;box-shadow:0 0 14px rgba(255,215,0,.55)!important;}
 .btn-sm{font-size:8px;padding:10px 16px;width:auto;}
 .w-strip{display:flex;align-items:center;justify-content:space-between;background:rgba(255,215,0,.06);border:1px solid rgba(255,215,0,.2);border-radius:10px;padding:12px 16px;margin-bottom:.75rem;gap:8px;}
 .w-addr{font-family:'Press Start 2P',monospace;font-size:7px;color:var(--y);}
@@ -321,11 +322,12 @@ body{touch-action:manipulation;}
             <button id="srv-eu" class="srv-btn" onclick="setGameServer('EU')">🇩🇪 FRANKFURT</button>
           </div>
         </div>
-        <button class="btn btn-g" onclick="go('scr-lobby');populateLobby();" style="margin-bottom:.5rem;">▶ ENTER ARENA</button>
-        <button class="btn btn-y btn-sm" onclick="openLeaderboard()" style="margin-bottom:.75rem;width:100%;">🏆 LEADERBOARD</button>
+        <button id="enter-arena-btn" class="btn btn-g" onclick="go('scr-lobby');populateLobby();" style="margin-bottom:.5rem;">▶ ENTER ARENA</button>
+        <button id="leaderboard-btn-home" class="btn btn-y btn-sm" onclick="openLeaderboard()" style="margin-bottom:.75rem;width:100%;">🏆 LEADERBOARD</button>
         <div style="background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:.75rem;text-align:left;">
           <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:var(--y);margin-bottom:8px;text-align:center;">🎮 CONTROLS</div>
-          <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);line-height:2.6;">
+          <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:rgba(0,255,255,.7);margin-bottom:4px;">⌨ KEYBOARD</div>
+          <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);line-height:2.6;margin-bottom:8px;">
             ↑↓←→ &nbsp;MOVE<br>
             V &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;USE CHERRY 🍒 (KILL MODE)<br>
             C &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;USE <svg xmlns="http://www.w3.org/2000/svg" width="10" height="14" viewBox="-7 -11 14 22" style="display:inline-block;vertical-align:middle;overflow:visible"><g transform="rotate(-30)"><ellipse cy="1.5" rx="2.4" ry="5.2" fill="#AA3300"/><ellipse cy="1.2" rx="2" ry="4.6" fill="#E85000"/><ellipse cx="-0.8" cy="-0.5" rx="0.8" ry="2.4" fill="#FF8C00"/><ellipse cy="-4.5" rx="1.6" ry="0.9" fill="#228B22"/><line x1="0.4" y1="-5.1" x2="2" y2="-7" stroke="#228B22" stroke-width="1.2" stroke-linecap="round"/></g></svg> (SPEED BOOST)<br>
@@ -333,12 +335,21 @@ body{touch-action:manipulation;}
             T &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CHAT<br>
             SPACE &nbsp;CASH OUT
           </div>
+          <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:rgba(255,215,0,.7);margin-bottom:4px;">🎮 CONTROLLER (XBOX / PS)</div>
+          <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);line-height:2.6;">
+            D-PAD / L-STICK &nbsp;MOVE<br>
+            A / CROSS &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;SPEED BOOST<br>
+            X / SQUARE &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CHERRY 🍒 KILL<br>
+            B / CIRCLE &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;BACK (MENUS)<br>
+            ↑↓ D-PAD &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;NAVIGATE MENUS<br>
+            A / CROSS &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CONFIRM (MENUS)
+          </div>
         </div>
       </div>
       <!-- RIGHT COLUMN -->
       <div style="flex:1;min-width:240px;">
         <button class="btn btn-sm" onclick="document.getElementById('tos-modal').classList.add('open')" style="background:rgba(255,99,71,.08);border-color:rgba(255,99,71,.4);color:#FF6347;font-family:'Press Start 2P',monospace;font-size:7px;width:100%;margin-bottom:.75rem;">📋 TERMS OF SERVICE · 18+ ONLY</button>
-        <button class="btn" style="background:rgba(57,255,20,.12);color:var(--g);border-color:var(--g);font-family:'Press Start 2P',monospace;font-size:9px;margin-bottom:.75rem;" onclick="openCashout()">💸 CASHOUT / WITHDRAW</button>
+        <button id="cashout-home-btn" class="btn" style="background:rgba(57,255,20,.12);color:var(--g);border-color:var(--g);font-family:'Press Start 2P',monospace;font-size:9px;margin-bottom:.75rem;" onclick="openCashout()">💸 CASHOUT / WITHDRAW</button>
         <div style="background:rgba(255,215,0,.05);border:1px solid rgba(255,215,0,.25);border-radius:10px;padding:12px 14px;margin-bottom:.75rem;text-align:center;">
           <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:#FFD700;margin-bottom:10px;">🎨 CUSTOMIZE PAC</div>
           <canvas id="cust-preview" width="72" height="72" style="display:block;margin:0 auto 10px;border-radius:50%;border:2px solid rgba(255,215,0,.3);background:#000;"></canvas>
@@ -466,7 +477,7 @@ body{touch-action:manipulation;}
         <option value="EU">🇪🇺 EU</option>
       </select>
     </div>
-    <button class="btn btn-c btn-sm" onclick="go('scr-home')">← HOME</button>
+    <button id="lobby-home-btn" class="btn btn-c btn-sm" onclick="go('scr-home')">← HOME</button>
   </div>
   <div class="lgrid">
     <!-- Free Lobby -->
@@ -477,7 +488,7 @@ body{touch-action:manipulation;}
       <div class="lsol">no wager</div>
       <div class="lpot">Practice Mode</div>
       <div class="lplay"><div class="ldot"></div><span id="l0-n">-- waiting</span></div>
-      <button class="btn btn-g" style="font-size:8px;padding:11px;" onclick="joinLobby(0)">▶ PLAY FREE</button>
+      <button id="lobby-free-btn" class="btn btn-g" style="font-size:8px;padding:11px;" onclick="joinLobby(0)">▶ PLAY FREE</button>
     </div>
     <!-- Gold Lobby $1 -->
     <div class="lcard gold">
@@ -487,7 +498,7 @@ body{touch-action:manipulation;}
       <div class="lsol" id="l1-sol">≈ -- SOL</div>
       <div class="lpot" id="l1-pot">POT: $2</div>
       <div class="lplay"><div class="ldot"></div><span id="l1-n">-- waiting</span></div>
-      <button class="btn btn-y" style="font-size:8px;padding:11px;" onclick="joinLobby(1)">⚔ PLAY FOR $1</button>
+      <button id="lobby-gold-btn" class="btn btn-y" style="font-size:8px;padding:11px;" onclick="joinLobby(1)">⚔ PLAY FOR $1</button>
     </div>
     <!-- Diamond Lobby $5 -->
     <div class="lcard diam">
@@ -497,10 +508,10 @@ body{touch-action:manipulation;}
       <div class="lsol" id="l5-sol">≈ -- SOL</div>
       <div class="lpot" id="l5-pot">POT: $10</div>
       <div class="lplay"><div class="ldot"></div><span id="l5-n">-- waiting</span></div>
-      <button class="btn btn-c" style="font-size:8px;padding:11px;" onclick="joinLobby(5)">⚔ PLAY FOR $5</button>
+      <button id="lobby-diam-btn" class="btn btn-c" style="font-size:8px;padding:11px;" onclick="joinLobby(5)">⚔ PLAY FOR $5</button>
     </div>
   </div>
-  <button class="btn btn-y btn-sm" onclick="openLeaderboard()" style="margin:.75rem auto 0;display:block;">🏆 LEADERBOARD</button>
+  <button id="lobby-lb-btn" class="btn btn-y btn-sm" onclick="openLeaderboard()" style="margin:.75rem auto 0;display:block;">🏆 LEADERBOARD</button>
   <div class="txlog" id="lobby-log" style="display:none;"></div>
 </div>
 
@@ -2814,7 +2825,53 @@ function p1d(dx,dy){
   }
 }
 function p2d(dx,dy){ p1d(dx,dy); } // both d-pads control local player
-// ── Gamepad support ──────────────────────────────────────────────────────────
+// ── Gamepad menu navigation ─────────────────────────────────────────────────
+const GP_MENUS={
+  'scr-home':  ['enter-arena-btn','leaderboard-btn-home','srv-na','srv-eu','cashout-home-btn'],
+  'scr-lobby': ['lobby-free-btn','lobby-gold-btn','lobby-diam-btn','lobby-home-btn','lobby-lb-btn'],
+};
+let _mFocusIdx=0, _mPrevScr=null, _mPrev={};
+function _activeScr(){
+  for(const id of Object.keys(GP_MENUS)){
+    const el=document.getElementById(id);
+    if(el&&el.classList.contains('on')) return id;
+  }
+  return null;
+}
+function _mApplyFocus(scrId){
+  const btns=GP_MENUS[scrId]||[];
+  btns.forEach((id,i)=>{
+    const el=document.getElementById(id);
+    if(el) el.classList.toggle('gp-focus',i===_mFocusIdx);
+  });
+}
+function _mClearFocus(){
+  Object.values(GP_MENUS).flat().forEach(id=>{
+    const el=document.getElementById(id); if(el) el.classList.remove('gp-focus');
+  });
+}
+setInterval(()=>{
+  if(G&&!G.over) return; // in-game → pollGamepad handles it
+  const pads=navigator.getGamepads?navigator.getGamepads():[];
+  let gp=null;
+  for(let i=0;i<pads.length;i++) if(pads[i]&&pads[i].connected){gp=pads[i];break;}
+  if(!gp){_mClearFocus();_mPrevScr=null;return;}
+  const scrId=_activeScr();
+  if(!scrId){_mClearFocus();_mPrevScr=null;return;}
+  // Reset focus when screen changes
+  if(scrId!==_mPrevScr){_mFocusIdx=0;_mPrevScr=scrId;_mApplyFocus(scrId);}
+  const btns=GP_MENUS[scrId];
+  const down=(i)=>!!(gp.buttons[i]&&gp.buttons[i].pressed);
+  const rose=(i)=>down(i)&&!_mPrev[i];
+  if(rose(12)){_mFocusIdx=(_mFocusIdx-1+btns.length)%btns.length;_mApplyFocus(scrId);}
+  if(rose(13)){_mFocusIdx=(_mFocusIdx+1)%btns.length;_mApplyFocus(scrId);}
+  if(rose(0)){const el=document.getElementById(btns[_mFocusIdx]);if(el){el.click();_mClearFocus();}}
+  if(rose(1)){// B / Circle = back
+    if(scrId==='scr-lobby'){go('scr-home');_mFocusIdx=0;}
+  }
+  for(let i=0;i<gp.buttons.length;i++) _mPrev[i]=down(i);
+},50);
+// ── Gamepad in-game controls ─────────────────────────────────────────────────
 // Standard mapping: btn 0=A/Cross, 2=X/Square, 12=↑, 13=↓, 14=←, 15=→
 // Xbox: A→boost, X→cherry  |  PS: Cross→boost, Square→cherry
 let _gpPrev={}, _gpStickPrev='';
