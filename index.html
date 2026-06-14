@@ -2879,7 +2879,7 @@ function _gpBack(scrId){
       stopHostLoop(); pkDisconnect(); G={};
       go('scr-lobby'); populateLobby();
     }
-    else if(scrId==='scr-lobby'){ pkDisconnect(); go('scr-home'); }
+    else if(scrId==='scr-lobby'){ _joiningLobby=false; go('scr-home'); }
     else if(scrId==='scr-result'){ go('scr-lobby'); populateLobby(); }
     else if(scrId==='scr-cashout'){ go('scr-home'); }
     else if(scrId==='scr-leaderboard'){ if(typeof _lbRefreshTimer!=='undefined'&&_lbRefreshTimer){clearInterval(_lbRefreshTimer);_lbRefreshTimer=null;} try{closeLbProfile();}catch(_){} go('scr-lobby'); }
@@ -2911,8 +2911,8 @@ function _menuGpRaf(){
             const RJO=['rjo-pay-btn','rjo-give-btn'];
             if(_mPrevScr!=='_rjo'){
               _mFocusIdx=0;_mPrevScr='_rjo';
-              // Clear stale button state frozen during active game so first LB/RB/A press fires
-              _mPrev[0]=false;_mPrev[4]=false;_mPrev[5]=false;
+              // Clear stale LB/RB state frozen during active game so first press fires
+              _mPrev[4]=false;_mPrev[5]=false;
             }
             // LB (4), RB (5), A (0) = confirm focused button (default idx 0 = PAY & REJOIN)
             if(rose(4)||rose(5)||rose(0)){
@@ -3000,10 +3000,11 @@ function pollGamepad(){
   if(rose(0)) usePow('pepper');
   if(rose(2)) usePow('cherry');
   if((rose(5)||rose(7))&&!isSpectating) instantCashout();
-  if(rose(4)){
+  if(rose(4)&&isSpectating){
     const ov=document.getElementById('rejoin-overlay');
     if(ov&&ov.style.display!=='none'){ const b=document.getElementById('rjo-pay-btn'); if(b) b.click(); }
-    else if(!_lobbyIsPaid) _doFreeRejoin();
+    else if(_lobbyIsPaid) spectateRejoin();
+    else _doFreeRejoin();
   }
   // Save state for next frame
   for(let i=0;i<gp.buttons.length;i++) _gpPrev[i]=down(i);
