@@ -1582,6 +1582,9 @@ async function pkConnect(roomId, gameToken){
       lg('mm-log','Tip: check your internet connection and reload','lwarn');
     if(_sio){ try{ _sio.disconnect(); }catch(_){} _sio=null; }
     ablyChannel=null;
+    _joiningLobby=false;
+    _lobbyIsPaid=false;
+    setTimeout(()=>{ try{ go('scr-lobby'); }catch(_){} },3000);
   }
 }
 function pkSend(data){
