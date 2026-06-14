@@ -2828,8 +2828,21 @@ function p1d(dx,dy){
 }
 function p2d(dx,dy){ p1d(dx,dy); } // both d-pads control local player
 // ── Gamepad menu navigation ─────────────────────────────────────────────────
+// Customize cycling — left/right D-pad changes option when a cust row is focused
+const CUST_DEFS=[
+  {arr:_SKIN_COLORS, get:()=>_mySkin.color, set:(v)=>{_mySkin.color=v;saveSkin();initCustomizePanel();drawSkinPreview();}},
+  {arr:_SKIN_HATS,   get:()=>_mySkin.hat,   set:(v)=>{_mySkin.hat=v;  saveSkin();initCustomizePanel();drawSkinPreview();}},
+  {arr:_SKIN_TRAILS, get:()=>_mySkin.trail, set:(v)=>{_mySkin.trail=v; saveSkin();initCustomizePanel();drawSkinPreview();}},
+  {arr:_SKIN_EYES,   get:()=>_mySkin.eyes,  set:(v)=>{_mySkin.eyes=v;  saveSkin();initCustomizePanel();drawSkinPreview();}},
+  {arr:_SKIN_AURAS,  get:()=>_mySkin.aura,  set:(v)=>{_mySkin.aura=v;  saveSkin();initCustomizePanel();drawSkinPreview();}},
+];
+function _gpCycleCust(catIdx,dir){
+  const d=CUST_DEFS[catIdx]; if(!d) return;
+  const i=(d.arr.indexOf(d.get())+dir+d.arr.length)%d.arr.length;
+  d.set(d.arr[i]);
+}
 const GP_MENUS={
-  'scr-home':   ['enter-arena-btn','leaderboard-btn-home','cashout-home-btn','h-refresh-btn'],
+  'scr-home':   ['enter-arena-btn','leaderboard-btn-home','cashout-home-btn','h-refresh-btn','cust-colors','cust-hats','cust-trails','cust-eyes','cust-aura'],
   'scr-lobby':  ['lobby-free-btn','lobby-gold-btn','lobby-diam-btn','lobby-home-btn','lobby-lb-btn'],
   'scr-result': ['result-rematch-btn','result-lobby-btn'],
   'scr-cashout':['co-send-btn','cashout-back-btn'],
@@ -2854,7 +2867,11 @@ function _gpBack(scrId){
     const rjo=document.getElementById('rejoin-overlay');
     if(rjo&&rjo.style.display!=='none'){ declineRejoin(); return; }
     if(isSpectating){ leaveSpectate(); return; }
-    if(scrId==='scr-game'||scrId==='scr-mm'){ pkDisconnect&&pkDisconnect(); go('scr-lobby'); populateLobby(); }
+    if(scrId==='scr-game'||scrId==='scr-mm'){
+      if(rafHandle){ cancelAnimationFrame(rafHandle); rafHandle=null; }
+      stopHostLoop(); pkDisconnect(); G={};
+      go('scr-lobby'); populateLobby();
+    }
     else if(scrId==='scr-lobby'){ go('scr-home'); }
     else if(scrId==='scr-result'){ go('scr-lobby'); populateLobby(); }
     else if(scrId==='scr-cashout'){ go('scr-home'); }
@@ -2892,8 +2909,15 @@ function _menuGpRaf(){
               if(rose(14)){_mFocusIdx=Math.max(horiz[0],_mFocusIdx-1);_mApplyFocus(scrId);}
               if(rose(15)){_mFocusIdx=Math.min(horiz[horiz.length-1],_mFocusIdx+1);_mApplyFocus(scrId);}
             } else if(scrId==='scr-home'){
-              if(rose(14)) setGameServer('NA');
-              if(rose(15)) setGameServer('EU');
+              if(_mFocusIdx>=4){
+                // Customize rows: left/right cycles options
+                if(rose(14)) _gpCycleCust(_mFocusIdx-4,-1);
+                if(rose(15)) _gpCycleCust(_mFocusIdx-4, 1);
+              } else {
+                // Main menu: left/right switches server
+                if(rose(14)) setGameServer('NA');
+                if(rose(15)) setGameServer('EU');
+              }
             }
             if(rose(0)){const el=document.getElementById(btns[_mFocusIdx]);if(el){el.click();_mClearFocus();_mPrevScr=null;}}
           } else {
