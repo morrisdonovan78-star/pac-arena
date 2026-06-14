@@ -4529,7 +4529,7 @@ function _voiceUpdateSpeaking(){
     vs.style.display='flex';
     vs.innerHTML=[..._voiceSpeaking].map(pid=>{
       const p=G?.players?.get(pid);
-      const label=pid===myPid?'YOU':(p?'P'+(p.num+1):pid.slice(0,4));
+      const label=(pid===myPid?(_cachedMyName||'YOU'):(p?.name||'P'+(p?.num+1))||pid.slice(0,4)).slice(0,10).toUpperCase();
       const color=p?p.color:'#FFD700';
       return `<div style="font-family:'Press Start 2P',monospace;font-size:7px;color:${color};background:rgba(0,0,0,0.75);border:1px solid ${color}88;border-radius:5px;padding:3px 8px;letter-spacing:.5px;">🎤 ${label}</div>`;
     }).join('');
