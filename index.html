@@ -1552,7 +1552,7 @@ async function pkConnect(roomId, gameToken){
     });
 
     _sio.on('gameover',()=>{
-      if(isSpectating){ addToast('🏁 GAME OVER — returning to lobby…','#FF6B6B'); setTimeout(leaveSpectate,3000); }
+      if(isSpectating){ addToast('🏁 GAME OVER — returning to lobby…','#FF6B6B'); _leaveSpecTimer=setTimeout(leaveSpectate,3000); }
     });
 
     _sio.on('disconnect',(reason)=>{
@@ -1912,6 +1912,7 @@ let isSpectating=false;                           // spectate mode flag
 let _spectateKillerPid=null;                      // pid of player who killed us — camera follows them while spectating
 let _hostPid=null;                                // authenticated host clientId — only messages from this id are trusted for host-only events
 let _cashoutInProgress=false;                     // debounce: prevent duplicate cashout requests
+let _leaveSpecTimer=null;                         // tracks setTimeout(leaveSpectate) — cancelled on manual leave to prevent double-disconnect
 let _zoomSliderEl=null;                           // cached zoom slider element — updated each frame
 let _joyDrawFn=null;                              // joystick draw function — called from main game loop
 let _guestInputLoop=null;                         // guest → host input heartbeat
@@ -2107,7 +2108,7 @@ function spectateRejoin(){
   if(G.over){
     // Game already ended — can't rejoin a dead game, send to lobby
     addToast('🏁 Game ended — returning to lobby…','#FF6B6B');
-    setTimeout(leaveSpectate,1500);
+    _leaveSpecTimer=setTimeout(leaveSpectate,1500);
     return;
   }
   if(!_lobbyIsPaid){ _doFreeRejoin(); return; }
@@ -2116,6 +2117,8 @@ function spectateRejoin(){
 }
 
 function leaveSpectate(){
+  // Cancel any pending auto-leave timer so it doesn't fire after a new game is started
+  if(_leaveSpecTimer){ clearTimeout(_leaveSpecTimer); _leaveSpecTimer=null; }
   // Stop audio, disconnect, go back to lobby
   closeAudio();
   if(rafHandle){ cancelAnimationFrame(rafHandle); rafHandle=null; }
@@ -2898,8 +2901,17 @@ function _menuGpRaf(){
           const rose=(i)=>down(i)&&!_mPrev[i];
           // B = universal back from anywhere
           if(rose(1)) _gpBack(scrId);
+          // Rejoin overlay: D-pad/A navigate PAY vs GIVE UP; security stays server-side
+          if(rejoinUp){
+            const RJO=['rjo-pay-btn','rjo-give-btn'];
+            if(_mPrevScr!=='_rjo'){_mFocusIdx=0;_mPrevScr='_rjo';}
+            if(rose(12)||rose(14)){_mFocusIdx=(_mFocusIdx-1+RJO.length)%RJO.length;}
+            if(rose(13)||rose(15)){_mFocusIdx=(_mFocusIdx+1)%RJO.length;}
+            RJO.forEach((id,i)=>{const el=document.getElementById(id);if(el)el.classList.toggle('gp-focus',i===_mFocusIdx);});
+            if(rose(0)){const el=document.getElementById(RJO[_mFocusIdx]);if(el&&!el.disabled)el.click();}
+          }
           // Screens with full D-pad nav
-          if(GP_MENUS[scrId]){
+          else if(GP_MENUS[scrId]){
             if(scrId!==_mPrevScr){_mFocusIdx=0;_mPrevScr=scrId;_mApplyFocus(scrId);}
             const btns=GP_MENUS[scrId];
             if(rose(12)){_mFocusIdx=(_mFocusIdx-1+btns.length)%btns.length;_mApplyFocus(scrId);}
@@ -2919,7 +2931,14 @@ function _menuGpRaf(){
                 if(rose(15)) setGameServer('EU');
               }
             }
-            if(rose(0)){const el=document.getElementById(btns[_mFocusIdx]);if(el){el.click();_mClearFocus();_mPrevScr=null;}}
+            if(rose(0)){
+              if(scrId==='scr-home'&&_mFocusIdx>=4){
+                // Customize rows: A cycles forward (same as D-right), never clears focus
+                _gpCycleCust(_mFocusIdx-4,1);
+              } else {
+                const el=document.getElementById(btns[_mFocusIdx]);if(el){el.click();_mClearFocus();_mPrevScr=null;}
+              }
+            }
           } else {
             _mPrevScr=scrId;
           }
