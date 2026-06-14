@@ -1888,7 +1888,7 @@ function rafDraw(ts=0){
     _fpsCount++;
     if(!_fpsLastTs) _fpsLastTs=ts;
     if(ts-_fpsLastTs>=1000){ _fpsVal=Math.round(_fpsCount*1000/(ts-_fpsLastTs)); _fpsCount=0; _fpsLastTs=ts; }
-    if(ts-_rafLastTs>=_RAF_MIN_MS){ _rafLastTs=ts; draw(); }
+    if(ts-_rafLastTs>=_RAF_MIN_MS){ _rafLastTs=ts; pollGamepad(); draw(); }
     rafHandle=requestAnimationFrame(rafDraw);
   } else { rafHandle=null; }
 }
@@ -2814,6 +2814,41 @@ function p1d(dx,dy){
   }
 }
 function p2d(dx,dy){ p1d(dx,dy); } // both d-pads control local player
+// ── Gamepad support ──────────────────────────────────────────────────────────
+// Standard mapping: btn 0=A/Cross, 2=X/Square, 12=↑, 13=↓, 14=←, 15=→
+// Xbox: A→boost, X→cherry  |  PS: Cross→boost, Square→cherry
+let _gpPrev={}, _gpStickPrev='';
+function pollGamepad(){
+  if(!G||G.over) return;
+  const pads=navigator.getGamepads?navigator.getGamepads():[];
+  let gp=null;
+  for(let i=0;i<pads.length;i++) if(pads[i]&&pads[i].connected){gp=pads[i];break;}
+  if(!gp) return;
+  const down=(i)=>!!(gp.buttons[i]&&gp.buttons[i].pressed);
+  const rose=(i)=>down(i)&&!_gpPrev[i]; // only on press, not hold
+  // D-pad
+  if(rose(12)) p1d(0,-1);
+  if(rose(13)) p1d(0,1);
+  if(rose(14)) p1d(-1,0);
+  if(rose(15)) p1d(1,0);
+  // Left analog stick — dominant axis, 0.5 deadzone
+  const ax=gp.axes[0]||0, ay=gp.axes[1]||0;
+  let sk='';
+  if(Math.max(Math.abs(ax),Math.abs(ay))>0.5)
+    sk=Math.abs(ax)>Math.abs(ay)?(ax<0?'L':'R'):(ay<0?'U':'D');
+  if(sk!==_gpStickPrev){
+    _gpStickPrev=sk;
+    if(sk==='L') p1d(-1,0);
+    else if(sk==='R') p1d(1,0);
+    else if(sk==='U') p1d(0,-1);
+    else if(sk==='D') p1d(0,1);
+  }
+  // Action buttons: A/Cross=boost(pepper), X/Square=cherry
+  if(rose(0)) usePow('pepper');
+  if(rose(2)) usePow('cherry');
+  // Save state for next frame
+  for(let i=0;i<gp.buttons.length;i++) _gpPrev[i]=down(i);
+}
 function onKey(e){
   // T opens chat during game or spectating (never when an input is already focused)
   if((e.key==='t'||e.key==='T')&&e.target.tagName!=='INPUT'&&e.target.tagName!=='TEXTAREA'){
