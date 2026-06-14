@@ -2834,34 +2834,39 @@ const GP_MENUS={
   'scr-result': ['result-rematch-btn','result-lobby-btn'],
   'scr-cashout':['co-send-btn','cashout-back-btn'],
 };
-// Lobby card indices that sit in a horizontal row — left/right navigates them
 const GP_HORIZ={'scr-lobby':[0,1,2]};
 let _mFocusIdx=0, _mPrevScr=null, _mPrev={};
 function _activeScr(){
-  for(const id of Object.keys(GP_MENUS)){
-    const el=document.getElementById(id);
-    if(el&&el.classList.contains('on')) return id;
-  }
-  // scr-game handled separately (not in GP_MENUS)
-  const gEl=document.getElementById('scr-game');
-  if(gEl&&gEl.classList.contains('on')) return 'scr-game';
+  const all=['scr-home','scr-lobby','scr-result','scr-cashout','scr-mm','scr-leaderboard','scr-game'];
+  for(const id of all){ const el=document.getElementById(id); if(el&&el.classList.contains('on')) return id; }
   return null;
 }
 function _mApplyFocus(scrId){
   const btns=GP_MENUS[scrId]||[];
-  btns.forEach((id,i)=>{
-    const el=document.getElementById(id);
-    if(el) el.classList.toggle('gp-focus',i===_mFocusIdx);
-  });
+  btns.forEach((id,i)=>{ const el=document.getElementById(id); if(el) el.classList.toggle('gp-focus',i===_mFocusIdx); });
 }
 function _mClearFocus(){
-  Object.values(GP_MENUS).flat().forEach(id=>{
-    const el=document.getElementById(id); if(el) el.classList.remove('gp-focus');
-  });
+  Object.values(GP_MENUS).flat().forEach(id=>{ const el=document.getElementById(id); if(el) el.classList.remove('gp-focus'); });
+}
+function _gpBack(scrId){
+  _mClearFocus(); _mFocusIdx=0; _mPrevScr=null;
+  try{
+    const rjo=document.getElementById('rejoin-overlay');
+    if(rjo&&rjo.style.display!=='none'){ declineRejoin(); return; }
+    if(isSpectating){ leaveSpectate(); return; }
+    if(scrId==='scr-game'||scrId==='scr-mm'){ pkDisconnect&&pkDisconnect(); go('scr-lobby'); populateLobby(); }
+    else if(scrId==='scr-lobby'){ go('scr-home'); }
+    else if(scrId==='scr-result'){ go('scr-lobby'); populateLobby(); }
+    else if(scrId==='scr-cashout'){ go('scr-home'); }
+    else if(scrId==='scr-leaderboard'){ if(typeof _lbRefreshTimer!=='undefined'&&_lbRefreshTimer){clearInterval(_lbRefreshTimer);_lbRefreshTimer=null;} try{closeLbProfile();}catch(_){} go('scr-lobby'); }
+  }catch(_){}
 }
 function _menuGpRaf(){
   try{
-    if(!G.players||G.over){
+    const rjo=document.getElementById('rejoin-overlay');
+    const rejoinUp=rjo&&rjo.style.display!=='none';
+    const inActiveGame=G.players&&!G.over&&!isSpectating&&!rejoinUp;
+    if(!inActiveGame){
       const pads=navigator.getGamepads?navigator.getGamepads():[];
       let gp=null;
       for(let i=0;i<pads.length;i++) if(pads[i]&&pads[i].connected){gp=pads[i];break;}
@@ -2869,36 +2874,28 @@ function _menuGpRaf(){
       else{
         const scrId=_activeScr();
         if(!scrId){_mClearFocus();_mPrevScr=null;}
-        else if(scrId==='scr-game'){
-          // Post-game (G.over): B → lobby
+        else{
           const down=(i)=>!!(gp.buttons[i]&&gp.buttons[i].pressed);
           const rose=(i)=>down(i)&&!_mPrev[i];
-          if(rose(1)){try{go('scr-lobby');populateLobby();}catch(_){}}
-          for(let i=0;i<gp.buttons.length;i++) _mPrev[i]=down(i);
-        } else {
-          if(scrId!==_mPrevScr){_mFocusIdx=0;_mPrevScr=scrId;_mApplyFocus(scrId);}
-          const btns=GP_MENUS[scrId];
-          const down=(i)=>!!(gp.buttons[i]&&gp.buttons[i].pressed);
-          const rose=(i)=>down(i)&&!_mPrev[i];
-          // Up/Down
-          if(rose(12)){_mFocusIdx=(_mFocusIdx-1+btns.length)%btns.length;_mApplyFocus(scrId);}
-          if(rose(13)){_mFocusIdx=(_mFocusIdx+1)%btns.length;_mApplyFocus(scrId);}
-          // Left/Right: horizontal lobby cards OR server switch on home
-          const horiz=GP_HORIZ[scrId]||[];
-          if(horiz.includes(_mFocusIdx)){
-            if(rose(14)){_mFocusIdx=Math.max(horiz[0],_mFocusIdx-1);_mApplyFocus(scrId);}
-            if(rose(15)){_mFocusIdx=Math.min(horiz[horiz.length-1],_mFocusIdx+1);_mApplyFocus(scrId);}
-          } else if(scrId==='scr-home'){
-            if(rose(14)) setGameServer('NA');
-            if(rose(15)) setGameServer('EU');
-          }
-          // Confirm
-          if(rose(0)){const el=document.getElementById(btns[_mFocusIdx]);if(el){el.click();_mClearFocus();_mPrevScr=null;}}
-          // Back
-          if(rose(1)){
-            if(scrId==='scr-lobby'){go('scr-home');_mFocusIdx=0;_mPrevScr=null;}
-            else if(scrId==='scr-result'){try{go('scr-lobby');populateLobby();}catch(_){} _mFocusIdx=0;_mPrevScr=null;}
-            else if(scrId==='scr-cashout'){go('scr-home');_mFocusIdx=0;_mPrevScr=null;}
+          // B = universal back from anywhere
+          if(rose(1)) _gpBack(scrId);
+          // Screens with full D-pad nav
+          if(GP_MENUS[scrId]){
+            if(scrId!==_mPrevScr){_mFocusIdx=0;_mPrevScr=scrId;_mApplyFocus(scrId);}
+            const btns=GP_MENUS[scrId];
+            if(rose(12)){_mFocusIdx=(_mFocusIdx-1+btns.length)%btns.length;_mApplyFocus(scrId);}
+            if(rose(13)){_mFocusIdx=(_mFocusIdx+1)%btns.length;_mApplyFocus(scrId);}
+            const horiz=GP_HORIZ[scrId]||[];
+            if(horiz.includes(_mFocusIdx)){
+              if(rose(14)){_mFocusIdx=Math.max(horiz[0],_mFocusIdx-1);_mApplyFocus(scrId);}
+              if(rose(15)){_mFocusIdx=Math.min(horiz[horiz.length-1],_mFocusIdx+1);_mApplyFocus(scrId);}
+            } else if(scrId==='scr-home'){
+              if(rose(14)) setGameServer('NA');
+              if(rose(15)) setGameServer('EU');
+            }
+            if(rose(0)){const el=document.getElementById(btns[_mFocusIdx]);if(el){el.click();_mClearFocus();_mPrevScr=null;}}
+          } else {
+            _mPrevScr=scrId;
           }
           for(let i=0;i<gp.buttons.length;i++) _mPrev[i]=down(i);
         }
