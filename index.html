@@ -3027,9 +3027,10 @@ function pollGamepad(){
   const rx=gp.axes[2]||0;
   if(Math.abs(rx)>0.3)
     _camZoom=Math.max(0.25,Math.min(4,_camZoom*(rx>0?1+0.008*rx:1/(1+0.008*Math.abs(rx)))));
-  // Action buttons: A/Cross=boost, X/Square=cherry, RB/RT=cashout, LB=rejoin
+  // Action buttons: A/Cross=boost, X/Square=cherry, RB/RT=cashout, LB=rejoin, Y=voice
   if(rose(0)) usePow('pepper');
   if(rose(2)) usePow('cherry');
+  if(rose(3)) voiceToggle();
   if((rose(5)||rose(7))&&!isSpectating) instantCashout();
   if(rose(4)&&isSpectating){
     const ov=document.getElementById('rejoin-overlay');
@@ -4524,6 +4525,18 @@ async function voiceToggle(){
     if(!navigator.mediaDevices?.getUserMedia){
       addToast('Voice chat not supported in this browser','#FF4444'); return;
     }
+    // Check if browser has already stored mic permission for this site.
+    // If 'granted' → getUserMedia returns instantly (no dialog).
+    // If 'prompt'  → native browser dialog will appear (one-time only on HTTPS;
+    //                 can't be accepted by controller — use mouse/touch once, then Y works forever).
+    try{
+      const perm=await navigator.permissions.query({name:'microphone'});
+      if(perm.state==='prompt'){
+        addToast('🎤 Allow mic in the browser popup — then Y works forever!','#FFD700');
+      } else if(perm.state==='denied'){
+        addToast('🎤 Mic blocked — enable it in browser site settings','#FF4444'); return;
+      }
+    }catch(_){}
     try{
       _voiceStream=await navigator.mediaDevices.getUserMedia({audio:true,video:false});
       _voiceEnabled=true;
@@ -4533,7 +4546,7 @@ async function voiceToggle(){
         _voiceLocalAnalyser=ctx.createAnalyser(); _voiceLocalAnalyser.fftSize=256; src.connect(_voiceLocalAnalyser);
       }catch(_){}
       if(btn){btn.textContent='🎤';btn.style.borderColor='rgba(57,255,20,0.6)';}
-      addToast('🎤 Voice chat ON — click again to mute','#39FF14');
+      addToast('🎤 Voice ON — press Y to mute/unmute','#39FF14');
       if(_sio) _sio.emit('voice-ready',{});
       if(G?.players) for(const[pid] of G.players) if(pid!==myPid) _voiceOffer(pid);
     }catch(e){
