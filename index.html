@@ -340,6 +340,8 @@ body{touch-action:manipulation;}
             D-PAD / L-STICK &nbsp;MOVE<br>
             A / CROSS &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;SPEED BOOST<br>
             X / SQUARE &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CHERRY 🍒 KILL<br>
+            RB / R1 / RT / R2 &nbsp;CASH OUT<br>
+            LB / L1 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;REJOIN<br>
             B / CIRCLE &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;BACK (MENUS)<br>
             ↑↓ D-PAD &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;NAVIGATE MENUS<br>
             A / CROSS &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CONFIRM (MENUS)
@@ -2900,9 +2902,15 @@ function pollGamepad(){
     else if(sk==='U') p1d(0,-1);
     else if(sk==='D') p1d(0,1);
   }
-  // Action buttons: A/Cross=boost(pepper), X/Square=cherry
+  // Action buttons: A/Cross=boost, X/Square=cherry, RB/RT=cashout, LB=rejoin
   if(rose(0)) usePow('pepper');
   if(rose(2)) usePow('cherry');
+  if((rose(5)||rose(7))&&!isSpectating) instantCashout();
+  if(rose(4)){
+    const ov=document.getElementById('rejoin-overlay');
+    if(ov&&ov.style.display!=='none'){ const b=document.getElementById('rjo-pay-btn'); if(b) b.click(); }
+    else if(!_lobbyIsPaid) _doFreeRejoin();
+  }
   // Save state for next frame
   for(let i=0;i<gp.buttons.length;i++) _gpPrev[i]=down(i);
 }
