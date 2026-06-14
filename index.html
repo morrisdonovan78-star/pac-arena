@@ -573,6 +573,9 @@ body{touch-action:manipulation;}
   <!-- Mute toggle — top-right corner, always accessible during gameplay -->
   <button id="mute-btn" onclick="toggleMute()" title="Toggle game audio"
     style="position:fixed;top:6px;right:10px;z-index:200;background:rgba(7,7,15,0.85);border:1px solid rgba(255,215,0,0.2);border-radius:6px;color:var(--y);font-size:16px;width:34px;height:34px;cursor:pointer;display:none;align-items:center;justify-content:center;padding:0;touch-action:manipulation;">🔊</button>
+  <!-- Voice chat toggle — below mute button -->
+  <button id="voice-btn" onclick="voiceToggle()" title="Voice chat (click to enable mic)"
+    style="position:fixed;top:46px;right:10px;z-index:200;background:rgba(7,7,15,0.85);border:1px solid rgba(255,215,0,0.2);border-radius:6px;color:var(--y);font-size:16px;width:34px;height:34px;cursor:pointer;display:none;align-items:center;justify-content:center;padding:0;touch-action:manipulation;">🎙️</button>
   <!-- Spectate panel — shown only while spectating, bottom-center -->
   <div id="spectate-panel" style="display:none;position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:200;display:none;flex-direction:column;align-items:center;gap:8px;pointer-events:auto;">
     <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:rgba(255,255,255,0.5);margin-bottom:2px;letter-spacing:1px;">👁 SPECTATING</div>
@@ -1512,6 +1515,20 @@ async function pkConnect(roomId, gameToken){
       if(!data||!data.id) return;
       if(G&&!G.over) removePlayer(data.id);
       _playerMeta.delete(data.id);
+      // Clean up voice peer for player who left
+      const lpc=_voicePcs.get(data.id); if(lpc){try{lpc.close();}catch(_){}} _voicePcs.delete(data.id);
+      _voiceAnalysers.delete(data.id);
+      const lel=_voiceAudios.get(data.id); if(lel){try{lel.srcObject=null;lel.remove();}catch(_){}} _voiceAudios.delete(data.id);
+    });
+
+    // Voice chat signaling relay
+    _sio.on('voice-signal',({from,toPid,type,sdp,candidate})=>{
+      if(toPid!==myPid) return;
+      _voiceHandleSignal(from,type,sdp,candidate);
+    });
+    _sio.on('voice-ready',({from})=>{
+      // Another player enabled their mic — send them an offer so they hear us too
+      if(_voiceEnabled&&from&&from!==myPid) _voiceOffer(from);
     });
 
     _sio.on('elim',(data)=>{
@@ -1905,11 +1922,19 @@ function rafDraw(ts=0){
     _fpsCount++;
     if(!_fpsLastTs) _fpsLastTs=ts;
     if(ts-_fpsLastTs>=1000){ _fpsVal=Math.round(_fpsCount*1000/(ts-_fpsLastTs)); _fpsCount=0; _fpsLastTs=ts; }
-    if(ts-_rafLastTs>=_RAF_MIN_MS){ _rafLastTs=ts; pollGamepad(); draw(); }
+    if(ts-_rafLastTs>=_RAF_MIN_MS){ _rafLastTs=ts; pollGamepad(); draw(); _voiceUpdateSpeaking(); }
     rafHandle=requestAnimationFrame(rafDraw);
   } else { rafHandle=null; }
 }
 let _rcMenu=null; // context-menu listener ref
+// ── Voice chat state ─────────────────────────────────────────────────────────
+let _voicePcs=new Map();        // pid → RTCPeerConnection
+let _voiceAudios=new Map();     // pid → HTMLAudioElement
+let _voiceStream=null;           // local mic MediaStream
+let _voiceEnabled=false;
+let _voiceAnalysers=new Map();  // pid → AnalyserNode (speaking detection)
+let _voiceLocalAnalyser=null;
+let _voiceSpeaking=new Set();   // pids currently speaking (rebuilt each frame)
 let _sio=null, ablyChannel=null, pkRoomId=null;
 let myPid=null, isHost=false;                     // N-player game identity
 let isSpectating=false;                           // spectate mode flag
@@ -2123,6 +2148,7 @@ function spectateRejoin(){
 function leaveSpectate(){
   // Cancel any pending auto-leave timer so it doesn't fire after a new game is started
   if(_leaveSpecTimer){ clearTimeout(_leaveSpecTimer); _leaveSpecTimer=null; }
+  voiceCleanup();
   // Stop audio, disconnect, go back to lobby
   closeAudio();
   if(rafHandle){ cancelAnimationFrame(rafHandle); rafHandle=null; }
@@ -2708,6 +2734,8 @@ function launchGame(){
     try{ const saved=localStorage.getItem('pa_muted'); _muted=(saved==='1'); }catch(_){ _muted=false; }
     _mb.textContent=_muted?'🔇':'🔊';
   }
+  // Show voice chat button
+  const _vb=document.getElementById('voice-btn'); if(_vb) _vb.style.display='flex';
   startPacManMusic();
   // Apply mute immediately after audio context is created (it may take a tick)
   if(_muted) setTimeout(()=>{ if(_audioCtx) _audioCtx.suspend().catch(()=>{}); },50);
@@ -2810,10 +2838,10 @@ function updateScoreboard(){
   // Skip the expensive innerHTML rebuild when nothing has changed.
   // The signature encodes player count + each player's id prefix, score and lives.
   // This eliminates 30 DOM rebuilds/sec during normal play — a significant CPU saving.
-  const sig=sorted.length+'|'+sorted.map(p=>p.id.slice(0,6)+':'+p.sc+','+p.lives).join('|');
+  const sig=sorted.length+'|'+sorted.map(p=>p.id.slice(0,6)+':'+p.sc+','+p.lives+(_voiceSpeaking.has(p.id)?'S':'')).join('|');
   if(sig===_lastSbSig) return;
   _lastSbSig=sig;
-  sb.innerHTML=sorted.map(p=>`<div class="gi" style="border-color:${p.color}44;"><span class="gl" style="color:${p.color};">${p.id===myPid?'YOU':'P'+(p.num+1)}</span><span class="gv" style="color:${p.color};">${p.sc}</span><span style="font-size:9px;"> ${'❤'.repeat(Math.max(0,p.lives))}</span></div>`).join('');
+  sb.innerHTML=sorted.map(p=>`<div class="gi" style="border-color:${p.color}44;${_voiceSpeaking.has(p.id)?'box-shadow:0 0 6px '+p.color+';':''}"><span class="gl" style="color:${p.color};">${p.id===myPid?'YOU':'P'+(p.num+1)}</span><span class="gv" style="color:${p.color};">${p.sc}</span><span style="font-size:9px;"> ${'❤'.repeat(Math.max(0,p.lives))}${_voiceSpeaking.has(p.id)?' 🎤':''}</span></div>`).join('');
 }
 
 function p1d(dx,dy){
@@ -2877,6 +2905,7 @@ function _gpBack(scrId){
     if(rjo&&rjo.style.display!=='none'){ declineRejoin(); return; }
     if(isSpectating){ leaveSpectate(); return; }
     if(scrId==='scr-game'||scrId==='scr-mm'){
+      voiceCleanup();
       if(rafHandle){ cancelAnimationFrame(rafHandle); rafHandle=null; }
       stopHostLoop(); pkDisconnect(); G={};
       go('scr-lobby'); populateLobby();
@@ -3807,6 +3836,7 @@ function draw(){
 async function endGame(reason){
   if(!G||G.over) return;
   G.over=true;
+  voiceCleanup();
   stopPacManMusic(); // stop siren/intro loops, keep _audioCtx alive for death sound
   if(reason==='eliminated') playDeath(); // 🎵 iconic descending sweep
   stopHostLoop();
@@ -4417,6 +4447,116 @@ async function doCashout(){
     showRes('Error: '+e.message,false);
   }
   btn.disabled=false; btn.textContent='💸 WITHDRAW';
+}
+
+// ═══ VOICE CHAT (WebRTC P2P via Socket.io signaling) ════════
+// Free forever: Google STUN for NAT traversal, no relay cost for ~90% of users.
+const _VOICE_ICE={iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]};
+
+function _voiceCreatePc(remotePid){
+  const pc=new RTCPeerConnection(_VOICE_ICE);
+  _voicePcs.set(remotePid,pc);
+  if(_voiceStream) _voiceStream.getTracks().forEach(t=>pc.addTrack(t,_voiceStream));
+  pc.ontrack=({streams:[stream]})=>{
+    let el=_voiceAudios.get(remotePid);
+    if(!el){ el=new Audio(); el.autoplay=true; document.body.appendChild(el); _voiceAudios.set(remotePid,el); }
+    el.srcObject=stream;
+    try{
+      const ctx=new(window.AudioContext||window.webkitAudioContext)();
+      const src=ctx.createMediaStreamSource(stream);
+      const an=ctx.createAnalyser(); an.fftSize=256; src.connect(an);
+      _voiceAnalysers.set(remotePid,an);
+    }catch(_){}
+  };
+  pc.onicecandidate=({candidate})=>{
+    if(candidate&&_sio) _sio.emit('voice-signal',{toPid:remotePid,type:'ice',candidate});
+  };
+  pc.onconnectionstatechange=()=>{
+    if(pc.connectionState==='failed'||pc.connectionState==='closed'){
+      _voicePcs.delete(remotePid); _voiceAnalysers.delete(remotePid);
+    }
+  };
+  return pc;
+}
+
+async function _voiceOffer(remotePid){
+  if(!_voiceEnabled||!_sio) return;
+  try{
+    let pc=_voicePcs.get(remotePid);
+    if(pc&&pc.signalingState!=='stable') return;
+    if(!pc) pc=_voiceCreatePc(remotePid);
+    const offer=await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    _sio.emit('voice-signal',{toPid:remotePid,type:'offer',sdp:offer.sdp});
+  }catch(e){ console.warn('[voice] offer:',e); }
+}
+
+async function _voiceHandleSignal(from,type,sdp,candidate){
+  try{
+    if(type==='offer'){
+      let pc=_voicePcs.get(from);
+      if(!pc) pc=_voiceCreatePc(from);
+      await pc.setRemoteDescription({type:'offer',sdp});
+      const answer=await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      if(_sio) _sio.emit('voice-signal',{toPid:from,type:'answer',sdp:answer.sdp});
+    } else if(type==='answer'){
+      const pc=_voicePcs.get(from);
+      if(pc&&pc.signalingState==='have-local-offer') await pc.setRemoteDescription({type:'answer',sdp});
+    } else if(type==='ice'){
+      const pc=_voicePcs.get(from);
+      if(pc&&candidate){ try{await pc.addIceCandidate(new RTCIceCandidate(candidate));}catch(_){} }
+    }
+  }catch(e){ console.warn('[voice] signal',type,e); }
+}
+
+function _voiceUpdateSpeaking(){
+  _voiceSpeaking.clear();
+  const buf=new Uint8Array(128);
+  const rms=an=>{ an.getByteFrequencyData(buf); return buf.reduce((s,v)=>s+v,0)/buf.length; };
+  _voiceAnalysers.forEach((an,pid)=>{ if(rms(an)>18) _voiceSpeaking.add(pid); });
+  if(_voiceLocalAnalyser&&myPid&&rms(_voiceLocalAnalyser)>18) _voiceSpeaking.add(myPid);
+}
+
+async function voiceToggle(){
+  const btn=document.getElementById('voice-btn');
+  if(!_voiceEnabled){
+    if(!navigator.mediaDevices?.getUserMedia){
+      addToast('Voice chat not supported in this browser','#FF4444'); return;
+    }
+    try{
+      _voiceStream=await navigator.mediaDevices.getUserMedia({audio:true,video:false});
+      _voiceEnabled=true;
+      try{
+        const ctx=new(window.AudioContext||window.webkitAudioContext)();
+        const src=ctx.createMediaStreamSource(_voiceStream);
+        _voiceLocalAnalyser=ctx.createAnalyser(); _voiceLocalAnalyser.fftSize=256; src.connect(_voiceLocalAnalyser);
+      }catch(_){}
+      if(btn){btn.textContent='🎤';btn.style.borderColor='rgba(57,255,20,0.6)';}
+      addToast('🎤 Voice chat ON — click again to mute','#39FF14');
+      if(_sio) _sio.emit('voice-ready',{});
+      if(G?.players) for(const[pid] of G.players) if(pid!==myPid) _voiceOffer(pid);
+    }catch(e){
+      addToast('Microphone access denied — check browser settings','#FF4444');
+    }
+  } else {
+    const muted=_voiceStream?.getAudioTracks().some(t=>!t.enabled);
+    _voiceStream?.getAudioTracks().forEach(t=>t.enabled=muted);
+    if(btn){btn.textContent=muted?'🎤':'🔇';btn.style.borderColor=muted?'rgba(57,255,20,0.6)':'rgba(255,68,68,0.5)';}
+    addToast(muted?'🎤 Mic unmuted':'🔇 Mic muted','#FFD700');
+  }
+}
+
+function voiceCleanup(){
+  _voicePcs.forEach(pc=>{try{pc.close();}catch(_){}});
+  _voicePcs.clear();
+  _voiceAudios.forEach(el=>{try{el.srcObject=null;el.remove();}catch(_){}});
+  _voiceAudios.clear();
+  _voiceAnalysers.clear(); _voiceSpeaking.clear(); _voiceLocalAnalyser=null;
+  if(_voiceStream){_voiceStream.getTracks().forEach(t=>t.stop());_voiceStream=null;}
+  _voiceEnabled=false;
+  const btn=document.getElementById('voice-btn');
+  if(btn){btn.textContent='🎙️';btn.style.display='none';btn.style.borderColor='rgba(255,215,0,0.2)';}
 }
 
 // ═══ BOOT ═══════════════════════════════════════════════════
