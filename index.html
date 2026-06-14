@@ -1855,7 +1855,19 @@ const POW_SPOTS=[
 function rndPowSpot(){
   const free=POW_SPOTS.filter(s=>G.maze[s.y][s.x]===0);
   if(!free.length) return null;
-  return free[Math.floor(Math.random()*free.length)];
+  // Collect existing powerup positions
+  const existing=[];
+  for(let y=0;y<G.maze.length;y++)
+    for(let x=0;x<G.maze[y].length;x++)
+      if(G.maze[y][x]===3||G.maze[y][x]===4) existing.push({x,y});
+  if(!existing.length) return free[Math.floor(Math.random()*free.length)];
+  // Pick the free spot with the greatest minimum Manhattan distance to any existing powerup
+  let best=null,bestDist=-1;
+  for(const s of free){
+    const minD=Math.min(...existing.map(e=>Math.abs(s.x-e.x)+Math.abs(s.y-e.y)));
+    if(minD>bestDist){bestDist=minD;best=s;}
+  }
+  return best;
 }
 
 // rafDraw is global so instantCashout can restart it
