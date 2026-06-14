@@ -2854,7 +2854,7 @@ function _mClearFocus(){
 }
 function _menuGpRaf(){
   try{
-    if(!G||G.over){
+    if(!G.players||G.over){
       const pads=navigator.getGamepads?navigator.getGamepads():[];
       let gp=null;
       for(let i=0;i<pads.length;i++) if(pads[i]&&pads[i].connected){gp=pads[i];break;}
@@ -2884,7 +2884,7 @@ requestAnimationFrame(_menuGpRaf);
 // Xbox: A→boost, X→cherry  |  PS: Cross→boost, Square→cherry
 let _gpPrev={}, _gpStickPrev='';
 function pollGamepad(){
-  if(!G||G.over) return;
+  if(!G.players||G.over) return;
   const pads=navigator.getGamepads?navigator.getGamepads():[];
   let gp=null;
   for(let i=0;i<pads.length;i++) if(pads[i]&&pads[i].connected){gp=pads[i];break;}
