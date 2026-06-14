@@ -1841,6 +1841,16 @@ const SPAWNS=[
   {x:2,y:34},{x:46,y:34}
 ];
 function rndSpawn(){ return SPAWNS[Math.floor(Math.random()*SPAWNS.length)]; }
+function bestSpawn(){
+  if(!G||!G.players||!G.players.size) return rndSpawn();
+  const players=[...G.players.values()];
+  let best=null,bestDist=-1;
+  for(const s of SPAWNS){
+    const minD=Math.min(...players.map(p=>Math.abs(s.x-p.x)+Math.abs(s.y-p.y)));
+    if(minD>bestDist){bestDist=minD;best=s;}
+  }
+  return best||rndSpawn();
+}
 // Powerup spawn spots — all verified walkable cells spread across the map
 const POW_SPOTS=[
   {x:2,y:2},{x:46,y:2},{x:9,y:2},{x:38,y:2},
@@ -2326,7 +2336,7 @@ function _doFreeRejoin(){
   // Hard guard — never allow free rejoin in a paid lobby regardless of ST.wagerSol value
   if(_lobbyIsPaid){ addToast('❌ Paid lobby — use the REJOIN button to pay','#FF4444'); return; }
   if(_rejoinCountdown){ clearInterval(_rejoinCountdown); _rejoinCountdown=null; }
-  const sp=rndSpawn();
+  const sp=bestSpawn();
   const rjName=getMyName();
   G.players.set(myPid,{
     id:myPid, num:G.players.size, color:_mySkin.color, hat:_mySkin.hat,
@@ -2481,7 +2491,7 @@ async function doRejoin(){
     // Prevents permanent invisibility if the socket drop or token issue means snap never fires.
     setTimeout(()=>{
       const _wp=G&&G.players.get(myPid);
-      if(_wp&&_wp._waitSnap){ const _fs=rndSpawn(); _wp.x=_fs.x; _wp.y=_fs.y; _wp.renderX=_fs.x; _wp.renderY=_fs.y; _wp._waitSnap=false; }
+      if(_wp&&_wp._waitSnap){ const _fs=bestSpawn(); _wp.x=_fs.x; _wp.y=_fs.y; _wp.renderX=_fs.x; _wp.renderY=_fs.y; _wp._waitSnap=false; }
     },2000);
 
     document.getElementById('rejoin-overlay').style.display='none';
@@ -2745,7 +2755,7 @@ function removePlayer(id){
 }
 
 function respawnPlayer(p){
-  const sp=rndSpawn();
+  const sp=bestSpawn();
   p.x=sp.x; p.y=sp.y; p.prevX=sp.x; p.prevY=sp.y;
   p.renderX=sp.x; p.renderY=sp.y; // snap render position on respawn
   p.dx=0; p.dy=0; p.nx=0; p.ny=0; p.mc=0;
