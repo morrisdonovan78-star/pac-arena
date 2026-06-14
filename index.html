@@ -668,7 +668,7 @@ body{touch-action:manipulation;}
     <div style="font-size:12px;color:var(--muted);margin-bottom:.9rem;text-align:left;" id="co-usd-amt">enter amount above</div>
     <button class="btn btn-g" id="co-send-btn" onclick="doCashout()" style="margin-bottom:.75rem;">💸 WITHDRAW</button>
     <div id="co-result" style="display:none;margin-bottom:.75rem;padding:12px;border-radius:8px;font-family:'Press Start 2P',monospace;font-size:8px;line-height:2;"></div>
-    <button class="btn btn-c btn-sm" onclick="go('scr-home')" style="margin:0 auto;width:auto;">← BACK</button>
+    <button id="cashout-back-btn" class="btn btn-c btn-sm" onclick="go('scr-home')" style="margin:0 auto;width:auto;">← BACK</button>
   </div>
 </div>
 
@@ -678,7 +678,7 @@ body{touch-action:manipulation;}
     <div class="r-ico" id="rico">🏆</div><div class="r-head" id="rhead">P1 WINS!</div><div class="r-sub" id="rsub"></div>
     <div class="rstats"><div class="rstat"><div class="rsl">P1 SCORE</div><div class="rsv hy" id="rs1">--</div></div><div class="rstat"><div class="rsl">P2 SCORE</div><div class="rsv hp" id="rs2">--</div></div><div class="rstat"><div class="rsl">WAGER</div><div class="rsv" id="rsw">--</div></div><div class="rstat"><div class="rsl">PAYOUT</div><div class="rsv hg" id="rsp">--</div></div></div>
     <a class="tx-a" id="rtx" href="#" target="_blank" style="display:none;">VIEW ON SOLANA EXPLORER ↗</a>
-    <div class="rbtns"><button class="btn btn-y" onclick="playAgain()">▶ REMATCH</button><button class="btn btn-c" onclick="go('scr-lobby');populateLobby();">← LOBBY</button></div>
+    <div class="rbtns"><button id="result-rematch-btn" class="btn btn-y" onclick="playAgain()">▶ REMATCH</button><button id="result-lobby-btn" class="btn btn-c" onclick="go('scr-lobby');populateLobby();">← LOBBY</button></div>
     <div class="txlog" id="res-log" style="margin-top:1.25rem;display:none;"></div>
   </div>
 </div>
@@ -2829,15 +2829,22 @@ function p1d(dx,dy){
 function p2d(dx,dy){ p1d(dx,dy); } // both d-pads control local player
 // ── Gamepad menu navigation ─────────────────────────────────────────────────
 const GP_MENUS={
-  'scr-home':  ['enter-arena-btn','leaderboard-btn-home','srv-na','srv-eu','cashout-home-btn'],
-  'scr-lobby': ['lobby-free-btn','lobby-gold-btn','lobby-diam-btn','lobby-home-btn','lobby-lb-btn'],
+  'scr-home':   ['enter-arena-btn','leaderboard-btn-home','cashout-home-btn','h-refresh-btn'],
+  'scr-lobby':  ['lobby-free-btn','lobby-gold-btn','lobby-diam-btn','lobby-home-btn','lobby-lb-btn'],
+  'scr-result': ['result-rematch-btn','result-lobby-btn'],
+  'scr-cashout':['co-send-btn','cashout-back-btn'],
 };
+// Lobby card indices that sit in a horizontal row — left/right navigates them
+const GP_HORIZ={'scr-lobby':[0,1,2]};
 let _mFocusIdx=0, _mPrevScr=null, _mPrev={};
 function _activeScr(){
   for(const id of Object.keys(GP_MENUS)){
     const el=document.getElementById(id);
     if(el&&el.classList.contains('on')) return id;
   }
+  // scr-game handled separately (not in GP_MENUS)
+  const gEl=document.getElementById('scr-game');
+  if(gEl&&gEl.classList.contains('on')) return 'scr-game';
   return null;
 }
 function _mApplyFocus(scrId){
@@ -2862,15 +2869,37 @@ function _menuGpRaf(){
       else{
         const scrId=_activeScr();
         if(!scrId){_mClearFocus();_mPrevScr=null;}
-        else{
+        else if(scrId==='scr-game'){
+          // Post-game (G.over): B → lobby
+          const down=(i)=>!!(gp.buttons[i]&&gp.buttons[i].pressed);
+          const rose=(i)=>down(i)&&!_mPrev[i];
+          if(rose(1)){try{go('scr-lobby');populateLobby();}catch(_){}}
+          for(let i=0;i<gp.buttons.length;i++) _mPrev[i]=down(i);
+        } else {
           if(scrId!==_mPrevScr){_mFocusIdx=0;_mPrevScr=scrId;_mApplyFocus(scrId);}
           const btns=GP_MENUS[scrId];
           const down=(i)=>!!(gp.buttons[i]&&gp.buttons[i].pressed);
           const rose=(i)=>down(i)&&!_mPrev[i];
+          // Up/Down
           if(rose(12)){_mFocusIdx=(_mFocusIdx-1+btns.length)%btns.length;_mApplyFocus(scrId);}
           if(rose(13)){_mFocusIdx=(_mFocusIdx+1)%btns.length;_mApplyFocus(scrId);}
+          // Left/Right: horizontal lobby cards OR server switch on home
+          const horiz=GP_HORIZ[scrId]||[];
+          if(horiz.includes(_mFocusIdx)){
+            if(rose(14)){_mFocusIdx=Math.max(horiz[0],_mFocusIdx-1);_mApplyFocus(scrId);}
+            if(rose(15)){_mFocusIdx=Math.min(horiz[horiz.length-1],_mFocusIdx+1);_mApplyFocus(scrId);}
+          } else if(scrId==='scr-home'){
+            if(rose(14)) setGameServer('NA');
+            if(rose(15)) setGameServer('EU');
+          }
+          // Confirm
           if(rose(0)){const el=document.getElementById(btns[_mFocusIdx]);if(el){el.click();_mClearFocus();_mPrevScr=null;}}
-          if(rose(1)&&scrId==='scr-lobby'){go('scr-home');_mFocusIdx=0;_mPrevScr=null;}
+          // Back
+          if(rose(1)){
+            if(scrId==='scr-lobby'){go('scr-home');_mFocusIdx=0;_mPrevScr=null;}
+            else if(scrId==='scr-result'){try{go('scr-lobby');populateLobby();}catch(_){} _mFocusIdx=0;_mPrevScr=null;}
+            else if(scrId==='scr-cashout'){go('scr-home');_mFocusIdx=0;_mPrevScr=null;}
+          }
           for(let i=0;i<gp.buttons.length;i++) _mPrev[i]=down(i);
         }
       }
