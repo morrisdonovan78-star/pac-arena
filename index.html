@@ -2852,27 +2852,33 @@ function _mClearFocus(){
     const el=document.getElementById(id); if(el) el.classList.remove('gp-focus');
   });
 }
-setInterval(()=>{
-  if(G&&!G.over) return; // in-game → pollGamepad handles it
-  const pads=navigator.getGamepads?navigator.getGamepads():[];
-  let gp=null;
-  for(let i=0;i<pads.length;i++) if(pads[i]&&pads[i].connected){gp=pads[i];break;}
-  if(!gp){_mClearFocus();_mPrevScr=null;return;}
-  const scrId=_activeScr();
-  if(!scrId){_mClearFocus();_mPrevScr=null;return;}
-  // Reset focus when screen changes
-  if(scrId!==_mPrevScr){_mFocusIdx=0;_mPrevScr=scrId;_mApplyFocus(scrId);}
-  const btns=GP_MENUS[scrId];
-  const down=(i)=>!!(gp.buttons[i]&&gp.buttons[i].pressed);
-  const rose=(i)=>down(i)&&!_mPrev[i];
-  if(rose(12)){_mFocusIdx=(_mFocusIdx-1+btns.length)%btns.length;_mApplyFocus(scrId);}
-  if(rose(13)){_mFocusIdx=(_mFocusIdx+1)%btns.length;_mApplyFocus(scrId);}
-  if(rose(0)){const el=document.getElementById(btns[_mFocusIdx]);if(el){el.click();_mClearFocus();}}
-  if(rose(1)){// B / Circle = back
-    if(scrId==='scr-lobby'){go('scr-home');_mFocusIdx=0;}
-  }
-  for(let i=0;i<gp.buttons.length;i++) _mPrev[i]=down(i);
-},50);
+function _menuGpRaf(){
+  try{
+    if(!G||G.over){
+      const pads=navigator.getGamepads?navigator.getGamepads():[];
+      let gp=null;
+      for(let i=0;i<pads.length;i++) if(pads[i]&&pads[i].connected){gp=pads[i];break;}
+      if(!gp){_mClearFocus();_mPrevScr=null;}
+      else{
+        const scrId=_activeScr();
+        if(!scrId){_mClearFocus();_mPrevScr=null;}
+        else{
+          if(scrId!==_mPrevScr){_mFocusIdx=0;_mPrevScr=scrId;_mApplyFocus(scrId);}
+          const btns=GP_MENUS[scrId];
+          const down=(i)=>!!(gp.buttons[i]&&gp.buttons[i].pressed);
+          const rose=(i)=>down(i)&&!_mPrev[i];
+          if(rose(12)){_mFocusIdx=(_mFocusIdx-1+btns.length)%btns.length;_mApplyFocus(scrId);}
+          if(rose(13)){_mFocusIdx=(_mFocusIdx+1)%btns.length;_mApplyFocus(scrId);}
+          if(rose(0)){const el=document.getElementById(btns[_mFocusIdx]);if(el){el.click();_mClearFocus();_mPrevScr=null;}}
+          if(rose(1)&&scrId==='scr-lobby'){go('scr-home');_mFocusIdx=0;_mPrevScr=null;}
+          for(let i=0;i<gp.buttons.length;i++) _mPrev[i]=down(i);
+        }
+      }
+    }
+  }catch(e){}
+  requestAnimationFrame(_menuGpRaf);
+}
+requestAnimationFrame(_menuGpRaf);
 // ── Gamepad in-game controls ─────────────────────────────────────────────────
 // Standard mapping: btn 0=A/Cross, 2=X/Square, 12=↑, 13=↓, 14=←, 15=→
 // Xbox: A→boost, X→cherry  |  PS: Cross→boost, Square→cherry
@@ -2902,6 +2908,10 @@ function pollGamepad(){
     else if(sk==='U') p1d(0,-1);
     else if(sk==='D') p1d(0,1);
   }
+  // Right stick X → zoom (right=in, left=out), scaled by deflection
+  const rx=gp.axes[2]||0;
+  if(Math.abs(rx)>0.3)
+    _camZoom=Math.max(0.25,Math.min(4,_camZoom*(rx>0?1+0.008*rx:1/(1+0.008*Math.abs(rx)))));
   // Action buttons: A/Cross=boost, X/Square=cherry, RB/RT=cashout, LB=rejoin
   if(rose(0)) usePow('pepper');
   if(rose(2)) usePow('cherry');
