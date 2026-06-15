@@ -1546,6 +1546,14 @@ async function pkConnect(roomId, gameToken){
       if(!from||from===myPid) return;
       _voiceReadyPids.add(from);
     });
+    // Diagnostic: server confirms it received and relayed the voice-audio packet
+    let _voiceAckToasted=false;
+    _sio.on('voice-ack',({relayCount})=>{
+      if(!_voiceAckToasted){
+        _voiceAckToasted=true;
+        addToast('🔁 Server relaying to '+relayCount+' player(s)','#00BFFF');
+      }
+    });
 
     _sio.on('elim',(data)=>{
       if(!G||G.over) return;
