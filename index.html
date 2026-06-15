@@ -1512,7 +1512,6 @@ async function pkConnect(roomId, gameToken){
       if(G&&!G.over&&!G.players.has(h.id))
         addPlayer({id:h.id,num:G.players.size,color:h.color||colorFromId(h.id),
           hat:'none',trail:'none',eyes:'dot',aura:'none',spawn:[h.x||14,h.y||18],name:h.name||'',sol:h.sol||0});
-      // Tell late joiner we have voice enabled so they can include us when they offer
       if(_voiceEnabled&&_sio) _sio.emit('voice-ready',{});
     });
 
@@ -1520,27 +1519,17 @@ async function pkConnect(roomId, gameToken){
       if(!data||!data.id) return;
       if(G&&!G.over) removePlayer(data.id);
       _playerMeta.delete(data.id);
-      // Clean up voice peer for player who left
-      const lpc=_voicePcs.get(data.id); if(lpc){try{lpc.close();}catch(_){}} _voicePcs.delete(data.id);
-      _voiceAnalysers.delete(data.id);
-      const lel=_voiceAudios.get(data.id); if(lel){try{lel.srcObject=null;lel.remove();}catch(_){}} _voiceAudios.delete(data.id);
+      _closeVoicePeer(data.id);
     });
 
-    // Voice chat signaling relay
-    _sio.on('voice-signal',({from,toPid,type,sdp,candidate})=>{
-      if(toPid!==myPid) return;
-      _voiceHandleSignal(from,type,sdp,candidate);
+    // Voice chat — relay-based (no WebRTC, works on all networks)
+    _sio.on('voice-audio',({from,buf})=>{
+      if(!from||from===myPid) return;
+      _playVoiceChunk(from,buf);
     });
     _sio.on('voice-ready',({from})=>{
       if(!from||from===myPid) return;
       _voiceReadyPids.add(from);
-      if(!_voiceEnabled||!(myPid>from)) return;
-      // Close any stale PC — failed/disconnected/stuck PCs block new connections
-      const _stale=_voicePcs.get(from);
-      if(_stale&&_stale.connectionState!=='connected'){
-        try{_stale.close();}catch(_){} _voicePcs.delete(from); _voiceAnalysers.delete(from); _iceBuffers.delete(from);
-      }
-      _voiceOffer(from);
     });
 
     _sio.on('elim',(data)=>{
@@ -1940,15 +1929,15 @@ function rafDraw(ts=0){
 }
 let _rcMenu=null; // context-menu listener ref
 // ── Voice chat state ─────────────────────────────────────────────────────────
-let _voicePcs=new Map();        // pid → RTCPeerConnection
-let _voiceAudios=new Map();     // pid → HTMLAudioElement
-let _voiceStream=null;           // local mic MediaStream
+let _voiceStream=null;          // local mic MediaStream
 let _voiceEnabled=false;
+let _voiceCapCtx=null;          // AudioContext for local capture (ScriptProcessorNode)
+let _voiceProc=null;            // ScriptProcessorNode sending PCM chunks
+let _peerAudioCtxs=new Map();   // pid → {ctx, analyser, nextTime}
 let _voiceAnalysers=new Map();  // pid → AnalyserNode (speaking detection)
 let _voiceLocalAnalyser=null;
 let _voiceSpeaking=new Set();   // pids currently speaking (rebuilt each frame)
 let _voiceReadyPids=new Set();  // pids that have sent voice-ready (mic enabled)
-let _iceBuffers=new Map();      // pid → [RTCIceCandidateInit] buffered until remote desc set
 let _sio=null, ablyChannel=null, pkRoomId=null;
 let myPid=null, isHost=false;                     // N-player game identity
 let isSpectating=false;                           // spectate mode flag
@@ -4466,93 +4455,44 @@ async function doCashout(){
   btn.disabled=false; btn.textContent='💸 WITHDRAW';
 }
 
-// ═══ VOICE CHAT (WebRTC P2P via Socket.io signaling) ════════
-// Free forever: Google STUN for NAT traversal, no relay cost for ~90% of users.
-const _VOICE_ICE={iceServers:[
-  {urls:'stun:stun.l.google.com:19302'},
-  {urls:'stun:stun1.l.google.com:19302'},
-  {urls:'turn:149.28.119.247:3478',username:'pac',credential:'arena2025'}
-]};
+// ═══ VOICE CHAT (socket.io PCM relay — works on all networks) ════════
 
-function _voiceCreatePc(remotePid){
-  const pc=new RTCPeerConnection(_VOICE_ICE);
-  _voicePcs.set(remotePid,pc);
-  if(_voiceStream) _voiceStream.getTracks().forEach(t=>pc.addTrack(t,_voiceStream));
-  pc.ontrack=(event)=>{
-    const stream=event.streams[0]||new MediaStream([event.track]);
-    let el=_voiceAudios.get(remotePid);
-    if(!el){ el=new Audio(); el.autoplay=true; document.body.appendChild(el); _voiceAudios.set(remotePid,el); }
-    el.srcObject=stream; el.play().catch(()=>{});
-    try{
-      const ctx=new(window.AudioContext||window.webkitAudioContext)();
-      const src=ctx.createMediaStreamSource(stream);
-      const an=ctx.createAnalyser(); an.fftSize=256; src.connect(an);
-      _voiceAnalysers.set(remotePid,an);
-    }catch(_){}
-  };
-  pc.onicecandidate=({candidate})=>{
-    // toJSON() ensures a plain serializable object, not an RTCIceCandidate instance
-    if(candidate&&_sio) _sio.emit('voice-signal',{toPid:remotePid,type:'ice',candidate:candidate.toJSON()});
-  };
-  pc.onconnectionstatechange=()=>{
-    if(pc.connectionState==='failed'||pc.connectionState==='closed'){
-      _voicePcs.delete(remotePid); _voiceAnalysers.delete(remotePid); _iceBuffers.delete(remotePid);
-      try{pc.close();}catch(_){}
-      // Higher-pid peer auto-retries after 2s so voice recovers without anyone retoggling
-      if(_voiceEnabled&&_sio&&myPid>remotePid){
-        setTimeout(()=>{ if(_voiceEnabled&&!_voicePcs.has(remotePid)) _voiceOffer(remotePid); },2000);
-      }
-    }
-  };
-  return pc;
+function _closeVoicePeer(pid){
+  const s=_peerAudioCtxs.get(pid);
+  if(s){ try{s.ctx.close();}catch(_){} _peerAudioCtxs.delete(pid); }
+  _voiceAnalysers.delete(pid);
+  _voiceReadyPids.delete(pid);
 }
 
-// Apply any ICE candidates that arrived before remote description was set
-async function _flushIce(remotePid,pc){
-  const buf=_iceBuffers.get(remotePid)||[];
-  _iceBuffers.delete(remotePid);
-  for(const c of buf){ try{await pc.addIceCandidate(c);}catch(_){} }
+function _getOrMakePeerAudio(pid){
+  let s=_peerAudioCtxs.get(pid);
+  if(!s){
+    const ctx=new(window.AudioContext||window.webkitAudioContext)({sampleRate:16000});
+    const an=ctx.createAnalyser(); an.fftSize=256;
+    an.connect(ctx.destination);
+    s={ctx,analyser:an,nextTime:0};
+    _peerAudioCtxs.set(pid,s);
+    _voiceAnalysers.set(pid,an);
+    ctx.resume().catch(()=>{});
+  }
+  return s;
 }
 
-async function _voiceOffer(remotePid){
-  if(!_voiceEnabled||!_sio) return;
+function _playVoiceChunk(from,buf){
   try{
-    let pc=_voicePcs.get(remotePid);
-    if(pc&&pc.signalingState!=='stable') return;
-    if(!pc) pc=_voiceCreatePc(remotePid);
-    const offer=await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    _sio.emit('voice-signal',{toPid:remotePid,type:'offer',sdp:offer.sdp});
-  }catch(e){ console.warn('[voice] offer:',e); }
-}
-
-async function _voiceHandleSignal(from,type,sdp,candidate){
-  try{
-    if(type==='offer'){
-      if(!_voiceEnabled) return;
-      let pc=_voicePcs.get(from);
-      if(!pc) pc=_voiceCreatePc(from);
-      await pc.setRemoteDescription({type:'offer',sdp});
-      await _flushIce(from,pc); // apply any candidates that arrived before this offer
-      const answer=await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      if(_sio) _sio.emit('voice-signal',{toPid:from,type:'answer',sdp:answer.sdp});
-    } else if(type==='answer'){
-      const pc=_voicePcs.get(from);
-      if(pc&&pc.signalingState==='have-local-offer'){
-        await pc.setRemoteDescription({type:'answer',sdp});
-        await _flushIce(from,pc); // apply any candidates that arrived before this answer
-      }
-    } else if(type==='ice'){
-      const pc=_voicePcs.get(from);
-      if(pc&&pc.remoteDescription){
-        try{await pc.addIceCandidate(candidate);}catch(_){}
-      } else {
-        // Remote description not set yet — buffer and apply after offer/answer completes
-        const buf=_iceBuffers.get(from)||[]; buf.push(candidate); _iceBuffers.set(from,buf);
-      }
-    }
-  }catch(e){ console.warn('[voice] signal',type,e); }
+    const s=_getOrMakePeerAudio(from);
+    const i16=new Int16Array(buf);
+    const ab=s.ctx.createBuffer(1,i16.length,16000);
+    const ch=ab.getChannelData(0);
+    for(let i=0;i<i16.length;i++) ch[i]=i16[i]/32767;
+    const src=s.ctx.createBufferSource();
+    src.buffer=ab;
+    src.connect(s.analyser);
+    const now=s.ctx.currentTime;
+    const t=Math.max(now+0.02,s.nextTime);
+    src.start(t);
+    s.nextTime=t+ab.duration;
+  }catch(_){}
 }
 
 function _voiceUpdateSpeaking(){
@@ -4599,16 +4539,28 @@ async function voiceToggle(){
       _voiceStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
       _voiceEnabled=true;
       try{
-        const ctx=new(window.AudioContext||window.webkitAudioContext)();
-        const src=ctx.createMediaStreamSource(_voiceStream);
-        _voiceLocalAnalyser=ctx.createAnalyser(); _voiceLocalAnalyser.fftSize=256; src.connect(_voiceLocalAnalyser);
+        _voiceCapCtx=new(window.AudioContext||window.webkitAudioContext)({sampleRate:16000});
+        await _voiceCapCtx.resume();
+        const src=_voiceCapCtx.createMediaStreamSource(_voiceStream);
+        _voiceLocalAnalyser=_voiceCapCtx.createAnalyser(); _voiceLocalAnalyser.fftSize=256;
+        src.connect(_voiceLocalAnalyser);
+        // ScriptProcessorNode captures PCM and sends over socket.io
+        _voiceProc=_voiceCapCtx.createScriptProcessor(512,1,1);
+        src.connect(_voiceProc);
+        // Silent gain node (required for onaudioprocess to fire without causing local echo)
+        const silence=_voiceCapCtx.createGain(); silence.gain.value=0;
+        _voiceProc.connect(silence); silence.connect(_voiceCapCtx.destination);
+        _voiceProc.onaudioprocess=(e)=>{
+          if(!_voiceEnabled||!_sio) return;
+          const pcm=e.inputBuffer.getChannelData(0);
+          const i16=new Int16Array(pcm.length);
+          for(let i=0;i<pcm.length;i++) i16[i]=Math.max(-32768,Math.min(32767,pcm[i]*32767));
+          _sio.emit('voice-audio',i16.buffer);
+        };
       }catch(_){}
       if(btn){btn.textContent='🎤';btn.style.borderColor='rgba(57,255,20,0.6)';}
       addToast('🎤 Voice ON — press Y to mute/unmute','#39FF14');
       if(_sio) _sio.emit('voice-ready',{});
-      // Offer all current players where we're the higher pid (glare prevention)
-      // Answerer ignores offers until their own mic is ready (_voiceHandleSignal guard)
-      if(G?.players) G.players.forEach((_,pid)=>{ if(pid!==myPid&&myPid>pid) _voiceOffer(pid); });
     }catch(e){
       addToast('Microphone access denied — check browser settings','#FF4444');
     }
@@ -4621,11 +4573,11 @@ async function voiceToggle(){
 }
 
 function voiceCleanup(){
-  _voicePcs.forEach(pc=>{try{pc.close();}catch(_){}});
-  _voicePcs.clear();
-  _voiceAudios.forEach(el=>{try{el.srcObject=null;el.remove();}catch(_){}});
-  _voiceAudios.clear();
-  _voiceAnalysers.clear(); _voiceSpeaking.clear(); _voiceLocalAnalyser=null; _voiceReadyPids.clear(); _iceBuffers.clear();
+  if(_voiceProc){try{_voiceProc.disconnect();}catch(_){} _voiceProc=null;}
+  if(_voiceCapCtx){try{_voiceCapCtx.close();}catch(_){} _voiceCapCtx=null;}
+  _peerAudioCtxs.forEach(s=>{try{s.ctx.close();}catch(_){}});
+  _peerAudioCtxs.clear();
+  _voiceAnalysers.clear(); _voiceSpeaking.clear(); _voiceLocalAnalyser=null; _voiceReadyPids.clear();
   if(_voiceStream){_voiceStream.getTracks().forEach(t=>t.stop());_voiceStream=null;}
   _voiceEnabled=false;
   const btn=document.getElementById('voice-btn');
