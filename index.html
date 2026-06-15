@@ -1937,7 +1937,8 @@ let _voiceStream=null;          // local mic MediaStream
 let _voiceEnabled=false;
 let _voiceCapCtx=null;          // AudioContext for local capture (ScriptProcessorNode)
 let _voiceProc=null;            // ScriptProcessorNode sending PCM chunks
-let _peerAudioCtxs=new Map();   // pid → {ctx, analyser, nextTime}
+let _voicePlayCtx=null;         // single shared AudioContext for all peer playback
+let _peerAudioCtxs=new Map();   // pid → {analyser, nextTime}
 let _voiceAnalysers=new Map();  // pid → AnalyserNode (speaking detection)
 let _voiceLocalAnalyser=null;
 let _voiceSpeaking=new Set();   // pids currently speaking (rebuilt each frame)
@@ -4462,31 +4463,30 @@ async function doCashout(){
 // ═══ VOICE CHAT (socket.io PCM relay — works on all networks) ════════
 
 function _closeVoicePeer(pid){
-  const s=_peerAudioCtxs.get(pid);
-  if(s){ try{s.ctx.close();}catch(_){} _peerAudioCtxs.delete(pid); }
+  _peerAudioCtxs.delete(pid);
   _voiceAnalysers.delete(pid);
   _voiceReadyPids.delete(pid);
 }
 
 function _getOrMakePeerAudio(pid){
+  if(!_voicePlayCtx) return null;
   let s=_peerAudioCtxs.get(pid);
   if(!s){
-    // Use device default sample rate — forcing 16000 fails silently on Safari/iOS
-    const ctx=new(window.AudioContext||window.webkitAudioContext)();
-    const an=ctx.createAnalyser(); an.fftSize=256;
-    an.connect(ctx.destination);
-    s={ctx,analyser:an,nextTime:0};
+    const an=_voicePlayCtx.createAnalyser(); an.fftSize=256;
+    an.connect(_voicePlayCtx.destination);
+    s={analyser:an,nextTime:0};
     _peerAudioCtxs.set(pid,s);
     _voiceAnalysers.set(pid,an);
-    ctx.resume().catch(()=>{});
   }
   return s;
 }
 
 function _playVoiceChunk(from,buf){
+  if(!_voicePlayCtx) return;
   try{
+    if(_voicePlayCtx.state==='suspended') _voicePlayCtx.resume().catch(()=>{});
     const s=_getOrMakePeerAudio(from);
-    if(s.ctx.state==='suspended') s.ctx.resume().catch(()=>{});
+    if(!s) return;
     // socket.io may deliver binary as ArrayBuffer or Uint8Array/Buffer — normalise to ArrayBuffer
     let ab;
     if(buf instanceof ArrayBuffer){
@@ -4496,14 +4496,14 @@ function _playVoiceChunk(from,buf){
     } else { return; }
     const i16=new Int16Array(ab);
     if(!i16.length) return;
-    // Audio was encoded at 16kHz — create buffer at 16kHz and let Web Audio resample on play
-    const audioBuf=s.ctx.createBuffer(1,i16.length,16000);
+    // Audio encoded at 16kHz — Web Audio resamples to context rate on play
+    const audioBuf=_voicePlayCtx.createBuffer(1,i16.length,16000);
     const ch=audioBuf.getChannelData(0);
     for(let i=0;i<i16.length;i++) ch[i]=i16[i]/32767;
-    const src=s.ctx.createBufferSource();
+    const src=_voicePlayCtx.createBufferSource();
     src.buffer=audioBuf;
     src.connect(s.analyser);
-    const now=s.ctx.currentTime;
+    const now=_voicePlayCtx.currentTime;
     const t=Math.max(now+0.05,s.nextTime);
     src.start(t);
     s.nextTime=t+audioBuf.duration;
@@ -4538,10 +4538,11 @@ async function voiceToggle(){
     if(!navigator.mediaDevices?.getUserMedia){
       addToast('Voice chat not supported in this browser','#FF4444'); return;
     }
-    // Check if browser has already stored mic permission for this site.
-    // If 'granted' → getUserMedia returns instantly (no dialog).
-    // If 'prompt'  → native browser dialog will appear (one-time only on HTTPS;
-    //                 can't be accepted by controller — use mouse/touch once, then Y works forever).
+    // Create shared playback context NOW — synchronously in the user gesture — so Chrome starts it running
+    if(!_voicePlayCtx||_voicePlayCtx.state==='closed'){
+      _voicePlayCtx=new(window.AudioContext||window.webkitAudioContext)();
+      _voicePlayCtx.resume().catch(()=>{});
+    }
     try{
       const perm=await navigator.permissions.query({name:'microphone'});
       if(perm.state==='prompt'){
@@ -4551,16 +4552,17 @@ async function voiceToggle(){
       }
     }catch(_){}
     try{
-      _voiceStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
+      _voiceStream=await navigator.mediaDevices.getUserMedia({
+        audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1},
+        video:false
+      });
       _voiceEnabled=true;
       try{
-        // Use device default rate — forcing 16kHz fails silently on Safari/iOS
         _voiceCapCtx=new(window.AudioContext||window.webkitAudioContext)();
         await _voiceCapCtx.resume();
         const src=_voiceCapCtx.createMediaStreamSource(_voiceStream);
         _voiceLocalAnalyser=_voiceCapCtx.createAnalyser(); _voiceLocalAnalyser.fftSize=256;
         src.connect(_voiceLocalAnalyser);
-        // Larger buffer (2048) is more reliable across browsers than 512
         _voiceProc=_voiceCapCtx.createScriptProcessor(2048,1,1);
         src.connect(_voiceProc);
         const silence=_voiceCapCtx.createGain(); silence.gain.value=0;
@@ -4568,9 +4570,11 @@ async function voiceToggle(){
         _voiceProc.onaudioprocess=(e)=>{
           if(!_voiceEnabled||!_sio) return;
           const pcm=e.inputBuffer.getChannelData(0);
-          // Downsample from native rate to 16kHz before sending
-          const nativeRate=_voiceCapCtx.sampleRate;
-          const ratio=nativeRate/16000;
+          // VAD silence gate — skip frames below speech threshold to cut echo & background noise
+          let sum=0; for(let i=0;i<pcm.length;i++) sum+=pcm[i]*pcm[i];
+          if(Math.sqrt(sum/pcm.length)<0.008) return;
+          // Downsample from native rate to 16kHz
+          const ratio=_voiceCapCtx.sampleRate/16000;
           const outLen=Math.floor(pcm.length/ratio);
           const i16=new Int16Array(outLen);
           for(let i=0;i<outLen;i++){
@@ -4597,7 +4601,7 @@ async function voiceToggle(){
 function voiceCleanup(){
   if(_voiceProc){try{_voiceProc.disconnect();}catch(_){} _voiceProc=null;}
   if(_voiceCapCtx){try{_voiceCapCtx.close();}catch(_){} _voiceCapCtx=null;}
-  _peerAudioCtxs.forEach(s=>{try{s.ctx.close();}catch(_){}});
+  if(_voicePlayCtx){try{_voicePlayCtx.close();}catch(_){} _voicePlayCtx=null;}
   _peerAudioCtxs.clear();
   _voiceAnalysers.clear(); _voiceSpeaking.clear(); _voiceLocalAnalyser=null; _voiceReadyPids.clear();
   if(_voiceStream){_voiceStream.getTracks().forEach(t=>t.stop());_voiceStream=null;}
