@@ -1512,6 +1512,8 @@ async function pkConnect(roomId, gameToken){
       if(G&&!G.over&&!G.players.has(h.id))
         addPlayer({id:h.id,num:G.players.size,color:h.color||colorFromId(h.id),
           hat:'none',trail:'none',eyes:'dot',aura:'none',spawn:[h.x||14,h.y||18],name:h.name||'',sol:h.sol||0});
+      // Tell late joiner we have voice enabled so they can include us when they offer
+      if(_voiceEnabled&&_sio) _sio.emit('voice-ready',{});
     });
 
     _sio.on('leave',(data)=>{
@@ -1532,8 +1534,13 @@ async function pkConnect(roomId, gameToken){
     _sio.on('voice-ready',({from})=>{
       if(!from||from===myPid) return;
       _voiceReadyPids.add(from);
-      // Higher-sorted pid is always the offerer — prevents simultaneous offer glare
-      if(_voiceEnabled&&myPid>from) _voiceOffer(from);
+      if(!_voiceEnabled||!(myPid>from)) return;
+      // Close any stale stuck PC so the retry offer goes through
+      const _stale=_voicePcs.get(from);
+      if(_stale&&_stale.connectionState!=='connected'&&_stale.signalingState!=='stable'){
+        try{_stale.close();}catch(_){} _voicePcs.delete(from); _voiceAnalysers.delete(from);
+      }
+      _voiceOffer(from);
     });
 
     _sio.on('elim',(data)=>{
@@ -4565,7 +4572,7 @@ async function voiceToggle(){
       }
     }catch(_){}
     try{
-      _voiceStream=await navigator.mediaDevices.getUserMedia({audio:true,video:false});
+      _voiceStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
       _voiceEnabled=true;
       try{
         const ctx=new(window.AudioContext||window.webkitAudioContext)();
@@ -4575,9 +4582,9 @@ async function voiceToggle(){
       if(btn){btn.textContent='🎤';btn.style.borderColor='rgba(57,255,20,0.6)';}
       addToast('🎤 Voice ON — press Y to mute/unmute','#39FF14');
       if(_sio) _sio.emit('voice-ready',{});
-      // Offer only peers who have already sent voice-ready (both sides have mic enabled)
-      // Higher-sorted pid is the offerer — prevents offer glare
-      _voiceReadyPids.forEach(pid=>{ if(myPid>pid) _voiceOffer(pid); });
+      // Offer all current players where we're the higher pid (glare prevention)
+      // Answerer ignores offers until their own mic is ready (_voiceHandleSignal guard)
+      if(G?.players) G.players.forEach((_,pid)=>{ if(pid!==myPid&&myPid>pid) _voiceOffer(pid); });
     }catch(e){
       addToast('Microphone access denied — check browser settings','#FF4444');
     }
