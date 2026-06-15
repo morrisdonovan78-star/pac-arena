@@ -1535,10 +1535,10 @@ async function pkConnect(roomId, gameToken){
       if(!from||from===myPid) return;
       _voiceReadyPids.add(from);
       if(!_voiceEnabled||!(myPid>from)) return;
-      // Close any stale stuck PC so the retry offer goes through
+      // Close any stale PC — failed/disconnected/stuck PCs block new connections
       const _stale=_voicePcs.get(from);
-      if(_stale&&_stale.connectionState!=='connected'&&_stale.signalingState!=='stable'){
-        try{_stale.close();}catch(_){} _voicePcs.delete(from); _voiceAnalysers.delete(from);
+      if(_stale&&_stale.connectionState!=='connected'){
+        try{_stale.close();}catch(_){} _voicePcs.delete(from); _voiceAnalysers.delete(from); _iceBuffers.delete(from);
       }
       _voiceOffer(from);
     });
@@ -4468,7 +4468,11 @@ async function doCashout(){
 
 // ═══ VOICE CHAT (WebRTC P2P via Socket.io signaling) ════════
 // Free forever: Google STUN for NAT traversal, no relay cost for ~90% of users.
-const _VOICE_ICE={iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]};
+const _VOICE_ICE={iceServers:[
+  {urls:'stun:stun.l.google.com:19302'},
+  {urls:'stun:stun1.l.google.com:19302'},
+  {urls:'turn:149.28.119.247:3478',username:'pac',credential:'arena2025'}
+]};
 
 function _voiceCreatePc(remotePid){
   const pc=new RTCPeerConnection(_VOICE_ICE);
@@ -4493,6 +4497,11 @@ function _voiceCreatePc(remotePid){
   pc.onconnectionstatechange=()=>{
     if(pc.connectionState==='failed'||pc.connectionState==='closed'){
       _voicePcs.delete(remotePid); _voiceAnalysers.delete(remotePid); _iceBuffers.delete(remotePid);
+      try{pc.close();}catch(_){}
+      // Higher-pid peer auto-retries after 2s so voice recovers without anyone retoggling
+      if(_voiceEnabled&&_sio&&myPid>remotePid){
+        setTimeout(()=>{ if(_voiceEnabled&&!_voicePcs.has(remotePid)) _voiceOffer(remotePid); },2000);
+      }
     }
   };
   return pc;
