@@ -575,7 +575,7 @@ body{touch-action:manipulation;}
   <button id="mute-btn" onclick="toggleMute()" title="Toggle game audio"
     style="position:fixed;top:6px;right:10px;z-index:200;background:rgba(7,7,15,0.85);border:1px solid rgba(255,215,0,0.2);border-radius:6px;color:var(--y);font-size:16px;width:34px;height:34px;cursor:pointer;display:none;align-items:center;justify-content:center;padding:0;touch-action:manipulation;">🔊</button>
   <!-- Voice chat toggle — below mute button -->
-  <button id="voice-btn" onclick="voiceToggle()" title="Voice chat (click to enable mic)"
+  <button id="voice-btn" onclick="voiceToggle()" title="Voice chat — M to mute/unmute"
     style="position:fixed;top:46px;right:10px;z-index:200;background:rgba(7,7,15,0.85);border:1px solid rgba(255,215,0,0.2);border-radius:6px;color:var(--y);font-size:16px;width:34px;height:34px;cursor:pointer;display:none;align-items:center;justify-content:center;padding:0;touch-action:manipulation;">🎙️</button>
   <!-- Voice speaking indicator — bottom-left, shows who's talking -->
   <div id="voice-speakers" style="position:fixed;bottom:16px;left:12px;z-index:200;display:none;flex-direction:column;gap:4px;pointer-events:none;"></div>
@@ -3103,6 +3103,8 @@ function onKey(e){
     // Zoom
     case'z': case'Z':{ _camZoom=Math.min(4,_camZoom*1.12); e.preventDefault(); break; }
     case'x': case'X':{ _camZoom=Math.max(0.25,_camZoom*0.89); e.preventDefault(); break; }
+    // Voice mute/unmute
+    case'm': case'M': if(!isSpectating){ voiceToggle(); e.preventDefault(); } break;
   }
 }
 // Update mobile powerup button opacity to reflect held state
