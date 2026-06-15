@@ -4471,7 +4471,8 @@ function _closeVoicePeer(pid){
 function _getOrMakePeerAudio(pid){
   let s=_peerAudioCtxs.get(pid);
   if(!s){
-    const ctx=new(window.AudioContext||window.webkitAudioContext)({sampleRate:16000});
+    // Use device default sample rate — forcing 16000 fails silently on Safari/iOS
+    const ctx=new(window.AudioContext||window.webkitAudioContext)();
     const an=ctx.createAnalyser(); an.fftSize=256;
     an.connect(ctx.destination);
     s={ctx,analyser:an,nextTime:0};
@@ -4485,18 +4486,28 @@ function _getOrMakePeerAudio(pid){
 function _playVoiceChunk(from,buf){
   try{
     const s=_getOrMakePeerAudio(from);
-    const i16=new Int16Array(buf);
-    const ab=s.ctx.createBuffer(1,i16.length,16000);
-    const ch=ab.getChannelData(0);
+    if(s.ctx.state==='suspended') s.ctx.resume().catch(()=>{});
+    // socket.io may deliver binary as ArrayBuffer or Uint8Array/Buffer — normalise to ArrayBuffer
+    let ab;
+    if(buf instanceof ArrayBuffer){
+      ab=buf;
+    } else if(ArrayBuffer.isView(buf)){
+      ab=buf.buffer.slice(buf.byteOffset,buf.byteOffset+buf.byteLength);
+    } else { return; }
+    const i16=new Int16Array(ab);
+    if(!i16.length) return;
+    // Audio was encoded at 16kHz — create buffer at 16kHz and let Web Audio resample on play
+    const audioBuf=s.ctx.createBuffer(1,i16.length,16000);
+    const ch=audioBuf.getChannelData(0);
     for(let i=0;i<i16.length;i++) ch[i]=i16[i]/32767;
     const src=s.ctx.createBufferSource();
-    src.buffer=ab;
+    src.buffer=audioBuf;
     src.connect(s.analyser);
     const now=s.ctx.currentTime;
-    const t=Math.max(now+0.02,s.nextTime);
+    const t=Math.max(now+0.05,s.nextTime);
     src.start(t);
-    s.nextTime=t+ab.duration;
-  }catch(_){}
+    s.nextTime=t+audioBuf.duration;
+  }catch(e){ console.warn('[voice-play]',e); }
 }
 
 function _voiceUpdateSpeaking(){
@@ -4543,25 +4554,32 @@ async function voiceToggle(){
       _voiceStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
       _voiceEnabled=true;
       try{
-        _voiceCapCtx=new(window.AudioContext||window.webkitAudioContext)({sampleRate:16000});
+        // Use device default rate — forcing 16kHz fails silently on Safari/iOS
+        _voiceCapCtx=new(window.AudioContext||window.webkitAudioContext)();
         await _voiceCapCtx.resume();
         const src=_voiceCapCtx.createMediaStreamSource(_voiceStream);
         _voiceLocalAnalyser=_voiceCapCtx.createAnalyser(); _voiceLocalAnalyser.fftSize=256;
         src.connect(_voiceLocalAnalyser);
-        // ScriptProcessorNode captures PCM and sends over socket.io
-        _voiceProc=_voiceCapCtx.createScriptProcessor(512,1,1);
+        // Larger buffer (2048) is more reliable across browsers than 512
+        _voiceProc=_voiceCapCtx.createScriptProcessor(2048,1,1);
         src.connect(_voiceProc);
-        // Silent gain node (required for onaudioprocess to fire without causing local echo)
         const silence=_voiceCapCtx.createGain(); silence.gain.value=0;
         _voiceProc.connect(silence); silence.connect(_voiceCapCtx.destination);
         _voiceProc.onaudioprocess=(e)=>{
           if(!_voiceEnabled||!_sio) return;
           const pcm=e.inputBuffer.getChannelData(0);
-          const i16=new Int16Array(pcm.length);
-          for(let i=0;i<pcm.length;i++) i16[i]=Math.max(-32768,Math.min(32767,pcm[i]*32767));
+          // Downsample from native rate to 16kHz before sending
+          const nativeRate=_voiceCapCtx.sampleRate;
+          const ratio=nativeRate/16000;
+          const outLen=Math.floor(pcm.length/ratio);
+          const i16=new Int16Array(outLen);
+          for(let i=0;i<outLen;i++){
+            const v=pcm[Math.floor(i*ratio)];
+            i16[i]=Math.max(-32768,Math.min(32767,v*32767));
+          }
           _sio.emit('voice-audio',i16.buffer);
         };
-      }catch(_){}
+      }catch(e){ console.warn('[voice-cap]',e); }
       if(btn){btn.textContent='🎤';btn.style.borderColor='rgba(57,255,20,0.6)';}
       addToast('🎤 Voice ON — press Y to mute/unmute','#39FF14');
       if(_sio) _sio.emit('voice-ready',{});
