@@ -1529,7 +1529,18 @@ async function pkConnect(roomId, gameToken){
     // Voice chat — relay-based (no WebRTC, works on all networks)
     _sio.on('voice-audio',({from,buf})=>{
       if(!from||from===myPid) return;
-      _playVoiceChunk(from,buf);
+      try{
+        // buf arrives as base64 string (avoids all socket.io binary-type ambiguity)
+        const bin=atob(buf);
+        const bytes=new Uint8Array(bin.length);
+        for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+        if(!_voiceHearFirst.has(from)){
+          _voiceHearFirst.add(from);
+          const nm=_playerMeta.get(from)?.name||from.slice(0,4);
+          addToast('🔊 Hearing '+nm+'!','#FFD700');
+        }
+        _playVoiceChunk(from,bytes.buffer);
+      }catch(_){}
     });
     _sio.on('voice-ready',({from})=>{
       if(!from||from===myPid) return;
@@ -1939,6 +1950,7 @@ let _voiceCapCtx=null;          // AudioContext for local capture (ScriptProcess
 let _voiceProc=null;            // ScriptProcessorNode sending PCM chunks
 let _voicePlayCtx=null;         // single shared AudioContext for all peer playback
 let _peerAudioCtxs=new Map();   // pid → {analyser, nextTime}
+let _voiceHearFirst=new Set();  // pids we've already shown "hearing" toast for
 let _voiceAnalysers=new Map();  // pid → AnalyserNode (speaking detection)
 let _voiceLocalAnalyser=null;
 let _voiceSpeaking=new Set();   // pids currently speaking (rebuilt each frame)
@@ -4481,22 +4493,14 @@ function _getOrMakePeerAudio(pid){
   return s;
 }
 
-function _playVoiceChunk(from,buf){
+function _playVoiceChunk(from,ab){
   if(!_voicePlayCtx) return;
   try{
     if(_voicePlayCtx.state==='suspended') _voicePlayCtx.resume().catch(()=>{});
     const s=_getOrMakePeerAudio(from);
     if(!s) return;
-    // socket.io may deliver binary as ArrayBuffer or Uint8Array/Buffer — normalise to ArrayBuffer
-    let ab;
-    if(buf instanceof ArrayBuffer){
-      ab=buf;
-    } else if(ArrayBuffer.isView(buf)){
-      ab=buf.buffer.slice(buf.byteOffset,buf.byteOffset+buf.byteLength);
-    } else { return; }
     const i16=new Int16Array(ab);
     if(!i16.length) return;
-    // Audio encoded at 16kHz — Web Audio resamples to context rate on play
     const audioBuf=_voicePlayCtx.createBuffer(1,i16.length,16000);
     const ch=audioBuf.getChannelData(0);
     for(let i=0;i<i16.length;i++) ch[i]=i16[i]/32767;
@@ -4504,7 +4508,8 @@ function _playVoiceChunk(from,buf){
     src.buffer=audioBuf;
     src.connect(s.analyser);
     const now=_voicePlayCtx.currentTime;
-    const t=Math.max(now+0.05,s.nextTime);
+    // cap lookahead to 1s so burst packets don't schedule audio far in the future
+    const t=Math.max(now+0.05,Math.min(s.nextTime,now+1.0));
     src.start(t);
     s.nextTime=t+audioBuf.duration;
   }catch(e){ console.warn('[voice-play]',e); }
@@ -4567,12 +4572,13 @@ async function voiceToggle(){
         src.connect(_voiceProc);
         const silence=_voiceCapCtx.createGain(); silence.gain.value=0;
         _voiceProc.connect(silence); silence.connect(_voiceCapCtx.destination);
+        let _vcSentFirst=false;
         _voiceProc.onaudioprocess=(e)=>{
           if(!_voiceEnabled||!_sio) return;
           const pcm=e.inputBuffer.getChannelData(0);
-          // VAD silence gate — skip frames below speech threshold to cut echo & background noise
+          // VAD silence gate
           let sum=0; for(let i=0;i<pcm.length;i++) sum+=pcm[i]*pcm[i];
-          if(Math.sqrt(sum/pcm.length)<0.008) return;
+          if(Math.sqrt(sum/pcm.length)<0.005) return;
           // Downsample from native rate to 16kHz
           const ratio=_voiceCapCtx.sampleRate/16000;
           const outLen=Math.floor(pcm.length/ratio);
@@ -4581,7 +4587,11 @@ async function voiceToggle(){
             const v=pcm[Math.floor(i*ratio)];
             i16[i]=Math.max(-32768,Math.min(32767,v*32767));
           }
-          _sio.emit('voice-audio',i16.buffer);
+          // Encode as base64 string — avoids all socket.io binary-type ambiguity
+          const raw=new Uint8Array(i16.buffer);
+          let s=''; for(let j=0;j<raw.length;j++) s+=String.fromCharCode(raw[j]);
+          if(!_vcSentFirst){ _vcSentFirst=true; addToast('🎤 Mic transmitting!','#39FF14'); }
+          _sio.emit('voice-audio',btoa(s));
         };
       }catch(e){ console.warn('[voice-cap]',e); }
       if(btn){btn.textContent='🎤';btn.style.borderColor='rgba(57,255,20,0.6)';}
@@ -4603,7 +4613,7 @@ function voiceCleanup(){
   if(_voiceCapCtx){try{_voiceCapCtx.close();}catch(_){} _voiceCapCtx=null;}
   if(_voicePlayCtx){try{_voicePlayCtx.close();}catch(_){} _voicePlayCtx=null;}
   _peerAudioCtxs.clear();
-  _voiceAnalysers.clear(); _voiceSpeaking.clear(); _voiceLocalAnalyser=null; _voiceReadyPids.clear();
+  _voiceAnalysers.clear(); _voiceSpeaking.clear(); _voiceLocalAnalyser=null; _voiceReadyPids.clear(); _voiceHearFirst.clear();
   if(_voiceStream){_voiceStream.getTracks().forEach(t=>t.stop());_voiceStream=null;}
   _voiceEnabled=false;
   const btn=document.getElementById('voice-btn');
