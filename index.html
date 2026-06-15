@@ -1948,6 +1948,7 @@ let _voiceAnalysers=new Map();  // pid → AnalyserNode (speaking detection)
 let _voiceLocalAnalyser=null;
 let _voiceSpeaking=new Set();   // pids currently speaking (rebuilt each frame)
 let _voiceReadyPids=new Set();  // pids that have sent voice-ready (mic enabled)
+let _iceBuffers=new Map();      // pid → [RTCIceCandidateInit] buffered until remote desc set
 let _sio=null, ablyChannel=null, pkRoomId=null;
 let myPid=null, isHost=false;                     // N-player game identity
 let isSpectating=false;                           // spectate mode flag
@@ -4477,8 +4478,7 @@ function _voiceCreatePc(remotePid){
     const stream=event.streams[0]||new MediaStream([event.track]);
     let el=_voiceAudios.get(remotePid);
     if(!el){ el=new Audio(); el.autoplay=true; document.body.appendChild(el); _voiceAudios.set(remotePid,el); }
-    el.srcObject=stream;
-    el.play().catch(()=>{});
+    el.srcObject=stream; el.play().catch(()=>{});
     try{
       const ctx=new(window.AudioContext||window.webkitAudioContext)();
       const src=ctx.createMediaStreamSource(stream);
@@ -4487,14 +4487,22 @@ function _voiceCreatePc(remotePid){
     }catch(_){}
   };
   pc.onicecandidate=({candidate})=>{
-    if(candidate&&_sio) _sio.emit('voice-signal',{toPid:remotePid,type:'ice',candidate});
+    // toJSON() ensures a plain serializable object, not an RTCIceCandidate instance
+    if(candidate&&_sio) _sio.emit('voice-signal',{toPid:remotePid,type:'ice',candidate:candidate.toJSON()});
   };
   pc.onconnectionstatechange=()=>{
     if(pc.connectionState==='failed'||pc.connectionState==='closed'){
-      _voicePcs.delete(remotePid); _voiceAnalysers.delete(remotePid);
+      _voicePcs.delete(remotePid); _voiceAnalysers.delete(remotePid); _iceBuffers.delete(remotePid);
     }
   };
   return pc;
+}
+
+// Apply any ICE candidates that arrived before remote description was set
+async function _flushIce(remotePid,pc){
+  const buf=_iceBuffers.get(remotePid)||[];
+  _iceBuffers.delete(remotePid);
+  for(const c of buf){ try{await pc.addIceCandidate(c);}catch(_){} }
 }
 
 async function _voiceOffer(remotePid){
@@ -4512,21 +4520,28 @@ async function _voiceOffer(remotePid){
 async function _voiceHandleSignal(from,type,sdp,candidate){
   try{
     if(type==='offer'){
-      // Don't answer until our own mic is ready — offerer's PC will reach 'failed',
-      // get cleaned up via onconnectionstatechange, and retry when we emit voice-ready
       if(!_voiceEnabled) return;
       let pc=_voicePcs.get(from);
       if(!pc) pc=_voiceCreatePc(from);
       await pc.setRemoteDescription({type:'offer',sdp});
+      await _flushIce(from,pc); // apply any candidates that arrived before this offer
       const answer=await pc.createAnswer();
       await pc.setLocalDescription(answer);
       if(_sio) _sio.emit('voice-signal',{toPid:from,type:'answer',sdp:answer.sdp});
     } else if(type==='answer'){
       const pc=_voicePcs.get(from);
-      if(pc&&pc.signalingState==='have-local-offer') await pc.setRemoteDescription({type:'answer',sdp});
+      if(pc&&pc.signalingState==='have-local-offer'){
+        await pc.setRemoteDescription({type:'answer',sdp});
+        await _flushIce(from,pc); // apply any candidates that arrived before this answer
+      }
     } else if(type==='ice'){
       const pc=_voicePcs.get(from);
-      if(pc&&candidate){ try{await pc.addIceCandidate(new RTCIceCandidate(candidate));}catch(_){} }
+      if(pc&&pc.remoteDescription){
+        try{await pc.addIceCandidate(candidate);}catch(_){}
+      } else {
+        // Remote description not set yet — buffer and apply after offer/answer completes
+        const buf=_iceBuffers.get(from)||[]; buf.push(candidate); _iceBuffers.set(from,buf);
+      }
     }
   }catch(e){ console.warn('[voice] signal',type,e); }
 }
@@ -4601,7 +4616,7 @@ function voiceCleanup(){
   _voicePcs.clear();
   _voiceAudios.forEach(el=>{try{el.srcObject=null;el.remove();}catch(_){}});
   _voiceAudios.clear();
-  _voiceAnalysers.clear(); _voiceSpeaking.clear(); _voiceLocalAnalyser=null; _voiceReadyPids.clear();
+  _voiceAnalysers.clear(); _voiceSpeaking.clear(); _voiceLocalAnalyser=null; _voiceReadyPids.clear(); _iceBuffers.clear();
   if(_voiceStream){_voiceStream.getTracks().forEach(t=>t.stop());_voiceStream=null;}
   _voiceEnabled=false;
   const btn=document.getElementById('voice-btn');
