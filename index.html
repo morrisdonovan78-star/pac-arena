@@ -1436,19 +1436,23 @@ async function pkConnect(roomId, gameToken){
           color:h.color||colorFromId(h.id), hat:'none', trail:'none', eyes:'dot', aura:'none',
           name:h.name||'', sol:h.sol||0
         }));
+        if(!!rafHandle){
+          // Reconnect mid-game: don't re-init G.players — 's' packets will re-sync.
+          // Just refresh the maze to pick up any dot changes during the drop.
+          if(data.maze&&G){ G.maze=data.maze; _mazeDirty=true; }
+          return;
+        }
         if(data.maze) _rosterMaze=data.maze;
-        const allPlayers=(data.players||[]).map((h,i)=>({
+        // Filter out dead/spectating players so their bodies don't ghost into G.players
+        const allPlayers=(data.players||[]).filter(h=>h.alive!==false).map((h,i)=>({
           id:h.id, num:i, color:h.color||colorFromId(h.id),
           spawn:[h.x||14,h.y||18], dx:h.dx||0, dy:h.dy||0, name:h.name||'', sol:h.sol||0,
           hat:'none', trail:'none', eyes:'dot', aura:'none'
         }));
-        const _alreadyLive=!!rafHandle;
         initGame(allPlayers);
-        if(!_alreadyLive){
-          document.getElementById('mm-sub').textContent='Connected!';
-          lg('mm-log','Joined with '+allPlayers.length+' player(s)','lok');
-          setTimeout(()=>launchGame(),300);
-        }
+        document.getElementById('mm-sub').textContent='Connected!';
+        lg('mm-log','Joined with '+allPlayers.length+' player(s)','lok');
+        setTimeout(()=>launchGame(),300);
       }catch(e){
         lg('mm-log','❌ Game init error: '+e.message,'lerr');
         console.error('[init]',e);
