@@ -1528,7 +1528,14 @@ async function pkConnect(roomId, gameToken){
 
     // Voice chat — relay-based (no WebRTC, works on all networks)
     _sio.on('voice-audio',({from,buf})=>{
-      if(!from||from===myPid) return;
+      // Fire diagnostic toast the INSTANT event arrives, before any filtering
+      if(!_voiceHearFirst.has('__evt')){
+        _voiceHearFirst.add('__evt');
+        const f6=String(from||'null').slice(0,6);
+        const m6=String(myPid||'null').slice(0,6);
+        addToast('PKT from:'+f6+' me:'+m6,'#FF00FF');
+      }
+      if(!from) return; // server excludes sender via socket.to(), so drop only missing-from
       try{
         // buf arrives as base64 string (avoids all socket.io binary-type ambiguity)
         const bin=atob(buf);
@@ -1540,7 +1547,7 @@ async function pkConnect(roomId, gameToken){
           addToast('🔊 Hearing '+nm+'!','#FFD700');
         }
         _playVoiceChunk(from,bytes.buffer);
-      }catch(_){}
+      }catch(e){ addToast('VOICE ERR:'+String(e).slice(0,30),'#FF4444'); }
     });
     _sio.on('voice-ready',({from})=>{
       if(!from||from===myPid) return;
