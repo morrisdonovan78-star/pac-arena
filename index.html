@@ -991,8 +991,11 @@ function exportWallet(){
 function changeRegion(r){
   REGION = r;
   localStorage.setItem('pa_region', r);
+  // Sync game server so Socket.io connects to the right VPS
+  GAME_SERVER = (r === 'EU') ? 'EU' : 'NA';
+  localStorage.setItem('pa_server', GAME_SERVER);
+  syncServerBtns();
   if(ST.conn){
-    // Always keep ProxyConnection — direct Connection hits CORS/rate-limit from browser
     ST.conn = makeConnection();
     lg('lobby-log', 'Region set → '+REGION, 'lhi');
     refreshBal();
@@ -1435,6 +1438,10 @@ function getSioUrl(){return GAME_SERVERS[GAME_SERVER].url;}
 function setGameServer(r){
   GAME_SERVER=r;
   localStorage.setItem('pa_server',r);
+  // Sync REGION + lobby selector to match
+  REGION = (r === 'EU') ? 'EU' : 'US';
+  localStorage.setItem('pa_region', REGION);
+  const rsel=document.getElementById('region-sel'); if(rsel) rsel.value=REGION;
   syncServerBtns();
 }
 function syncServerBtns(){
