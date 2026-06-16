@@ -1356,6 +1356,18 @@ async function signLocalTx(tx){
 // ═══════════════════════════════════════════════════════════
 // LOBBY
 // ═══════════════════════════════════════════════════════════
+let _lobbyCountTimer=null;
+function fetchLobbyCounts(){
+  fetch(getSioUrl()+'/counts',{signal:AbortSignal.timeout(4000)})
+    .then(r=>r.json())
+    .then(d=>{
+      const fmt=(n)=>n===1?'1 player online':n+' players online';
+      document.getElementById('l0-n').textContent=fmt(d['free-lobby']||0);
+      document.getElementById('l1-n').textContent=fmt(d['paid-lobby-1']||0);
+      document.getElementById('l5-n').textContent=fmt(d['paid-lobby-25']||0);
+    })
+    .catch(()=>{});
+}
 function populateLobby(){
   fetchPrice().then(()=>{
     const s1=usdToSol(1), s5=usdToSol(5);
@@ -1363,14 +1375,18 @@ function populateLobby(){
     document.getElementById('l5-sol').textContent='≈ '+s5+' SOL per player';
     document.getElementById('l1-pot').textContent='Win 90% of pot (~'+(s1*2*0.9).toFixed(5)+' SOL)';
     document.getElementById('l5-pot').textContent='Win 90% of pot (~'+(s5*2*0.9).toFixed(5)+' SOL)';
-    document.getElementById('l0-n').textContent='join to see players';
-    document.getElementById('l1-n').textContent='join to see players';
-    document.getElementById('l5-n').textContent='join to see players';
+    document.getElementById('l0-n').textContent='fetching…';
+    document.getElementById('l1-n').textContent='fetching…';
+    document.getElementById('l5-n').textContent='fetching…';
+    fetchLobbyCounts();
+    if(_lobbyCountTimer) clearInterval(_lobbyCountTimer);
+    _lobbyCountTimer=setInterval(fetchLobbyCounts,8000);
     updateUI();
     // Sync region selector
     const rsel=document.getElementById('region-sel'); if(rsel) rsel.value=REGION;
   });
 }
+function stopLobbyCountPoll(){ if(_lobbyCountTimer){clearInterval(_lobbyCountTimer);_lobbyCountTimer=null;} }
 
 // ═══════════════════════════════════════════════════════════
 // ABLY REAL-TIME MULTIPLAYER
@@ -1767,6 +1783,7 @@ async function joinLobby(usd){
 
   // Free lobby — no transaction, permanent room
   if(usd===0){
+    stopLobbyCountPoll();
     go('scr-mm');
     document.getElementById('mm-sub').textContent='Joining free lobby…';
     lg('mm-log','Connecting to live free lobby…','lhi');
@@ -1784,6 +1801,7 @@ async function joinLobby(usd){
   // No confirm popup — just join immediately and show a toast
   addToast('🎮 Joining $'+usd+' lobby — wagering '+ST.wagerSol.toFixed(4)+' SOL…','#FFD700');
 
+  stopLobbyCountPoll();
   go('scr-mm');
   try{
     lg('mm-log','Creating escrow…','lhi');
@@ -2935,7 +2953,7 @@ function _gpBack(scrId){
       stopHostLoop(); pkDisconnect(); G={};
       go('scr-lobby'); populateLobby();
     }
-    else if(scrId==='scr-lobby'){ if(rafHandle){ cancelAnimationFrame(rafHandle); rafHandle=null; } _joiningLobby=false; go('scr-home'); }
+    else if(scrId==='scr-lobby'){ if(rafHandle){ cancelAnimationFrame(rafHandle); rafHandle=null; } _joiningLobby=false; stopLobbyCountPoll(); go('scr-home'); }
     else if(scrId==='scr-result'){ go('scr-lobby'); populateLobby(); }
     else if(scrId==='scr-cashout'){ go('scr-home'); }
     else if(scrId==='scr-leaderboard'){ if(typeof _lbRefreshTimer!=='undefined'&&_lbRefreshTimer){clearInterval(_lbRefreshTimer);_lbRefreshTimer=null;} try{closeLbProfile();}catch(_){} go('scr-lobby'); }
