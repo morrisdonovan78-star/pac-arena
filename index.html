@@ -1629,7 +1629,7 @@ async function pkConnect(roomId, gameToken){
       const el=document.getElementById('spec-count');
       const box=document.getElementById('spec-count-box');
       if(el) el.textContent=cnt;
-      if(box) box.style.display=cnt>0?'flex':'none';
+      if(box) box.style.display='flex';
     });
 
     _sio.on('chat',(data)=>{
@@ -1763,7 +1763,7 @@ function applyRemoteState(d){
     const el=document.getElementById('spec-count');
     const box=document.getElementById('spec-count-box');
     if(el) el.textContent=d.spec;
-    if(box) box.style.display=d.spec>0?'flex':'none';
+    if(box) box.style.display='flex';
   }
   updateScoreboard();
 }
@@ -2144,6 +2144,7 @@ function closeAudio(){
   _wakaPhase=0;
   const mb=document.getElementById('mute-btn'); if(mb) mb.style.display='none';
   const vb=document.getElementById('voice-btn'); if(vb) vb.style.display='none';
+  const scb=document.getElementById('spec-count-box'); if(scb) scb.style.display='none';
 }
 
 // ── Audio mute toggle (🔊/🔇 button) ─────────────────────────
@@ -2792,6 +2793,9 @@ function launchGame(){
   const _vb=document.getElementById('voice-btn'); if(_vb) _vb.style.display='flex';
   // Show adaptive keybind strip
   const _kh=document.getElementById('kb-hud'); if(_kh){ _kh.style.display='flex'; _updateKbHud(); }
+  // Always show spectator counter during gameplay (starts at 0)
+  const _scb=document.getElementById('spec-count-box'); if(_scb) _scb.style.display='flex';
+  const _sc=document.getElementById('spec-count'); if(_sc) _sc.textContent='0';
   startPacManMusic();
   // Apply mute immediately after audio context is created (it may take a tick)
   if(_muted) setTimeout(()=>{ if(_audioCtx) _audioCtx.suspend().catch(()=>{}); },50);
