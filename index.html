@@ -333,6 +333,8 @@ body{touch-action:manipulation;}
             C &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;USE <svg xmlns="http://www.w3.org/2000/svg" width="10" height="14" viewBox="-7 -11 14 22" style="display:inline-block;vertical-align:middle;overflow:visible"><g transform="rotate(-30)"><ellipse cy="1.5" rx="2.4" ry="5.2" fill="#AA3300"/><ellipse cy="1.2" rx="2" ry="4.6" fill="#E85000"/><ellipse cx="-0.8" cy="-0.5" rx="0.8" ry="2.4" fill="#FF8C00"/><ellipse cy="-4.5" rx="1.6" ry="0.9" fill="#228B22"/><line x1="0.4" y1="-5.1" x2="2" y2="-7" stroke="#228B22" stroke-width="1.2" stroke-linecap="round"/></g></svg> (SPEED BOOST)<br>
             Z / X &nbsp;&nbsp;ZOOM IN / OUT<br>
             T &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CHAT<br>
+            M &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;VOICE CHAT MUTE / UNMUTE 🎤<br>
+            N &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;GAME SOUND MUTE / UNMUTE 🔊<br>
             SPACE &nbsp;CASH OUT
           </div>
           <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:rgba(255,215,0,.7);margin-bottom:4px;">🎮 CONTROLLER (XBOX / PS)</div>
@@ -340,7 +342,8 @@ body{touch-action:manipulation;}
             D-PAD / L-STICK &nbsp;MOVE<br>
             A / CROSS &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;SPEED BOOST<br>
             X / SQUARE &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CHERRY 🍒 KILL<br>
-            Y / TRIANGLE &nbsp;&nbsp;&nbsp;&nbsp;VOICE CHAT 🎤<br>
+            Y / TRIANGLE &nbsp;&nbsp;&nbsp;&nbsp;VOICE CHAT MUTE 🎤<br>
+            RS (R3) &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;GAME SOUND MUTE 🔊<br>
             RB / R1 / RT / R2 &nbsp;CASH OUT<br>
             LB / L1 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;REJOIN<br>
             B / CIRCLE &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;BACK (MENUS)<br>
@@ -579,6 +582,8 @@ body{touch-action:manipulation;}
     style="position:fixed;top:46px;right:10px;z-index:200;background:rgba(7,7,15,0.85);border:1px solid rgba(255,215,0,0.2);border-radius:6px;color:var(--y);font-size:16px;width:34px;height:34px;cursor:pointer;display:none;align-items:center;justify-content:center;padding:0;touch-action:manipulation;">🎙️</button>
   <!-- Voice speaking indicator — bottom-left, shows who's talking -->
   <div id="voice-speakers" style="position:fixed;bottom:16px;left:12px;z-index:200;display:none;flex-direction:column;gap:4px;pointer-events:none;"></div>
+  <!-- In-game keybind strip — bottom-center, adapts to keyboard vs controller -->
+  <div id="kb-hud" style="position:fixed;bottom:12px;left:50%;transform:translateX(-50%);z-index:105;display:none;gap:7px;flex-wrap:wrap;justify-content:center;pointer-events:none;"></div>
   <!-- Spectate panel — shown only while spectating, bottom-center -->
   <div id="spectate-panel" style="display:none;position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:200;display:none;flex-direction:column;align-items:center;gap:8px;pointer-events:auto;">
     <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:rgba(255,255,255,0.5);margin-bottom:2px;letter-spacing:1px;">👁 SPECTATING</div>
@@ -2207,6 +2212,7 @@ function leaveSpectate(){
   if(chatMsgs){ chatMsgs.innerHTML=''; chatMsgs.style.display='none'; }
   const p=document.getElementById('spectate-panel'); if(p) p.style.display='none';
   const mb=document.getElementById('mute-btn'); if(mb) mb.style.display='none';
+  const _khl=document.getElementById('kb-hud'); if(_khl) _khl.style.display='none';
   pkDisconnect();
   go('scr-lobby');
   populateLobby();
@@ -2780,6 +2786,8 @@ function launchGame(){
   }
   // Show voice chat button
   const _vb=document.getElementById('voice-btn'); if(_vb) _vb.style.display='flex';
+  // Show adaptive keybind strip
+  const _kh=document.getElementById('kb-hud'); if(_kh){ _kh.style.display='flex'; _updateKbHud(); }
   startPacManMusic();
   // Apply mute immediately after audio context is created (it may take a tick)
   if(_muted) setTimeout(()=>{ if(_audioCtx) _audioCtx.suspend().catch(()=>{}); },50);
@@ -3044,6 +3052,32 @@ requestAnimationFrame(_menuGpRaf);
 // Standard mapping: btn 0=A/Cross, 2=X/Square, 12=↑, 13=↓, 14=←, 15=→
 // Xbox: A→boost, X→cherry  |  PS: Cross→boost, Square→cherry
 let _gpPrev={}, _gpStickPrev='';
+let _inputType='keyboard'; // 'keyboard' or 'controller' — updated on first real input
+
+function _updateKbHud(){
+  const el=document.getElementById('kb-hud'); if(!el||el.style.display==='none') return;
+  const pads=navigator.getGamepads?navigator.getGamepads():[];
+  let gp=null; for(let i=0;i<pads.length;i++) if(pads[i]&&pads[i].connected){gp=pads[i];break;}
+  const ps=gp&&(gp.id.toLowerCase().includes('playstation')||gp.id.toLowerCase().includes('054c')||gp.id.toLowerCase().includes('dualshock')||gp.id.toLowerCase().includes('dualsense'));
+  const chip=(key,lbl,border)=>`<span style="display:inline-flex;align-items:center;gap:5px;background:rgba(0,0,0,0.72);border:1.5px solid ${border};border-radius:6px;padding:4px 9px;"><span style="font-family:'Press Start 2P',monospace;font-size:9px;color:#fff;background:rgba(255,255,255,0.13);border:1px solid rgba(255,255,255,0.28);border-radius:4px;padding:3px 6px;letter-spacing:0;">${key}</span><span style="font-family:'Press Start 2P',monospace;font-size:7px;color:rgba(255,255,255,0.7);letter-spacing:.5px;">${lbl}</span></span>`;
+  if(_inputType==='controller'){
+    el.innerHTML=[
+      chip(ps?'✕':'A',  'BOOST',   'rgba(0,200,100,0.55)'),
+      chip(ps?'□':'X',  'KILL',    'rgba(220,50,50,0.55)'),
+      chip(ps?'△':'Y',  'VOICE',   'rgba(200,200,0,0.55)'),
+      chip('RS',         'SOUND',   'rgba(100,160,255,0.55)'),
+      chip(ps?'R1':'RB','CASH OUT','rgba(255,215,0,0.55)'),
+    ].join('');
+  } else {
+    el.innerHTML=[
+      chip('C',   'BOOST',   'rgba(0,200,100,0.55)'),
+      chip('V',   'KILL',    'rgba(220,50,50,0.55)'),
+      chip('M',   'VOICE',   'rgba(200,200,0,0.55)'),
+      chip('N',   'SOUND',   'rgba(100,160,255,0.55)'),
+      chip('SPC', 'CASH OUT','rgba(255,215,0,0.55)'),
+    ].join('');
+  }
+}
 function pollGamepad(){
   if(!G.players||G.over) return;
   const pads=navigator.getGamepads?navigator.getGamepads():[];
@@ -3073,10 +3107,16 @@ function pollGamepad(){
   const rx=gp.axes[2]||0;
   if(Math.abs(rx)>0.3)
     _camZoom=Math.max(0.25,Math.min(4,_camZoom*(rx>0?1+0.008*rx:1/(1+0.008*Math.abs(rx)))));
-  // Action buttons: A/Cross=boost, X/Square=cherry, RB/RT=cashout, LB=rejoin, Y=voice
+  // Detect controller input — switch HUD if user was on keyboard
+  let _anyBtn=false;
+  for(let i=0;i<gp.buttons.length;i++) if(gp.buttons[i]&&gp.buttons[i].pressed){_anyBtn=true;break;}
+  if(!_anyBtn&&(Math.abs(ax)>0.5||Math.abs(ay)>0.5)) _anyBtn=true;
+  if(_anyBtn&&_inputType!=='controller'){_inputType='controller';_updateKbHud();}
+  // Action buttons: A/Cross=boost, X/Square=cherry, RB/RT=cashout, LB=rejoin, Y=voice, RS=sound mute
   if(rose(0)) usePow('pepper');
   if(rose(2)) usePow('cherry');
   if(rose(3)&&!isSpectating) voiceToggle();
+  if(rose(10)) toggleMute();
   if((rose(5)||rose(7))&&!isSpectating) instantCashout();
   if(rose(4)&&isSpectating){
     const ov=document.getElementById('rejoin-overlay');
@@ -3088,6 +3128,10 @@ function pollGamepad(){
   for(let i=0;i<gp.buttons.length;i++) _gpPrev[i]=down(i);
 }
 function onKey(e){
+  // Track keyboard input — switch HUD away from controller if keyboard used
+  if(e.target.tagName!=='INPUT'&&e.target.tagName!=='TEXTAREA'&&_inputType!=='keyboard'){
+    _inputType='keyboard'; _updateKbHud();
+  }
   // T opens chat during game or spectating (never when an input is already focused)
   if((e.key==='t'||e.key==='T')&&e.target.tagName!=='INPUT'&&e.target.tagName!=='TEXTAREA'){
     if(G||isSpectating){ e.preventDefault(); openChat(); return; }
@@ -3114,6 +3158,8 @@ function onKey(e){
     case'x': case'X':{ _camZoom=Math.max(0.25,_camZoom*0.89); e.preventDefault(); break; }
     // Voice mute/unmute
     case'm': case'M': if(!isSpectating){ voiceToggle(); e.preventDefault(); } break;
+    // Game sound mute/unmute
+    case'n': case'N': toggleMute(); e.preventDefault(); break;
   }
 }
 // Update mobile powerup button opacity to reflect held state
@@ -3894,10 +3940,11 @@ async function endGame(reason){
   document.removeEventListener('keydown',onKey);
   if(_visHandler){ document.removeEventListener('visibilitychange',_visHandler); _visHandler=null; }
   if(_rcMenu) document.removeEventListener('contextmenu',_rcMenu);
-  // Hide mobile controls + spectate panel when game ends
+  // Hide mobile controls + spectate panel + keybind HUD when game ends
   const pb=document.getElementById('pow-btns'); if(pb) pb.style.display='none';
   const cw=document.getElementById('cash-btn-wrap'); if(cw) cw.style.display='none';
   const _spe=document.getElementById('spectate-panel'); if(_spe) _spe.style.display='none';
+  const _kho=document.getElementById('kb-hud'); if(_kho) _kho.style.display='none';
   if(_zoomSliderEl){ _zoomSliderEl.style.display='none'; _zoomSliderEl=null; }
   _joyDrawFn=null;
   const _joyEl2=document.getElementById('joy-canvas'); if(_joyEl2) _joyEl2.style.display='none';
