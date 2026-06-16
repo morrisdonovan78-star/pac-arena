@@ -680,6 +680,7 @@ body{touch-action:manipulation;}
       <div style="font-family:'Press Start 2P',monospace;font-size:9px;color:#FFD700;letter-spacing:1px;">PLAYER PROFILE</div>
       <button onclick="closeLbProfile()" style="background:none;border:none;color:rgba(255,255,255,0.5);font-size:20px;cursor:pointer;line-height:1;">×</button>
     </div>
+    <div id="lb-profile-gp-hint" style="display:none;font-size:7px;color:rgba(255,215,0,.45);font-family:'Press Start 2P',monospace;margin-bottom:.7rem;letter-spacing:1px;">🎮 X=COPY ADDR &nbsp;·&nbsp; B=CLOSE</div>
     <div id="lb-profile-content"></div>
   </div>
 </div>
@@ -3142,10 +3143,15 @@ function _menuGpRaf(){
                 if(_lbFocusIdx<0){_lbFocusIdx=0;_applyLbFocus();}
                 if(rose(12)){_lbFocusIdx=Math.max(0,_lbFocusIdx-1);_applyLbFocus();}
                 if(rose(13)){_lbFocusIdx=Math.min(n-1,_lbFocusIdx+1);_applyLbFocus();}
-                if(rose(0)){openLbProfile(_lbFocusIdx);}
-                if(rose(1)){const m=document.getElementById('lb-profile-modal');if(m&&m.style.display!=='none'){closeLbProfile();}else{showScreen('scr-home');}}
-                if(rose(3)){_openLbOsk();}
-                if(rose(8)){showScreen('scr-home');}
+                const _profModal=document.getElementById('lb-profile-modal');
+                const _profOpen=_profModal&&_profModal.style.display!=='none';
+                const _profHint=document.getElementById('lb-profile-gp-hint');
+                if(_profHint) _profHint.style.display=_profOpen?'block':'none';
+                if(rose(0)&&!_profOpen){openLbProfile(_lbFocusIdx);}
+                if(rose(1)){if(_profOpen){closeLbProfile();}else{showScreen('scr-home');}}
+                if(rose(2)&&_profOpen&&_lbProfileAddr){lbCopyAddr(_lbProfileAddr);}
+                if(rose(3)&&!_profOpen){_openLbOsk();}
+                if(rose(8)){if(_profOpen){closeLbProfile();}else{showScreen('scr-home');}}
               }
             }
           } else {
@@ -4223,13 +4229,15 @@ async function fetchHomeLb(){
 let _lbRefreshTimer=null;
 let _lbPlayerCache=[];
 let _lbFocusIdx=-1;
+let _lbProfileAddr='';
 let _lbOskOpen=false;
 let _lbOskRow=0;
 let _lbOskCol=0;
 const _OSK_ROWS=[
+  ['1','2','3','4','5','6','7','8','9','0'],
   ['Q','W','E','R','T','Y','U','I','O','P'],
-  ['A','S','D','F','G','H','J','K','L'],
-  ['Z','X','C','V','B','N','M','SPC','⌫','GO'],
+  ['A','S','D','F','G','H','J','K','L','.'],
+  ['Z','X','C','V','B','N','M','-','_','SPC','⌫','GO'],
 ];
 
 async function openLeaderboard(){
@@ -4314,6 +4322,7 @@ function _renderLeaderboard(d){
 function openLbProfile(idx){
   const p=_lbPlayerCache[idx];
   if(!p) return;
+  _lbProfileAddr=p.address||'';
   const wins=p.wins||0;
   const losses=p.losses||0;
   const kills=p.kills||0;
