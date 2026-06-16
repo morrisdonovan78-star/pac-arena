@@ -662,7 +662,10 @@ body{touch-action:manipulation;}
     </div>
     <div style="margin-bottom:.75rem;text-align:left;">
       <label style="display:block;font-family:'Press Start 2P',monospace;font-size:7px;color:var(--muted);margin-bottom:6px;">DESTINATION WALLET</label>
-      <input id="co-dest" type="text" placeholder="Paste Phantom / external wallet address" style="width:100%;box-sizing:border-box;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-family:'Exo 2',sans-serif;font-size:13px;color:var(--txt);outline:none;"/>
+      <div style="display:flex;gap:8px;">
+        <input id="co-dest" type="text" placeholder="Paste Phantom / external wallet address" style="flex:1;min-width:0;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-family:'Exo 2',sans-serif;font-size:13px;color:var(--txt);outline:none;"/>
+        <button class="copy-btn" onclick="navigator.clipboard.readText().then(t=>{const i=document.getElementById('co-dest');i.value=t.trim();i.style.borderColor='var(--g)';setTimeout(()=>i.style.borderColor='var(--border)',1200);}).catch(()=>{})" style="padding:0 14px;white-space:nowrap;">📋 PASTE</button>
+      </div>
     </div>
     <div style="margin-bottom:.5rem;text-align:left;">
       <label style="display:block;font-family:'Press Start 2P',monospace;font-size:7px;color:var(--muted);margin-bottom:6px;">AMOUNT ($USD)</label>
