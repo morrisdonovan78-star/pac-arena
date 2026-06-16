@@ -110,6 +110,7 @@ label{font-size:10px;color:var(--muted);display:block;margin-bottom:5px;}
 .la-voiceban{background:rgba(255,105,180,.15);color:var(--pk);}
 .la-unvoiceban{background:rgba(57,255,20,.1);color:var(--g);}
 .la-endgame{background:rgba(0,255,255,.12);color:var(--c);}
+.la-broadcast{background:rgba(255,140,0,.15);color:#FF8C00;}
 .la-default{background:rgba(255,255,255,.08);color:var(--muted);}
 
 /* ── Toast ────────────────────────────────────────────────────────── */
@@ -325,6 +326,21 @@ function renderLive() {
   const c = document.getElementById('content');
   c.innerHTML = `
     <div class="section-title">🔴 LIVE GAME STATUS</div>
+    <div class="card" style="border-color:rgba(255,140,0,.35);margin-bottom:16px;">
+      <div class="card-title" style="color:#FF8C00;">📢 BROADCAST TO PLAYERS</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <select id="bc-lobby" style="width:160px;flex-shrink:0;">
+          <option value="">ALL LOBBIES</option>
+          <option value="free-lobby">FREE LOBBY</option>
+          <option value="paid-lobby-1">$1 LOBBY</option>
+          <option value="paid-lobby-5">$5 LOBBY</option>
+          <option value="paid-lobby-25">$25 LOBBY</option>
+        </select>
+        <input type="text" id="bc-msg" placeholder="Type message to send to all players…" maxlength="200"
+          onkeydown="if(event.key==='Enter')sendBroadcast()" style="flex:1;">
+        <button class="btn btn-sm" style="color:#FF8C00;border-color:#FF8C00;flex-shrink:0;" onclick="sendBroadcast()">📢 SEND</button>
+      </div>
+    </div>
     <div class="refresh-bar">
       <span class="dot-live"></span>
       Auto-refresh: <span id="live-cd">10</span>s &nbsp;
@@ -430,6 +446,18 @@ function quickWarn(addr, name) {
     try { await api({ action: 'warn', address: addr, message: msg }); toast('Warning sent to ' + name, 'var(--y)'); }
     catch (e) { toast('Error: ' + e.message, 'var(--r)'); }
   }, `<input id="warn-msg-input" class="warn-input" type="text" placeholder="Warning message…" maxlength="120">`);
+}
+
+async function sendBroadcast() {
+  const msg     = (document.getElementById('bc-msg')?.value || '').trim();
+  const lobbyId = document.getElementById('bc-lobby')?.value || '';
+  if (!msg) { toast('Enter a message to broadcast', '#FF8C00'); return; }
+  try {
+    await api({ action: 'broadcast', message: msg, lobbyId: lobbyId || null });
+    toast('📢 Broadcast sent' + (lobbyId ? ' to ' + lobbyId : ' to ALL'), '#FF8C00', 5000);
+    const el = document.getElementById('bc-msg');
+    if (el) el.value = '';
+  } catch (e) { toast('Error: ' + e.message, 'var(--r)'); }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

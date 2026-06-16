@@ -88,7 +88,7 @@ async function logAction(action, target, detail) {
 
 // ── Game server calls ─────────────────────────────────────────────────────────
 const SERVERS = [
-  process.env.GAME_SERVER_URL    || 'https://pac-arena.duckdns.org',
+  process.env.GAME_SERVER_URL    || 'http://149.28.119.247:3001',
   process.env.GAME_SERVER_EU_URL || '',
 ].filter(Boolean);
 
@@ -197,6 +197,13 @@ module.exports = async function handler(req, res) {
     if (!lobbyId) return res.status(400).json({ error: 'lobbyId required' });
     const results = await callAllServers('endgame', 'POST', { lobbyId, reason });
     await logAction('endgame', lobbyId, reason);
+    return res.json({ ok: true, results });
+  }
+
+  if (action === 'broadcast') {
+    if (!message) return res.status(400).json({ error: 'message required' });
+    const results = await callAllServers('broadcast', 'POST', { message, lobbyId: lobbyId || null });
+    await logAction('broadcast', lobbyId || 'ALL', message);
     return res.json({ ok: true, results });
   }
 

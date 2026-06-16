@@ -1708,6 +1708,10 @@ async function pkConnect(roomId, gameToken){
     _sio.on('admin-endgame',()=>{
       addToast('🛑 Game ended by moderator','#FF4444',5000);
     });
+    _sio.on('admin-broadcast',(d)=>{
+      const msg=d&&d.message?d.message:'';
+      if(msg) addToast('📢 '+msg,'#FF8C00',12000);
+    });
 
     _sio.on('disconnect',(reason)=>{
       if(reason==='io client disconnect') return;
