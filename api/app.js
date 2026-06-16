@@ -55,8 +55,7 @@ module.exports = function handler(req, res) {
   }
 
   // ── OG preview image ─────────────────────────────────────────────────────────
-  const path = reqPath;
-  if (path === '/og' || path === '/og-image') {
+  if (reqPath === '/og' || reqPath === '/og-image') {
     res.setHeader('Content-Type', 'image/svg+xml');
     res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
     return res.status(200).send(OG_SVG);
