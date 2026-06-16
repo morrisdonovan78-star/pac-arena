@@ -161,6 +161,10 @@ html,body{background:var(--dark);color:var(--txt);font-family:'Exo 2',sans-serif
 .btn-r{color:var(--r);border-color:var(--r);}
 .btn-pk{color:var(--pk);border-color:var(--pk);}
 .gp-focus{outline:2px solid #FFD700!important;outline-offset:3px;box-shadow:0 0 14px rgba(255,215,0,.55)!important;}
+#lb-osk{position:fixed;bottom:0;left:0;right:0;background:#09091a;border-top:2px solid rgba(255,215,0,.4);z-index:960;padding:10px 12px 18px;display:none;}
+.osk-key{display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);border-radius:7px;min-width:32px;height:36px;font-family:'Press Start 2P',monospace;font-size:6px;color:var(--txt);cursor:pointer;padding:0 5px;transition:background .08s;}
+.osk-key:hover{background:rgba(255,255,255,.14);}
+.osk-key.osk-sel{background:rgba(255,215,0,.22);border-color:#FFD700;color:#FFD700;box-shadow:0 0 10px rgba(255,215,0,.4);}
 .btn-sm{font-size:8px;padding:10px 16px;width:auto;}
 .w-strip{display:flex;align-items:center;justify-content:space-between;background:rgba(255,215,0,.06);border:1px solid rgba(255,215,0,.2);border-radius:10px;padding:12px 16px;margin-bottom:.75rem;gap:8px;}
 .w-addr{font-family:'Press Start 2P',monospace;font-size:7px;color:var(--y);}
@@ -577,6 +581,7 @@ body{touch-action:manipulation;}
       style="flex:1;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-family:monospace;font-size:11px;color:var(--txt);outline:none;"
       onkeydown="if(event.key==='Enter')lbSearch()"/>
     <button class="btn btn-c btn-sm" onclick="lbSearch()">🔍 FIND</button>
+    <button id="lb-osk-btn" class="btn btn-y btn-sm" onclick="_openLbOsk()" title="Controller keyboard (Y)" style="display:none;font-size:8px;padding:8px 10px;">🎮Y</button>
   </div>
   <div id="lb-search-result" style="display:none;max-width:480px;width:100%;margin:0 auto .85rem;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:10px;padding:14px 16px;"></div>
   <!-- Top players -->
@@ -677,6 +682,16 @@ body{touch-action:manipulation;}
     </div>
     <div id="lb-profile-content"></div>
   </div>
+</div>
+
+<!-- ON-SCREEN KEYBOARD — controller search for leaderboard -->
+<div id="lb-osk">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+    <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:#FFD700;letter-spacing:1px;">🎮 SEARCH</div>
+    <div id="lb-osk-val" style="flex:1;margin:0 12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:6px 10px;font-family:monospace;font-size:12px;color:var(--txt);min-height:28px;letter-spacing:1px;"></div>
+    <div style="font-size:8px;color:var(--muted);font-family:'Press Start 2P',monospace;line-height:1.6;text-align:right;">A=TYPE&nbsp;X=⌫<br>START=GO&nbsp;B=CLOSE</div>
+  </div>
+  <div id="lb-osk-keys"></div>
 </div>
 
 <!-- WITHDRAW — free, send to external wallet, no fee -->
@@ -3088,7 +3103,40 @@ function _menuGpRaf(){
                 const el=document.getElementById(btns[_mFocusIdx]);if(el){el.click();_mClearFocus();_mPrevScr=null;}
               }
             }
+          } else if(scrId==='scr-leaderboard'){
+            // Show OSK button when gamepad is active
+            const oskBtn=document.getElementById('lb-osk-btn');
+            if(oskBtn) oskBtn.style.display='inline-flex';
+            if(scrId!==_mPrevScr){_lbFocusIdx=-1;_mPrevScr=scrId;}
+            if(_lbOskOpen){
+              // OSK mode: navigate keys with D-pad, A=type, X=backspace, B/Select=close, Start=search
+              const rowLen=_OSK_ROWS[_lbOskRow].length;
+              if(rose(12)){_lbOskRow=(_lbOskRow-1+_OSK_ROWS.length)%_OSK_ROWS.length;_lbOskCol=Math.min(_lbOskCol,_OSK_ROWS[_lbOskRow].length-1);}
+              if(rose(13)){_lbOskRow=(_lbOskRow+1)%_OSK_ROWS.length;_lbOskCol=Math.min(_lbOskCol,_OSK_ROWS[_lbOskRow].length-1);}
+              if(rose(14)){_lbOskCol=Math.max(0,_lbOskCol-1);}
+              if(rose(15)){_lbOskCol=Math.min(_OSK_ROWS[_lbOskRow].length-1,_lbOskCol+1);}
+              if(rose(0)){_oskPress(_OSK_ROWS[_lbOskRow][_lbOskCol]);}
+              if(rose(2)){_oskPress('⌫');}
+              if(rose(1)||rose(8)){_closeLbOsk();}
+              if(rose(9)){_oskPress('GO');}
+              _renderOsk();
+            } else {
+              // Player list mode: D-pad up/down navigates rows, A=open profile, B/Select=back, Y=OSK
+              const rows=document.querySelectorAll('.lb-row');
+              const n=rows.length;
+              if(n>0){
+                if(_lbFocusIdx<0){_lbFocusIdx=0;_applyLbFocus();}
+                if(rose(12)){_lbFocusIdx=Math.max(0,_lbFocusIdx-1);_applyLbFocus();}
+                if(rose(13)){_lbFocusIdx=Math.min(n-1,_lbFocusIdx+1);_applyLbFocus();}
+                if(rose(0)){openLbProfile(_lbFocusIdx);}
+                if(rose(1)){const m=document.getElementById('lb-profile-modal');if(m&&m.style.display!=='none'){closeLbProfile();}else{showScreen('scr-home');}}
+                if(rose(3)){_openLbOsk();}
+                if(rose(8)){showScreen('scr-home');}
+              }
+            }
           } else {
+            const oskBtn=document.getElementById('lb-osk-btn');
+            if(oskBtn) oskBtn.style.display='none';
             _mPrevScr=scrId;
           }
           for(let i=0;i<gp.buttons.length;i++) _mPrev[i]=down(i);
@@ -4160,6 +4208,15 @@ async function fetchHomeLb(){
 // ═══════════════════════════════════════════════════════════
 let _lbRefreshTimer=null;
 let _lbPlayerCache=[];
+let _lbFocusIdx=-1;
+let _lbOskOpen=false;
+let _lbOskRow=0;
+let _lbOskCol=0;
+const _OSK_ROWS=[
+  ['Q','W','E','R','T','Y','U','I','O','P'],
+  ['A','S','D','F','G','H','J','K','L'],
+  ['Z','X','C','V','B','N','M','SPC','⌫','GO'],
+];
 
 async function openLeaderboard(){
   go('scr-leaderboard');
@@ -4212,7 +4269,7 @@ function _renderLeaderboard(d){
     const displayName=p.name?escHtml(p.name.slice(0,16)):'ANON';
     const kd=((p.kills||0)/Math.max(p.losses||0,1)).toFixed(1);
     const winRate=p.games>0?((+(p.wins||0)/p.games)*100).toFixed(0)+'%':'–';
-    return `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:8px;padding:11px 13px;margin-bottom:7px;">
+    return `<div class="lb-row" data-idx="${i}" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:8px;padding:11px 13px;margin-bottom:7px;scroll-margin:8px;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;">
         <div style="display:flex;align-items:center;gap:10px;">${rank}
           <div>
@@ -4308,6 +4365,49 @@ function openLbProfile(idx){
 
 function closeLbProfile(){
   document.getElementById('lb-profile-modal').style.display='none';
+}
+
+function _applyLbFocus(){
+  document.querySelectorAll('.lb-row').forEach((el,i)=>{
+    el.classList.toggle('gp-focus',i===_lbFocusIdx);
+    if(i===_lbFocusIdx) el.scrollIntoView({block:'nearest',behavior:'smooth'});
+  });
+}
+function _openLbOsk(){
+  _lbOskOpen=true; _lbOskRow=0; _lbOskCol=0;
+  const inp=document.getElementById('lb-search-inp');
+  const valEl=document.getElementById('lb-osk-val');
+  if(valEl) valEl.textContent=inp?inp.value:'';
+  document.getElementById('lb-osk').style.display='block';
+  _renderOsk();
+}
+function _closeLbOsk(){
+  _lbOskOpen=false;
+  document.getElementById('lb-osk').style.display='none';
+}
+function _renderOsk(){
+  let html='';
+  _OSK_ROWS.forEach((row,r)=>{
+    html+='<div style="display:flex;gap:4px;justify-content:center;margin-bottom:4px;">';
+    row.forEach((k,c)=>{
+      const sel=(r===_lbOskRow&&c===_lbOskCol)?'osk-sel':'';
+      const wide=(k==='SPC'||k==='GO')?'min-width:48px;':'';
+      html+=`<div class="osk-key ${sel}" style="${wide}" onclick="_oskPress('${k}')">${k}</div>`;
+    });
+    html+='</div>';
+  });
+  document.getElementById('lb-osk-keys').innerHTML=html;
+}
+function _oskPress(k){
+  const inp=document.getElementById('lb-search-inp');
+  const valEl=document.getElementById('lb-osk-val');
+  let cur=inp?inp.value:'';
+  if(k==='⌫'){cur=cur.slice(0,-1);}
+  else if(k==='GO'){_closeLbOsk();lbSearch();return;}
+  else if(k==='SPC'){cur+=' ';}
+  else{cur+=k;}
+  if(inp) inp.value=cur;
+  if(valEl) valEl.textContent=cur;
 }
 
 function lbCopyAddr(addr){

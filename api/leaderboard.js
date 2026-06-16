@@ -9,55 +9,71 @@ const CORS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
-// Read player stats from the new ph: hash key, with fallback to old plb: JSON blob.
-// Migrates old data on first read so future writes stay on hash keys only.
+// Read player stats — always reads both ph: hash and old plb: blob, merging where needed.
+// Rule: hash field takes priority IF it is defined (even 0). If a field is absent from
+// the hash (never written), the old blob value is used and migrated to hash.
+// This handles the common case where join.js wrote to the hash (games, wagered, name)
+// BEFORE the old blob migration could run, leaving kills/wins/losses absent from hash.
 async function readStats(address) {
   const empty = { name:'', earned:0, wagered:0, games:0, kills:0, wins:0, losses:0 };
+  const INT_FIELDS = ['earned','wagered','games','kills','wins','losses'];
 
-  // Try new hash key first
-  const h = await kvHgetall('ph:' + address);
-  if (h && Object.keys(h).length > 0) {
-    const stats = {
-      name:    h.name   || '',
-      earned:  parseInt(h.earned)  || 0,
-      wagered: parseInt(h.wagered) || 0,
-      games:   parseInt(h.games)   || 0,
-      kills:   parseInt(h.kills)   || 0,
-      wins:    parseInt(h.wins)    || 0,
-      losses:  parseInt(h.losses)  || 0,
-    };
-    // Hash exists but may be missing name if player played after hash migration but before
-    // explicitly setting a name. Check old JSON blob for the name and migrate it.
-    if (!stats.name) {
+  const [h, raw] = await Promise.all([
+    kvHgetall('ph:' + address).catch(() => null),
+    kvGet('plb:' + address).catch(() => null),
+  ]);
+
+  const hashEmpty = !h || Object.keys(h).length === 0;
+  let blob = {};
+  if (raw) { try { blob = { ...empty, ...JSON.parse(raw) }; } catch(_) {} }
+
+  if (hashEmpty && !raw) return empty;
+
+  // Only old blob — migrate it fully to hash, return blob data
+  if (hashEmpty) {
+    (async () => {
       try {
-        const raw = await kvGet('plb:' + address);
-        if (raw) {
-          const old = JSON.parse(raw);
-          if (old.name) {
-            stats.name = old.name;
-            await kvHset('ph:' + address, 'name', old.name);
-          }
-        }
+        const p = 'ph:' + address;
+        if (blob.name)    await kvHset(p, 'name', blob.name);
+        for (const f of INT_FIELDS) if (blob[f]) await kvHset(p, f, String(blob[f]));
       } catch(_) {}
-    }
-    return stats;
+    })();
+    return blob;
   }
 
-  // Fall back to old JSON blob (plb: key) and migrate into hash
-  const raw = await kvGet('plb:' + address);
-  if (!raw) return empty;
-  try {
-    const s = { ...empty, ...JSON.parse(raw) };
-    // Migrate: write each field into the hash atomically (HINCRBY for ints, HSET for name)
-    if (s.name)    await kvHset('ph:' + address, 'name',    s.name);
-    if (s.earned)  await kvHincrby('ph:' + address, 'earned',  s.earned);
-    if (s.wagered) await kvHincrby('ph:' + address, 'wagered', s.wagered);
-    if (s.games)   await kvHincrby('ph:' + address, 'games',   s.games);
-    if (s.kills)   await kvHincrby('ph:' + address, 'kills',   s.kills);
-    if (s.wins)    await kvHincrby('ph:' + address, 'wins',    s.wins);
-    if (s.losses)  await kvHincrby('ph:' + address, 'losses',  s.losses);
-    return s;
-  } catch (_) { return empty; }
+  // Hash exists — for each field: use hash value when field is present, else fall back to blob
+  const toMigrate = {};
+  const getField = (f) => {
+    if (h[f] !== undefined) return parseInt(h[f]) || 0;
+    const bv = parseInt(blob[f]) || 0;
+    if (bv > 0) toMigrate[f] = String(bv);
+    return bv;
+  };
+
+  const stats = {
+    name:    h.name || blob.name || '',
+    earned:  getField('earned'),
+    wagered: getField('wagered'),
+    games:   getField('games'),
+    kills:   getField('kills'),
+    wins:    getField('wins'),
+    losses:  getField('losses'),
+  };
+  if (!h.name && blob.name) toMigrate.name = blob.name;
+
+  // Migrate missing fields to hash (fire-and-forget — no double-count risk since we
+  // only migrate fields that were completely absent from the hash)
+  if (Object.keys(toMigrate).length > 0) {
+    (async () => {
+      try {
+        await Promise.all(Object.entries(toMigrate).map(([k, v]) =>
+          kvHset('ph:' + address, k, v)
+        ));
+      } catch(_) {}
+    })();
+  }
+
+  return stats;
 }
 
 // Read global counters from new hash, with fallback to old JSON blob.
