@@ -1530,6 +1530,7 @@ async function pkConnect(roomId, gameToken){
       if(G&&!G.over&&!G.players.has(h.id))
         addPlayer({id:h.id,num:G.players.size,color:h.color||colorFromId(h.id),
           hat:'none',trail:'none',eyes:'dot',aura:'none',spawn:[h.x||14,h.y||18],name:h.name||'',sol:h.sol||0});
+      if(h.id!==myPid) playJoinPing();
       if(_voiceEnabled&&_sio) _sio.emit('voice-ready',{});
     });
 
@@ -2080,11 +2081,10 @@ const _chatLog=[];                          // recent chat messages (max 8)
 let _visHandler=null; // tab-visibility handler ref (so we can removeEventListener cleanly)
 
 // ─────────────────────────────────────────────────────────────
-// AUTHENTIC PAC-MAN AUDIO SYSTEM
-// ─────────────────────────────────────────────────────────────
-let _wakaPhase=0, _sirenTimer=null, _lastWakaTs=0;
+// ── Audio system ──────────────────────────────────────────────
+let _wakaPhase=0, _lastWakaTs=0;
 
-// Core oscillator tone (shared by music + SFX)
+// Core oscillator tone — used by all SFX
 function _tone(freq,durMs,vol,type){
   if(!_audioCtx) return;
   try{
@@ -2099,65 +2099,20 @@ function _tone(freq,durMs,vol,type){
   }catch(_){}
 }
 
-// ── 1. Game-start intro jingle (note-perfect 1980 Namco arcade) ──
-// Each entry: [frequency Hz, duration ms]. 0 = rest.
-const _INTRO=[
-  [493.88,90],[493.88,90],[493.88,90],          // B4  B4  B4
-  [369.99,48],[0,48],[493.88,90],               // F#4 —  B4
-  [440.00,135],[440.00,90],[440.00,90],         // A4  A4  A4
-  [349.23,48],[0,48],[440.00,90],               // F4  —  A4
-  [415.30,135],[415.30,90],[415.30,90],         // Ab4 Ab4 Ab4
-  [349.23,48],[0,48],[415.30,90],               // F4  —  Ab4
-  [392.00,135],[392.00,90],[392.00,90],         // G4  G4  G4
-  [311.13,48],[0,48],[392.00,90],               // Eb4 —  G4
-  [369.99,270],[0,90],                          // F#4 (hold)
-  [493.88,90],[493.88,90],[440.00,180],[0,90],  // B4  B4  A4  —
-  [369.99,90],[369.99,90],[329.63,270],[0,90],  // F#4 F#4 E4  —
-];
-
-// ── 2. Chase siren (loops after intro, classic two-tone warble) ──
-function _startSiren(){
-  if(_sirenTimer||_musicStop) return;
-  let ph=0;
-  function sk(){
-    if(_musicStop||!_audioCtx){ _sirenTimer=null; return; }
-    _tone(ph%2===0?480:450, 100, 0.04, 'square');
-    ph++;
-    _sirenTimer=setTimeout(sk, 120);
-  }
-  sk();
-}
-function _stopSiren(){ if(_sirenTimer){ clearTimeout(_sirenTimer); _sirenTimer=null; } }
-
-// ── Public: start / stop music ────────────────────────────────
+// ── Public: start / stop audio ────────────────────────────────
 function startPacManMusic(){
   if(_audioCtx) return;
   try{
     _audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-    _musicStop=false; _wakaPhase=0;
-    let i=0;
-    function nxt(){
-      if(_musicStop||!_audioCtx) return;
-      if(i>=_INTRO.length){ _startSiren(); return; }
-      const [f,d]=_INTRO[i++];
-      if(f>0) _tone(f,d*0.85,0.09,'square');
-      setTimeout(nxt,d);
-    }
-    nxt();
+    if(_muted) _audioCtx.suspend().catch(()=>{});
   }catch(e){}
 }
-function stopPacManMusic(){
-  // Stop loops but KEEP _audioCtx alive so SFX (death sound) still work
-  _musicStop=true; _stopSiren();
-}
+function stopPacManMusic(){}
 function closeAudio(){
-  // Full teardown — call only when leaving game entirely (playAgain / logout)
-  _musicStop=true; _stopSiren();
   if(_audioCtx){ try{ _audioCtx.close(); }catch(_){} _audioCtx=null; }
   _wakaPhase=0;
-  // Hide mute button when game is fully over
-  const mb=document.getElementById('mute-btn');
-  if(mb) mb.style.display='none';
+  const mb=document.getElementById('mute-btn'); if(mb) mb.style.display='none';
+  const vb=document.getElementById('voice-btn'); if(vb) vb.style.display='none';
 }
 
 // ── Audio mute toggle (🔊/🔇 button) ─────────────────────────
@@ -2350,6 +2305,24 @@ function playPepper(){
   (function n(){
     if(!_audioCtx||i>=_SFX_PEPPER.length) return;
     const [f,d]=_SFX_PEPPER[i++]; _tone(f,d*0.85,0.11,'sawtooth'); setTimeout(n,d);
+  })();
+}
+
+// Player joined: soft two-note ping (sine = clean bell quality)
+function playJoinPing(){
+  if(!_audioCtx) return;
+  _tone(880,100,0.07,'sine');
+  setTimeout(()=>_tone(1174,200,0.07,'sine'),90);
+}
+
+// Cashout / money: ascending coin cascade C6→E6→G6→C7→E7 then sustained ring
+const _SFX_COIN=[[1047,35],[1319,35],[1568,35],[2093,35],[2637,220]];
+function playCoinSfx(){
+  if(!_audioCtx) return;
+  let i=0;
+  (function n(){
+    if(!_audioCtx||i>=_SFX_COIN.length) return;
+    const [f,d]=_SFX_COIN[i++]; _tone(f,d*0.9,0.09,'sine'); setTimeout(n,d);
   })();
 }
 
@@ -4452,6 +4425,7 @@ async function instantCashout(){
     const _cw=document.getElementById('cash-btn-wrap'); if(_cw) _cw.style.display='none';
     ST.hasEscrow=false;
     const _solAmt=(d.playerCut/solanaWeb3.LAMPORTS_PER_SOL).toFixed(4);
+    playCoinSfx();
     if(d.confirmed){
       addToast('💰 +'+_solAmt+' SOL CASHED OUT!','#39FF14');
     }else{
