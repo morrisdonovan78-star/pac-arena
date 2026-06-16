@@ -6,7 +6,7 @@
 
 const nacl   = require('tweetnacl');
 const crypto = require('crypto');
-const { kvGet, kvSet, kvDel, kvSetPerm, kvZadd } = require('../lib/kv');
+const { kvGet, kvSet, kvDel, kvSetPerm, kvZadd, kvHincrby, kvHget, kvHset, kvHsetnx } = require('../lib/kv');
 
 // Game token — HMAC-signed proof of payment for the Socket.io game server.
 // Format matches server.js makeGameToken() so the server can validate it.
@@ -187,19 +187,20 @@ module.exports = async function handler(req, res) {
     // they paid a new wager — no concurrent cashout can be legitimately in-flight.
     kvDel('lock:co:' + walletAddress).catch(() => {});
 
-    // Fire-and-forget leaderboard join stat (wagered + games count)
+    // Fire-and-forget leaderboard join stat — atomic HINCRBY, no read-modify-write race
     (async()=>{
       try{
-        const raw=await kvGet('plb:'+walletAddress);
-        const s=raw?{...{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0},...JSON.parse(raw)}:{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0};
-        if(playerName&&typeof playerName==='string'&&!s.name) s.name=playerName.slice(0,20).toUpperCase();
-        s.wagered+=lamps; s.games+=1;
-        await kvSetPerm('plb:'+walletAddress,JSON.stringify(s));
-        await kvZadd('lb:earned',s.earned,walletAddress);
-        const gRaw=await kvGet('plb:global');
-        const gd=gRaw?{...{totalEarned:0,totalWagered:0,gamesPlayed:0},...JSON.parse(gRaw)}:{totalEarned:0,totalWagered:0,gamesPlayed:0};
-        gd.totalWagered+=lamps; gd.gamesPlayed+=1;
-        await kvSetPerm('plb:global',JSON.stringify(gd));
+        const pk='ph:'+walletAddress;
+        // Set display name only if player doesn't have one yet
+        if(playerName&&typeof playerName==='string') await kvHsetnx(pk,'name',playerName.slice(0,20).toUpperCase());
+        await kvHincrby(pk,'wagered',lamps);
+        await kvHincrby(pk,'games',1);
+        // Keep sorted set score in sync (score = current earned lamports)
+        const earned=await kvHget(pk,'earned');
+        await kvZadd('lb:earned',Number(earned)||0,walletAddress);
+        // Global counters
+        await kvHincrby('ph:global','totalWagered',lamps);
+        await kvHincrby('ph:global','gamesPlayed',1);
       }catch(_){}
     })();
 

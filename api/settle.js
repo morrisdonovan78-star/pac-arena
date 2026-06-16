@@ -3,7 +3,7 @@
 const nacl    = require('tweetnacl');
 const crypto  = require('crypto');
 const GAME_SECRET = (process.env.GAME_SECRET || '').trim();
-const { kvGet, kvSet, kvSetNX, kvDel, kvSetPerm, kvZadd } = require('../lib/kv');
+const { kvGet, kvSet, kvSetNX, kvDel, kvSetPerm, kvZadd, kvHincrby } = require('../lib/kv');
 
 // ── Ed25519 wallet signature verification ─────────────────────────────────────
 // The client signs: "pac-arena:{action}:{playerAddress}:{wagerLamports}:{unixTs}"
@@ -345,16 +345,11 @@ module.exports = async function handler(req, res) {
             (async()=>{ try{ await kvDel('krl:'+playerAddress); }catch(_){} })();
             (async()=>{
               try{
-                const raw=await kvGet('plb:'+playerAddress);
-                const s=raw?{...{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0},...JSON.parse(raw)}:{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0};
-                s.earned+=playerCut;
-                s.wins=(s.wins||0)+1;
-                await kvSetPerm('plb:'+playerAddress,JSON.stringify(s));
-                await kvZadd('lb:earned',s.earned,playerAddress);
-                const gRaw=await kvGet('plb:global');
-                const gd=gRaw?{...{totalEarned:0,totalWagered:0,gamesPlayed:0},...JSON.parse(gRaw)}:{totalEarned:0,totalWagered:0,gamesPlayed:0};
-                gd.totalEarned+=playerCut;
-                await kvSetPerm('plb:global',JSON.stringify(gd));
+                const pk='ph:'+playerAddress;
+                const newEarned=await kvHincrby(pk,'earned',playerCut);
+                await kvHincrby(pk,'wins',1);
+                await kvZadd('lb:earned',Number(newEarned)||0,playerAddress);
+                await kvHincrby('ph:global','totalEarned',playerCut);
               }catch(_){}
             })();
             break;
@@ -450,12 +445,10 @@ module.exports = async function handler(req, res) {
           }
           (async()=>{
             try{
-              const raw=await kvGet('plb:'+playerAddress);
-              const s=raw?{...{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0},...JSON.parse(raw)}:{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0};
-              s.kills=(s.kills||0)+1;
-              s.earned+=(killerCut||0);
-              await kvSetPerm('plb:'+playerAddress,JSON.stringify(s));
-              await kvZadd('lb:earned',s.earned,playerAddress);
+              const pk='ph:'+playerAddress;
+              await kvHincrby(pk,'kills',1);
+              const newEarned=await kvHincrby(pk,'earned',killerCut||0);
+              await kvZadd('lb:earned',Number(newEarned)||0,playerAddress);
             }catch(_){}
           })();
           break;
@@ -499,12 +492,7 @@ module.exports = async function handler(req, res) {
         await kvDel('pw:' + playerAddress);
         (async()=>{ try{ await kvDel('krl:'+playerAddress); await kvDel('kc:'+playerAddress); }catch(_){} })();
         (async()=>{
-          try{
-            const raw=await kvGet('plb:'+playerAddress);
-            const s=raw?{...{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0},...JSON.parse(raw)}:{name:'',earned:0,wagered:0,games:0,kills:0,wins:0,losses:0};
-            s.losses=(s.losses||0)+1;
-            await kvSetPerm('plb:'+playerAddress,JSON.stringify(s));
-          }catch(_){}
+          try{ await kvHincrby('ph:'+playerAddress,'losses',1); }catch(_){}
         })();
         clearTimeout(guard); done = true;
         return res.status(200).json({ sig: loseSig, amount: finalAmt, confirmed: loseConfirmed });
