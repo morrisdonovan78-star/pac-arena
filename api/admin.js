@@ -173,23 +173,23 @@ module.exports = async function handler(req, res) {
   const token = (req.headers['x-admin-token'] || '').trim();
   if (!verifyToken(token)) return res.status(403).json({ error: 'Invalid or expired session. Log in again.' });
 
-  const { action, address, reason, duration, message, lobbyId } = req.body || {};
+  const { action, address, reason, duration, message, lobbyId, socketId } = req.body || {};
 
   if (action === 'status') {
     return res.json({ servers: await callAllServers('status', 'GET') });
   }
 
   if (action === 'kick') {
-    if (!address) return res.status(400).json({ error: 'address required' });
-    const results = await callAllServers('kick', 'POST', { walletAddress: address, reason });
-    await logAction('kick', address, reason);
+    if (!address && !socketId) return res.status(400).json({ error: 'address required' });
+    const results = await callAllServers('kick', 'POST', { walletAddress: address, socketId, reason });
+    await logAction('kick', address || socketId, reason);
     return res.json({ ok: true, results });
   }
 
   if (action === 'warn') {
-    if (!address || !message) return res.status(400).json({ error: 'address and message required' });
-    const results = await callAllServers('warn', 'POST', { walletAddress: address, message });
-    await logAction('warn', address, message);
+    if ((!address && !socketId) || !message) return res.status(400).json({ error: 'address and message required' });
+    const results = await callAllServers('warn', 'POST', { walletAddress: address, socketId, message });
+    await logAction('warn', address || socketId, message);
     return res.json({ ok: true, results });
   }
 

@@ -399,8 +399,10 @@ async function loadLive() {
         html += `<div class="empty-lobby">— Empty —</div>`;
       } else {
         for (const p of players) {
-          const addr  = p.walletAddress || p.socketId || '???';
-          const name  = p.playerName || 'ANON';
+          const sid   = p.socketId || '';
+          const waddr = p.walletAddress || '';
+          const addr  = waddr || sid || '???';
+          const name  = p.playerName || (sid ? sid.slice(0,8) : 'ANON');
           const short = addr.length > 12 ? addr.slice(0,6)+'…'+addr.slice(-4) : addr;
           html += `<div class="player-row">
             <div class="player-info">
@@ -408,9 +410,10 @@ async function loadLive() {
               <div class="player-addr addr-short" title="${esc(addr)}">${esc(short)}</div>
             </div>
             <div class="player-actions">
-              <button class="btn btn-xs btn-r"  onclick="quickKick('${esc(addr)}','${esc(name)}')">KICK</button>
-              <button class="btn btn-xs btn-y"  onclick="quickWarn('${esc(addr)}','${esc(name)}')">WARN</button>
-              <button class="btn btn-xs btn-pk" onclick="lookupPlayer('${esc(addr)}')">BAN →</button>
+              <button class="btn btn-xs btn-r"  onclick="quickKick('${esc(waddr)}','${esc(name)}','${esc(sid)}')">KICK</button>
+              <button class="btn btn-xs btn-y"  onclick="quickWarn('${esc(waddr)}','${esc(name)}','${esc(sid)}')">WARN</button>
+              <button class="btn btn-xs btn-pk" onclick="quickVoiceBan('${esc(waddr||sid)}','${esc(name)}')">VBAN</button>
+              <button class="btn btn-xs btn-c"  onclick="lookupPlayer('${esc(addr)}')">MORE</button>
             </div>
           </div>`;
         }
@@ -432,20 +435,38 @@ function confirmEndGame(lobbyId) {
   });
 }
 
-function quickKick(addr, name) {
-  openModal('Kick Player', `Kick ${name} (${addr.slice(0,8)}…) from their current game?`, 'KICK', async () => {
-    try { await api({ action: 'kick', address: addr }); toast('Kicked: ' + name, 'var(--r)'); loadLive(); }
-    catch (e) { toast('Error: ' + e.message, 'var(--r)'); }
+function quickKick(walletAddr, name, socketId) {
+  openModal('Kick Player', `Kick ${name} from their current game?`, 'KICK', async () => {
+    try {
+      const d = await api({ action: 'kick', address: walletAddr || socketId, socketId, reason: '' });
+      const kicked = (d.results || []).reduce((s, r) => s + (r.kicked || 0), 0);
+      if (kicked > 0) { toast('⚡ Kicked: ' + name, 'var(--r)'); loadLive(); }
+      else toast('⚠ Player not found in active game', 'var(--y)');
+    } catch (e) { toast('Error: ' + e.message, 'var(--r)'); }
   });
 }
 
-function quickWarn(addr, name) {
+function quickWarn(walletAddr, name, socketId) {
   openModal('Send Warning', `Send a warning message to ${name}:`, 'SEND', async () => {
     const msg = document.getElementById('warn-msg-input')?.value || '';
     if (!msg.trim()) { toast('Enter a message', 'var(--y)'); return; }
-    try { await api({ action: 'warn', address: addr, message: msg }); toast('Warning sent to ' + name, 'var(--y)'); }
-    catch (e) { toast('Error: ' + e.message, 'var(--r)'); }
+    try {
+      const d = await api({ action: 'warn', address: walletAddr || socketId, socketId, message: msg });
+      const sent = (d.results || []).reduce((s, r) => s + (r.sent || 0), 0);
+      toast(sent > 0 ? '⚠ Warning sent to ' + name : '⚠ Player not found in active game', sent > 0 ? 'var(--y)' : 'var(--muted)');
+    } catch (e) { toast('Error: ' + e.message, 'var(--r)'); }
   }, `<input id="warn-msg-input" class="warn-input" type="text" placeholder="Warning message…" maxlength="120">`);
+}
+
+function quickVoiceBan(address, name) {
+  if (!address || address === '???') { toast('No address — use PLAYER tab to search', 'var(--y)'); return; }
+  openModal('Voice Ban', `Voice ban ${name}? Pick duration:`, 'APPLY VOICE BAN', async () => {
+    try {
+      await api({ action: 'voiceban', address, duration: _voiceDur });
+      toast('🔇 Voice banned: ' + name + ' (' + _voiceDur + ')', 'var(--pk)', 6000);
+    } catch (e) { toast('Error: ' + e.message, 'var(--r)'); }
+  }, `<div class="dur-row" id="qvb-dur-row" style="margin-top:10px;"></div>`);
+  setTimeout(() => buildDurRow('qvb-dur-row', 'voiceDur'), 30);
 }
 
 async function sendBroadcast() {
