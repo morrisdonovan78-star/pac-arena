@@ -17,7 +17,7 @@ async function readStats(address) {
   // Try new hash key first
   const h = await kvHgetall('ph:' + address);
   if (h && Object.keys(h).length > 0) {
-    return {
+    const stats = {
       name:    h.name   || '',
       earned:  parseInt(h.earned)  || 0,
       wagered: parseInt(h.wagered) || 0,
@@ -26,6 +26,21 @@ async function readStats(address) {
       wins:    parseInt(h.wins)    || 0,
       losses:  parseInt(h.losses)  || 0,
     };
+    // Hash exists but may be missing name if player played after hash migration but before
+    // explicitly setting a name. Check old JSON blob for the name and migrate it.
+    if (!stats.name) {
+      try {
+        const raw = await kvGet('plb:' + address);
+        if (raw) {
+          const old = JSON.parse(raw);
+          if (old.name) {
+            stats.name = old.name;
+            await kvHset('ph:' + address, 'name', old.name);
+          }
+        }
+      } catch(_) {}
+    }
+    return stats;
   }
 
   // Fall back to old JSON blob (plb: key) and migrate into hash

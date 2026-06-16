@@ -1297,6 +1297,12 @@ async function checkSession(){
     ST.email=s.email; ST.address=s.address; _jwt=s.token||'';
     ST.conn=makeConnection();
     await fetchPrice(); await refreshBal();
+    const _nkcs='pa_name_'+s.address;
+    if(!localStorage.getItem(_nkcs)){
+      fetch('/api/leaderboard?address='+encodeURIComponent(s.address)).then(r=>r.json()).then(d=>{
+        if(d&&d.player&&d.player.name){ localStorage.setItem(_nkcs,d.player.name); updateUI(); }
+      }).catch(()=>{});
+    }
     document.getElementById('home-off').style.display='none';
     document.getElementById('home-on').style.display='block';
     const rsel=document.getElementById('region-sel'); if(rsel) rsel.value=REGION;
@@ -1797,7 +1803,7 @@ async function joinLobby(usd){
     // cannot enter presence on the paid channel and game entry is blocked.
     lg('mm-log','Recording wager…','lhi');
     const roomId=usd===1?'paid-lobby-1':'paid-lobby-25';
-    const _pName=ST.email?ST.email.split('@')[0].slice(0,16).toUpperCase():'';
+    const _pName=localStorage.getItem('pa_name_'+ST.address)||'';
     const joinResult=await recordWager(ST.address, lamps, sig, roomId, _pName);
     const gameToken=joinResult.gameToken||null;
     ST.entryToken=gameToken;
@@ -2026,11 +2032,11 @@ let _lastDrawTs=0; // used by draw() for frame-delta interpolation
 let _lastSbSig='';  // scoreboard change-detection — skip DOM rebuild when nothing changed
 let _cachedMyName='YOU'; // cached once — avoids string ops inside 60fps draw loop
 
-function _nameKey(){ return 'pa_name_'+(ST.address||ST.email||'anon'); }
+function _nameKey(){ return 'pa_name_'+ST.address; }
 function getMyName(){
+  if(!ST.address) return 'YOU';
   const saved=localStorage.getItem(_nameKey());
   if(saved&&saved.trim()) return saved.trim().slice(0,14).toUpperCase();
-  if(ST.email) return ST.email.split('@')[0].slice(0,12).toUpperCase();
   return 'YOU';
 }
 async function saveDisplayName(){
@@ -2494,14 +2500,14 @@ async function doRejoin(){
 
     if(!G||G.over){
       _rjStatus('Game ended during payment — your SOL was deposited safely.<br>It will be credited to your next game.','#FF8C00');
-      const _rjPName=ST.email?ST.email.split('@')[0].slice(0,16).toUpperCase():'';
+      const _rjPName=localStorage.getItem('pa_name_'+ST.address)||'';
       try{ await recordWager(ST.address,lamps,sig,pkRoomId,_rjPName); _rjPendingTxSig=null; }catch(_){}
       payBtn.disabled=false; payBtn.textContent='💰 TRY AGAIN'; giveBtn.disabled=false;
       return;
     }
 
     _rjStatus('Recording wager on server…');
-    const _rjPName=ST.email?ST.email.split('@')[0].slice(0,16).toUpperCase():'';
+    const _rjPName=localStorage.getItem('pa_name_'+ST.address)||'';
     let wagerRecorded=false;
     try {
       const rjResult=await recordWager(ST.address, lamps, sig, pkRoomId, _rjPName);
