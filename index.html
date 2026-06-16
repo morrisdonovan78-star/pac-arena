@@ -1772,6 +1772,9 @@ async function joinLobby(usd){
   // If a previous join was abandoned (B-press during connect), _sio is null but flag may still be set
   if(_joiningLobby && !_sio) _joiningLobby=false;
   if(_joiningLobby){ return; }
+  // Create AudioContext NOW while we're inside a user gesture — join/cashout sounds need it
+  // before launchGame() is ever called (e.g. join ping fires during matchmaking)
+  startPacManMusic();
   // Kill any stale rafDraw loop from a previous game so _alreadyLive=false in the init handler
   if(rafHandle){ cancelAnimationFrame(rafHandle); rafHandle=null; }
   _joiningLobby=true;
