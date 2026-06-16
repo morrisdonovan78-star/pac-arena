@@ -2,7 +2,6 @@
   "regions": ["iad1"],
   "functions": {
     "api/app.js":        { "regions": ["iad1"], "maxDuration": 5  },
-    "api/version.js":    { "regions": ["iad1"], "maxDuration": 5  },
     "api/rpc.js":        { "regions": ["iad1"], "maxDuration": 15 },
     "api/balance.js":    { "regions": ["iad1"], "maxDuration": 10 },
     "api/settle.js":     { "regions": ["iad1"], "maxDuration": 60 },
