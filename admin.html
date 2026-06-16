@@ -215,7 +215,7 @@ async function doLogin() {
   btn.disabled = true; btn.textContent = 'CHECKING…';
   err.textContent = '';
   try {
-    const r = await fetch('/api/admin-auth', {
+    const r = await fetch('/api/admin?do=auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password: pw }),
@@ -271,7 +271,7 @@ function startSessionTimer() {
 
 // ── API helper ────────────────────────────────────────────────────────────────
 async function api(body) {
-  const r = await fetch('/api/admin-action', {
+  const r = await fetch('/api/admin', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-admin-token': _token },
     body: JSON.stringify(body),

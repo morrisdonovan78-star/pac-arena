@@ -36,6 +36,13 @@ const OG_SVG = `<svg width="1200" height="630" xmlns="http://www.w3.org/2000/svg
 module.exports = function handler(req, res) {
   const reqPath = (req.url || '/').split('?')[0];
 
+  // ── Version endpoint (absorbed from api/version.js to stay within 12-fn limit)
+  if (reqPath === '/api/version') {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    return res.status(200).json({ v: process.env.VERCEL_DEPLOYMENT_ID || process.env.VERCEL_GIT_COMMIT_SHA || 'dev' });
+  }
+
   // ── Admin panel ───────────────────────────────────────────────────────────────
   if (reqPath === '/admin' || reqPath === '/admin/') {
     try {
