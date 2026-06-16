@@ -1,5 +1,6 @@
 // api/ably-token.js — Issues short-lived Ably tokens to clients.
 // ABLY_KEY env var must be set in Vercel: Settings → Environment Variables
+const { kvGet } = require('../lib/kv');
 
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -28,6 +29,22 @@ module.exports = async function handler(req, res) {
   const clientId = (req.query && req.query.clientId)
     || (req.body  && req.body.clientId)
     || undefined;
+
+  // Voice ban check — if wallet is voice-banned, refuse token
+  if (clientId) {
+    try {
+      const raw = await kvGet('voiceban:' + clientId);
+      if (raw) {
+        const ban = JSON.parse(raw);
+        const active = ban.type === 'perm' || (ban.until > 0 && Date.now() < ban.until);
+        if (active) {
+          const until = ban.type === 'perm' ? 'permanently' : ('until ' + new Date(ban.until).toUTCString());
+          console.log('[ably-token] Voice-banned wallet attempted token:', clientId);
+          return res.status(403).json({ error: 'Voice chat banned ' + until + (ban.reason ? ': ' + ban.reason : '') });
+        }
+      }
+    } catch (_) {}
+  }
 
   // keyName + timestamp + nonce + capability all required by Ably REST API
   const tokenParams = {

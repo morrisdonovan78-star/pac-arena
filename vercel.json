@@ -12,7 +12,10 @@
     "api/ably-token.js": { "regions": ["iad1"], "maxDuration": 5  },
     "api/price.js":      { "regions": ["iad1"], "maxDuration": 10 },
     "api/privy.js":      { "regions": ["iad1"], "maxDuration": 10 },
-    "api/wallet.js":     { "regions": ["iad1"], "maxDuration": 15 }
+    "api/wallet.js":       { "regions": ["iad1"], "maxDuration": 15 },
+    "api/admin-auth.js":   { "regions": ["iad1"], "maxDuration": 10 },
+    "api/admin-action.js": { "regions": ["iad1"], "maxDuration": 15 },
+    "api/check-ban.js":    { "regions": ["iad1"], "maxDuration": 5  }
   },
   "redirects": [],
   "rewrites": [

@@ -165,6 +165,19 @@ module.exports = async function handler(req, res) {
       return res.status(403).json({ error: 'Invalid wallet signature' });
     }
 
+    // Game ban check — banned players cannot enter any lobby
+    try {
+      const banRaw = await kvGet('ban:' + walletAddress);
+      if (banRaw) {
+        const ban = JSON.parse(banRaw);
+        const active = ban.type === 'perm' || (ban.until > 0 && Date.now() < ban.until);
+        if (active) {
+          const until = ban.type === 'perm' ? 'permanently' : ('until ' + new Date(ban.until).toUTCString());
+          return res.status(403).json({ error: 'Your account is banned from PAC ARENA ' + until + (ban.reason ? '. Reason: ' + ban.reason : '') });
+        }
+      }
+    } catch (_) {} // Never block a legitimate player due to a KV read error
+
     // Replay guard — reject re-use of a txSig that was already registered.
     // After cashout the KV wager entry is deleted, but an attacker could re-submit
     // the same old txSig to recreate it and cashout again from other players' funds.

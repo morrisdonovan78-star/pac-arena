@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PAC ARENA — MOD PANEL</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:#06060f;color:#e0e0f0;font-family:monospace;font-size:13px;min-height:100vh;overflow-x:hidden;}
+:root{--g:#39FF14;--y:#FFD700;--r:#FF4444;--c:#00FFFF;--pk:#FF69B4;--panel:#0d0d1c;--border:rgba(255,255,255,.1);--muted:rgba(255,255,255,.45);}
+
+/* ── Login ────────────────────────────────────────────────────────── */
+#login{display:flex;align-items:center;justify-content:center;min-height:100vh;background:radial-gradient(ellipse at center,#0e0e22 0%,#06060f 70%);}
+.login-card{background:var(--panel);border:1px solid rgba(255,215,0,.3);border-radius:16px;padding:2.5rem 2rem;width:340px;text-align:center;box-shadow:0 0 60px rgba(255,215,0,.08);}
+.login-logo{font-family:'Press Start 2P',monospace;font-size:11px;color:var(--y);letter-spacing:2px;margin-bottom:.4rem;}
+.login-sub{font-size:8px;font-family:'Press Start 2P',monospace;color:var(--c);letter-spacing:3px;margin-bottom:2rem;}
+.login-card input{width:100%;background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-family:monospace;font-size:14px;color:#fff;outline:none;margin-bottom:1rem;letter-spacing:2px;}
+.login-card input:focus{border-color:rgba(255,215,0,.5);box-shadow:0 0 12px rgba(255,215,0,.15);}
+.login-err{color:var(--r);font-size:11px;min-height:20px;margin-top:.5rem;}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;font-family:'Press Start 2P',monospace;font-size:8px;padding:12px 20px;border:2px solid;border-radius:8px;cursor:pointer;background:transparent;transition:all .15s;letter-spacing:1px;white-space:nowrap;}
+.btn:disabled{opacity:.4;cursor:not-allowed;}
+.btn-y{color:var(--y);border-color:var(--y);}
+.btn-y:hover:not(:disabled){background:rgba(255,215,0,.12);box-shadow:0 0 16px rgba(255,215,0,.3);}
+.btn-r{color:var(--r);border-color:var(--r);}
+.btn-r:hover:not(:disabled){background:rgba(255,68,68,.12);box-shadow:0 0 16px rgba(255,68,68,.3);}
+.btn-g{color:var(--g);border-color:var(--g);}
+.btn-g:hover:not(:disabled){background:rgba(57,255,20,.1);box-shadow:0 0 16px rgba(57,255,20,.25);}
+.btn-c{color:var(--c);border-color:var(--c);}
+.btn-c:hover:not(:disabled){background:rgba(0,255,255,.08);box-shadow:0 0 16px rgba(0,255,255,.2);}
+.btn-pk{color:var(--pk);border-color:var(--pk);}
+.btn-pk:hover:not(:disabled){background:rgba(255,105,180,.1);}
+.btn-sm{font-size:7px;padding:7px 11px;}
+.btn-xs{font-size:6px;padding:5px 8px;}
+.btn-full{width:100%;}
+
+/* ── Shell ────────────────────────────────────────────────────────── */
+#shell{display:none;height:100vh;overflow:hidden;flex-direction:column;}
+#topbar{background:var(--panel);border-bottom:1px solid var(--border);padding:0 20px;height:52px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.topbar-logo{font-family:'Press Start 2P',monospace;font-size:9px;color:var(--y);}
+.topbar-right{display:flex;align-items:center;gap:14px;}
+#session-timer{font-size:10px;color:var(--muted);}
+#shell-body{display:flex;flex:1;overflow:hidden;}
+#sidebar{width:180px;background:var(--panel);border-right:1px solid var(--border);flex-shrink:0;display:flex;flex-direction:column;padding:16px 0;}
+.nav-item{display:flex;align-items:center;gap:10px;padding:12px 18px;cursor:pointer;font-size:10px;color:var(--muted);border-left:3px solid transparent;transition:all .15s;}
+.nav-item:hover{color:#fff;background:rgba(255,255,255,.03);}
+.nav-item.active{color:var(--y);border-left-color:var(--y);background:rgba(255,215,0,.05);}
+.nav-icon{font-size:14px;width:18px;text-align:center;}
+#content{flex:1;overflow-y:auto;padding:22px;}
+
+/* ── Cards ────────────────────────────────────────────────────────── */
+.card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin-bottom:14px;}
+.card-title{font-family:'Press Start 2P',monospace;font-size:8px;color:var(--y);letter-spacing:1px;margin-bottom:14px;display:flex;align-items:center;gap:8px;}
+.section-title{font-family:'Press Start 2P',monospace;font-size:9px;color:var(--c);letter-spacing:1px;margin-bottom:12px;}
+
+/* ── Inputs ───────────────────────────────────────────────────────── */
+input[type=text],input[type=password],textarea,select{background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:7px;padding:9px 12px;font-family:monospace;font-size:12px;color:#e0e0f0;outline:none;width:100%;}
+input[type=text]:focus,input[type=password]:focus,select:focus{border-color:rgba(255,215,0,.4);}
+select option{background:#0d0d1c;}
+label{font-size:10px;color:var(--muted);display:block;margin-bottom:5px;}
+
+/* ── Lobby cards (live tab) ───────────────────────────────────────── */
+.lobby-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;}
+.lobby-card{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;padding:14px;}
+.lobby-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
+.lobby-name{font-family:'Press Start 2P',monospace;font-size:7px;color:var(--y);}
+.lobby-count{font-size:10px;color:var(--muted);}
+.player-row{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.05);gap:8px;}
+.player-row:last-child{border-bottom:none;}
+.player-info{flex:1;min-width:0;}
+.player-name{font-size:11px;color:#fff;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.player-addr{font-size:10px;color:var(--muted);font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.player-actions{display:flex;gap:5px;flex-shrink:0;}
+.empty-lobby{text-align:center;color:var(--muted);font-size:10px;padding:14px 0;}
+.offline-badge{display:inline-block;background:rgba(255,68,68,.15);border:1px solid rgba(255,68,68,.3);border-radius:5px;padding:2px 8px;font-size:10px;color:var(--r);}
+.online-badge{display:inline-block;background:rgba(57,255,20,.1);border:1px solid rgba(57,255,20,.3);border-radius:5px;padding:2px 8px;font-size:10px;color:var(--g);}
+
+/* ── Player profile ───────────────────────────────────────────────── */
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;margin-bottom:14px;}
+.stat-box{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:8px;padding:10px 12px;text-align:center;}
+.stat-val{font-family:'Press Start 2P',monospace;font-size:11px;color:var(--y);margin-bottom:4px;}
+.stat-lbl{font-size:9px;color:var(--muted);}
+.ban-status{border-radius:8px;padding:10px 14px;font-size:11px;margin-bottom:10px;}
+.ban-status.clean{background:rgba(57,255,20,.07);border:1px solid rgba(57,255,20,.25);color:var(--g);}
+.ban-status.banned{background:rgba(255,68,68,.1);border:1px solid rgba(255,68,68,.3);color:var(--r);}
+
+/* ── Duration picker ──────────────────────────────────────────────── */
+.dur-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;}
+.dur-btn{font-family:'Press Start 2P',monospace;font-size:6px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;color:var(--muted);transition:all .12s;}
+.dur-btn:hover{border-color:var(--y);color:var(--y);}
+.dur-btn.sel{background:rgba(255,215,0,.18);border-color:var(--y);color:var(--y);}
+.dur-btn.perm-sel{background:rgba(255,68,68,.18);border-color:var(--r);color:var(--r);}
+
+/* ── Bans list ────────────────────────────────────────────────────── */
+.ban-row{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:rgba(255,68,68,.05);border:1px solid rgba(255,68,68,.15);border-radius:8px;margin-bottom:8px;gap:10px;}
+.ban-row .ban-addr{font-family:monospace;font-size:11px;color:#fff;}
+.ban-row .ban-exp{font-size:10px;color:var(--muted);}
+.ban-row .ban-reason{font-size:10px;color:rgba(255,100,100,.8);margin-top:2px;}
+
+/* ── Log ──────────────────────────────────────────────────────────── */
+.log-row{display:flex;align-items:flex-start;gap:12px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:10px;}
+.log-ts{color:var(--muted);white-space:nowrap;flex-shrink:0;}
+.log-action{font-family:'Press Start 2P',monospace;font-size:7px;padding:2px 7px;border-radius:4px;flex-shrink:0;}
+.log-target{color:#fff;word-break:break-all;}
+.log-detail{color:var(--muted);word-break:break-all;}
+.la-kick{background:rgba(255,68,68,.2);color:var(--r);}
+.la-ban{background:rgba(255,68,68,.25);color:var(--r);}
+.la-unban{background:rgba(57,255,20,.15);color:var(--g);}
+.la-warn{background:rgba(255,215,0,.15);color:var(--y);}
+.la-voiceban{background:rgba(255,105,180,.15);color:var(--pk);}
+.la-unvoiceban{background:rgba(57,255,20,.1);color:var(--g);}
+.la-endgame{background:rgba(0,255,255,.12);color:var(--c);}
+.la-default{background:rgba(255,255,255,.08);color:var(--muted);}
+
+/* ── Toast ────────────────────────────────────────────────────────── */
+#toast{position:fixed;bottom:24px;right:24px;z-index:999;display:flex;flex-direction:column;gap:8px;pointer-events:none;}
+.toast-item{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:10px 16px;font-size:11px;max-width:320px;pointer-events:none;animation:fadeIn .2s;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+
+/* ── Modal ────────────────────────────────────────────────────────── */
+#modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:800;align-items:center;justify-content:center;}
+#modal-bg.open{display:flex;}
+.modal{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:24px;width:380px;max-width:95vw;}
+.modal-title{font-family:'Press Start 2P',monospace;font-size:9px;color:var(--y);margin-bottom:16px;}
+.modal-msg{font-size:12px;color:#ccc;margin-bottom:18px;line-height:1.7;}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end;}
+
+/* ── Misc ─────────────────────────────────────────────────────────── */
+.refresh-bar{display:flex;align-items:center;gap:10px;margin-bottom:14px;font-size:10px;color:var(--muted);}
+.dot-live{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--r);box-shadow:0 0 6px var(--r);animation:pulse 1.5s infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.15);border-top-color:var(--y);border-radius:50%;animation:spin .7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+hr{border:none;border-top:1px solid var(--border);margin:16px 0;}
+.addr-short{font-family:monospace;}
+.warn-input{width:100%;margin-top:8px;}
+</style>
+</head>
+<body>
+
+<!-- ═══ LOGIN ══════════════════════════════════════════════════════════════ -->
+<div id="login">
+  <div class="login-card">
+    <div class="login-logo">PAC ARENA</div>
+    <div class="login-sub">MOD PANEL</div>
+    <input type="password" id="pw" placeholder="Password…" maxlength="128" onkeydown="if(event.key==='Enter')doLogin()">
+    <button class="btn btn-y btn-full" onclick="doLogin()" id="login-btn">ENTER PANEL</button>
+    <div class="login-err" id="login-err"></div>
+  </div>
+</div>
+
+<!-- ═══ SHELL ═══════════════════════════════════════════════════════════════ -->
+<div id="shell">
+  <div id="topbar">
+    <div class="topbar-logo">🎮 PAC ARENA — MOD PANEL</div>
+    <div class="topbar-right">
+      <span id="session-timer"></span>
+      <button class="btn btn-r btn-sm" onclick="doLogout()">LOG OUT</button>
+    </div>
+  </div>
+  <div id="shell-body">
+    <div id="sidebar">
+      <div class="nav-item active" onclick="openTab('live')"   id="nav-live">  <span class="nav-icon">🔴</span>LIVE</div>
+      <div class="nav-item"        onclick="openTab('player')" id="nav-player"><span class="nav-icon">🔍</span>PLAYER</div>
+      <div class="nav-item"        onclick="openTab('bans')"   id="nav-bans">  <span class="nav-icon">🚫</span>GAME BANS</div>
+      <div class="nav-item"        onclick="openTab('voice')"  id="nav-voice"> <span class="nav-icon">🔇</span>VOICE BANS</div>
+      <div class="nav-item"        onclick="openTab('log')"    id="nav-log">   <span class="nav-icon">📋</span>MOD LOG</div>
+    </div>
+    <div id="content"></div>
+  </div>
+</div>
+
+<!-- ═══ MODAL ══════════════════════════════════════════════════════════════ -->
+<div id="modal-bg">
+  <div class="modal">
+    <div class="modal-title" id="modal-title">Confirm</div>
+    <div class="modal-msg"   id="modal-msg"></div>
+    <div id="modal-extra"></div>
+    <div class="modal-actions" style="margin-top:16px;">
+      <button class="btn btn-sm" style="color:var(--muted);border-color:var(--border);" onclick="closeModal()">CANCEL</button>
+      <button class="btn btn-sm btn-r" id="modal-confirm-btn" onclick="modalConfirm()">CONFIRM</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ TOAST ══════════════════════════════════════════════════════════════ -->
+<div id="toast"></div>
+
+<script>
+'use strict';
+// ── State ─────────────────────────────────────────────────────────────────────
+let _token   = sessionStorage.getItem('adm_tok') || '';
+let _tokenExp= parseInt(sessionStorage.getItem('adm_exp')) || 0;
+let _tab     = 'live';
+let _liveTimer = null;
+let _liveCountdown = 0;
+let _modalCb = null;
+let _curPlayer = null;
+let _gameDur   = '24h';
+let _voiceDur  = '24h';
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+(function init() {
+  if (_token && _tokenExp > Date.now() / 1000) {
+    showShell();
+  }
+})();
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+async function doLogin() {
+  const pw = document.getElementById('pw').value;
+  if (!pw) return;
+  const btn = document.getElementById('login-btn');
+  const err = document.getElementById('login-err');
+  btn.disabled = true; btn.textContent = 'CHECKING…';
+  err.textContent = '';
+  try {
+    const r = await fetch('/api/admin-auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw }),
+    });
+    const d = await r.json();
+    if (!r.ok || !d.token) {
+      err.textContent = d.error || 'Login failed';
+      btn.disabled = false; btn.textContent = 'ENTER PANEL';
+      return;
+    }
+    _token    = d.token;
+    _tokenExp = Math.floor(Date.now() / 1000) + (d.ttl || 28800);
+    sessionStorage.setItem('adm_tok', _token);
+    sessionStorage.setItem('adm_exp', String(_tokenExp));
+    showShell();
+  } catch (e) {
+    err.textContent = 'Network error: ' + e.message;
+    btn.disabled = false; btn.textContent = 'ENTER PANEL';
+  }
+}
+
+function doLogout() {
+  _token = ''; _tokenExp = 0;
+  sessionStorage.removeItem('adm_tok');
+  sessionStorage.removeItem('adm_exp');
+  clearInterval(_liveTimer);
+  document.getElementById('shell').style.display = 'none';
+  document.getElementById('login').style.display = 'flex';
+  document.getElementById('pw').value = '';
+  document.getElementById('login-err').textContent = '';
+}
+
+function showShell() {
+  document.getElementById('login').style.display  = 'none';
+  document.getElementById('shell').style.display  = 'flex';
+  startSessionTimer();
+  openTab('live');
+}
+
+// ── Session timer ─────────────────────────────────────────────────────────────
+function startSessionTimer() {
+  function tick() {
+    const left = _tokenExp - Math.floor(Date.now() / 1000);
+    if (left <= 0) { doLogout(); return; }
+    const h = Math.floor(left / 3600);
+    const m = Math.floor((left % 3600) / 60);
+    document.getElementById('session-timer').textContent =
+      'Session: ' + (h > 0 ? h + 'h ' : '') + m + 'm remaining';
+  }
+  tick();
+  setInterval(tick, 30000);
+}
+
+// ── API helper ────────────────────────────────────────────────────────────────
+async function api(body) {
+  const r = await fetch('/api/admin-action', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-admin-token': _token },
+    body: JSON.stringify(body),
+  });
+  const d = await r.json();
+  if (r.status === 403) { doLogout(); throw new Error('Session expired'); }
+  if (!r.ok) throw new Error(d.error || 'Server error');
+  return d;
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function toast(msg, col, ttl) {
+  const el = document.createElement('div');
+  el.className = 'toast-item';
+  el.style.borderColor = col || 'rgba(255,255,255,.2)';
+  el.textContent = msg;
+  document.getElementById('toast').appendChild(el);
+  setTimeout(() => el.remove(), ttl || 4000);
+}
+
+// ── Modal ─────────────────────────────────────────────────────────────────────
+function openModal(title, msg, confirmLabel, cb, extra) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-msg').textContent   = msg;
+  document.getElementById('modal-extra').innerHTML   = extra || '';
+  const btn = document.getElementById('modal-confirm-btn');
+  btn.textContent = confirmLabel || 'CONFIRM';
+  btn.className   = 'btn btn-sm btn-r';
+  _modalCb = cb;
+  document.getElementById('modal-bg').classList.add('open');
+}
+function closeModal() { document.getElementById('modal-bg').classList.remove('open'); _modalCb = null; }
+function modalConfirm() { closeModal(); if (_modalCb) _modalCb(); }
+
+// ── Nav ───────────────────────────────────────────────────────────────────────
+const TABS = ['live','player','bans','voice','log'];
+function openTab(t) {
+  _tab = t;
+  TABS.forEach(id => {
+    document.getElementById('nav-' + id).classList.toggle('active', id === t);
+  });
+  clearInterval(_liveTimer);
+  const renders = { live: renderLive, player: renderPlayer, bans: renderBans, voice: renderVoice, log: renderLog };
+  if (renders[t]) renders[t]();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// LIVE TAB
+// ══════════════════════════════════════════════════════════════════════════════
+function renderLive() {
+  const c = document.getElementById('content');
+  c.innerHTML = `
+    <div class="section-title">🔴 LIVE GAME STATUS</div>
+    <div class="refresh-bar">
+      <span class="dot-live"></span>
+      Auto-refresh: <span id="live-cd">10</span>s &nbsp;
+      <button class="btn btn-sm btn-y" onclick="loadLive()">↻ REFRESH NOW</button>
+    </div>
+    <div id="live-body"><div style="text-align:center;padding:40px;color:var(--muted);">
+      <div class="spinner" style="margin:0 auto 12px;"></div>Loading…</div></div>`;
+  loadLive();
+  _liveCountdown = 10;
+  _liveTimer = setInterval(() => {
+    _liveCountdown--;
+    const el = document.getElementById('live-cd');
+    if (el) el.textContent = _liveCountdown;
+    if (_liveCountdown <= 0) { _liveCountdown = 10; loadLive(); }
+  }, 1000);
+}
+
+async function loadLive() {
+  _liveCountdown = 10;
+  const el = document.getElementById('live-cd');
+  if (el) el.textContent = '…';
+  let data;
+  try { data = await api({ action: 'status' }); }
+  catch (e) { const b=document.getElementById('live-body'); if(b) b.innerHTML=`<div style="color:var(--r);padding:20px;">Error: ${esc(e.message)}</div>`; return; }
+
+  const body = document.getElementById('live-body');
+  if (!body) return;
+
+  const servers = data.servers || [];
+  if (!servers.length) { body.innerHTML = '<div style="color:var(--muted);padding:20px;">No server data available.</div>'; return; }
+
+  let html = '';
+  for (const srv of servers) {
+    const label = srv.server || 'Server';
+    if (srv.offline || srv.error) {
+      html += `<div class="card"><div class="card-title"><span class="offline-badge">OFFLINE</span> ${esc(label)}</div><div style="color:var(--r);font-size:11px;">${esc(srv.error||'Unreachable')}</div></div>`;
+      continue;
+    }
+    const rooms = srv.rooms || {};
+    const LOBBY_LABELS = {
+      'free-lobby':'FREE LOBBY','paid-lobby-1':'$1 LOBBY','paid-lobby-5':'$5 LOBBY','paid-lobby-25':'$25 LOBBY'
+    };
+    html += `<div class="card"><div class="card-title"><span class="online-badge">ONLINE</span> &nbsp;${esc(label)}</div><div class="lobby-grid">`;
+    const lobbyIds = Object.keys(LOBBY_LABELS);
+    for (const lid of lobbyIds) {
+      const players = rooms[lid] || [];
+      html += `<div class="lobby-card">
+        <div class="lobby-card-header">
+          <div class="lobby-name">${LOBBY_LABELS[lid]}</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div class="lobby-count">${players.length} player${players.length===1?'':'s'}</div>
+            ${players.length>0?`<button class="btn btn-xs btn-c" onclick="confirmEndGame('${lid}')">⏹ END</button>`:''}
+          </div>
+        </div>`;
+      if (!players.length) {
+        html += `<div class="empty-lobby">— Empty —</div>`;
+      } else {
+        for (const p of players) {
+          const addr  = p.walletAddress || p.socketId || '???';
+          const name  = p.playerName || 'ANON';
+          const short = addr.length > 12 ? addr.slice(0,6)+'…'+addr.slice(-4) : addr;
+          html += `<div class="player-row">
+            <div class="player-info">
+              <div class="player-name">${esc(name)}</div>
+              <div class="player-addr addr-short" title="${esc(addr)}">${esc(short)}</div>
+            </div>
+            <div class="player-actions">
+              <button class="btn btn-xs btn-r"  onclick="quickKick('${esc(addr)}','${esc(name)}')">KICK</button>
+              <button class="btn btn-xs btn-y"  onclick="quickWarn('${esc(addr)}','${esc(name)}')">WARN</button>
+              <button class="btn btn-xs btn-pk" onclick="lookupPlayer('${esc(addr)}')">BAN →</button>
+            </div>
+          </div>`;
+        }
+      }
+      html += `</div>`;
+    }
+    html += `</div></div>`;
+  }
+  body.innerHTML = html || '<div style="color:var(--muted);padding:20px;">No rooms found.</div>';
+}
+
+function confirmEndGame(lobbyId) {
+  openModal('Force-End Game', `Force-end the "${lobbyId}" match? All players will be returned to lobby.`, 'END GAME', async () => {
+    try {
+      await api({ action: 'endgame', lobbyId });
+      toast('Game ended: ' + lobbyId, 'var(--c)');
+      loadLive();
+    } catch (e) { toast('Error: ' + e.message, 'var(--r)'); }
+  });
+}
+
+function quickKick(addr, name) {
+  openModal('Kick Player', `Kick ${name} (${addr.slice(0,8)}…) from their current game?`, 'KICK', async () => {
+    try { await api({ action: 'kick', address: addr }); toast('Kicked: ' + name, 'var(--r)'); loadLive(); }
+    catch (e) { toast('Error: ' + e.message, 'var(--r)'); }
+  });
+}
+
+function quickWarn(addr, name) {
+  openModal('Send Warning', `Send a warning message to ${name}:`, 'SEND', async () => {
+    const msg = document.getElementById('warn-msg-input')?.value || '';
+    if (!msg.trim()) { toast('Enter a message', 'var(--y)'); return; }
+    try { await api({ action: 'warn', address: addr, message: msg }); toast('Warning sent to ' + name, 'var(--y)'); }
+    catch (e) { toast('Error: ' + e.message, 'var(--r)'); }
+  }, `<input id="warn-msg-input" class="warn-input" type="text" placeholder="Warning message…" maxlength="120">`);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PLAYER TAB
+// ══════════════════════════════════════════════════════════════════════════════
+function renderPlayer() {
+  document.getElementById('content').innerHTML = `
+    <div class="section-title">🔍 PLAYER LOOKUP</div>
+    <div class="card">
+      <label>Wallet address or display name</label>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="player-search" placeholder="Wallet address (full) or name…" maxlength="88" onkeydown="if(event.key==='Enter')searchPlayer()">
+        <button class="btn btn-y" onclick="searchPlayer()" style="white-space:nowrap;">SEARCH</button>
+      </div>
+    </div>
+    <div id="player-result"></div>`;
+  if (_curPlayer) renderPlayerCard(_curPlayer.player, _curPlayer.gameBan, _curPlayer.voiceBan, _curPlayer.address);
+}
+
+async function searchPlayer() {
+  const q = (document.getElementById('player-search')?.value || '').trim();
+  if (!q) return;
+  const res = document.getElementById('player-result');
+  res.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);"><div class="spinner" style="margin:0 auto;"></div></div>';
+  try {
+    const d = await api({ action: 'getplayer', address: q });
+    _curPlayer = { ...d, address: q };
+    renderPlayerCard(d.player, d.gameBan, d.voiceBan, q);
+  } catch (e) {
+    res.innerHTML = `<div style="color:var(--r);padding:20px;">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+function lookupPlayer(addr) {
+  openTab('player');
+  setTimeout(() => {
+    const el = document.getElementById('player-search');
+    if (el) { el.value = addr; searchPlayer(); }
+  }, 50);
+}
+
+function renderPlayerCard(p, gameBan, voiceBan, address) {
+  const res = document.getElementById('player-result');
+  if (!res) return;
+  if (!p && !gameBan && !voiceBan) {
+    res.innerHTML = `<div class="card" style="text-align:center;color:var(--muted);padding:30px;">No player data found for this address.</div>`;
+    return;
+  }
+  const name     = p?.name || 'ANON';
+  const games    = parseInt(p?.games)  || 0;
+  const wins     = parseInt(p?.wins)   || 0;
+  const losses   = parseInt(p?.losses) || 0;
+  const kills    = parseInt(p?.kills)  || 0;
+  const earned   = (parseInt(p?.earned)  || 0) / 1e9;
+  const wagered  = (parseInt(p?.wagered) || 0) / 1e9;
+  const kd       = losses > 0 ? (kills / losses).toFixed(1) : kills > 0 ? '∞' : '0.0';
+  const winRate  = games > 0 ? Math.round((wins / games) * 100) : 0;
+  const short    = address.length > 16 ? address.slice(0,8)+'…'+address.slice(-6) : address;
+
+  const gBanHtml = gameBan
+    ? `<div class="ban-status banned">🚫 GAME BANNED — ${gameBan.type === 'perm' ? 'PERMANENT' : 'until ' + new Date(gameBan.until).toLocaleString()}${gameBan.reason ? ' · ' + esc(gameBan.reason) : ''}</div>`
+    : `<div class="ban-status clean">✅ No game ban</div>`;
+  const vBanHtml = voiceBan
+    ? `<div class="ban-status banned">🔇 VOICE BANNED — ${voiceBan.type === 'perm' ? 'PERMANENT' : 'until ' + new Date(voiceBan.until).toLocaleString()}${voiceBan.reason ? ' · ' + esc(voiceBan.reason) : ''}</div>`
+    : `<div class="ban-status clean">✅ No voice ban</div>`;
+
+  res.innerHTML = `
+  <div class="card">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;gap:10px;flex-wrap:wrap;">
+      <div>
+        <div style="font-family:'Press Start 2P',monospace;font-size:13px;color:var(--y);margin-bottom:6px;">${esc(name)}</div>
+        <div style="font-family:monospace;font-size:11px;color:var(--muted);" title="${esc(address)}">${esc(short)}</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-sm btn-r"  onclick="confirmKick('${esc(address)}','${esc(name)}')">⚡ KICK</button>
+        <button class="btn btn-sm btn-y"  onclick="openWarnModal('${esc(address)}','${esc(name)}')">⚠ WARN</button>
+      </div>
+    </div>
+
+    <div class="stat-grid">
+      <div class="stat-box"><div class="stat-val">${games}</div><div class="stat-lbl">GAMES</div></div>
+      <div class="stat-box"><div class="stat-val">${wins}</div><div class="stat-lbl">WINS</div></div>
+      <div class="stat-box"><div class="stat-val">${losses}</div><div class="stat-lbl">LOSSES</div></div>
+      <div class="stat-box"><div class="stat-val">${kills}</div><div class="stat-lbl">KILLS</div></div>
+      <div class="stat-box"><div class="stat-val">${kd}</div><div class="stat-lbl">K/D</div></div>
+      <div class="stat-box"><div class="stat-val">${winRate}%</div><div class="stat-lbl">WIN RATE</div></div>
+      <div class="stat-box"><div class="stat-val" style="font-size:9px;">${earned.toFixed(3)}</div><div class="stat-lbl">SOL EARNED</div></div>
+      <div class="stat-box"><div class="stat-val" style="font-size:9px;">${wagered.toFixed(3)}</div><div class="stat-lbl">SOL WAGERED</div></div>
+    </div>
+
+    ${gBanHtml}
+    ${vBanHtml}
+    <hr>
+
+    <!-- Game ban controls -->
+    <div style="margin-bottom:16px;">
+      <div class="card-title">🚫 GAME BAN</div>
+      <div class="dur-row" id="gdur-row"></div>
+      <label style="margin-top:8px;">Reason (optional)</label>
+      <input type="text" id="gban-reason" placeholder="Reason for ban…" maxlength="120" style="margin-bottom:10px;">
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-r btn-sm" onclick="applyBan('${esc(address)}','${esc(name)}')">APPLY GAME BAN</button>
+        ${gameBan ? `<button class="btn btn-g btn-sm" onclick="confirmUnban('${esc(address)}','${esc(name)}')">REMOVE BAN</button>` : ''}
+      </div>
+    </div>
+    <hr>
+
+    <!-- Voice ban controls -->
+    <div>
+      <div class="card-title">🔇 VOICE BAN</div>
+      <div class="dur-row" id="vdur-row"></div>
+      <label style="margin-top:8px;">Reason (optional)</label>
+      <input type="text" id="vban-reason" placeholder="Reason for voice ban…" maxlength="120" style="margin-bottom:10px;">
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-pk btn-sm" onclick="applyVoiceBan('${esc(address)}','${esc(name)}')">APPLY VOICE BAN</button>
+        ${voiceBan ? `<button class="btn btn-g btn-sm" onclick="confirmUnvoiceBan('${esc(address)}','${esc(name)}')">REMOVE VOICE BAN</button>` : ''}
+      </div>
+    </div>
+  </div>`;
+
+  buildDurRow('gdur-row', 'gameDur');
+  buildDurRow('vdur-row', 'voiceDur');
+}
+
+function buildDurRow(rowId, varName) {
+  const durs = ['1h','3h','6h','24h','7d','30d','perm'];
+  const labels = { '1h':'1 HOUR','3h':'3 HRS','6h':'6 HRS','24h':'24 HRS','7d':'7 DAYS','30d':'30 DAYS','perm':'PERM' };
+  const cur = varName === 'gameDur' ? _gameDur : _voiceDur;
+  const row = document.getElementById(rowId);
+  if (!row) return;
+  row.innerHTML = durs.map(d => {
+    const cls = d === cur ? (d === 'perm' ? 'perm-sel' : 'sel') : '';
+    return `<button class="dur-btn ${cls}" onclick="setDur('${varName}','${d}','${rowId}')">${labels[d]}</button>`;
+  }).join('');
+}
+
+function setDur(varName, val, rowId) {
+  if (varName === 'gameDur')  _gameDur  = val;
+  else                        _voiceDur = val;
+  buildDurRow(rowId, varName);
+}
+
+function confirmKick(address, name) {
+  openModal('Kick Player', `Kick ${name} from their current game? (Does not ban them.)`, 'KICK', async () => {
+    try { await api({ action: 'kick', address }); toast('Kicked: ' + name, 'var(--r)'); }
+    catch (e) { toast('Error: ' + e.message, 'var(--r)'); }
+  });
+}
+
+function openWarnModal(address, name) {
+  openModal('Send Warning', `Send an on-screen warning to ${name}:`, 'SEND WARNING', async () => {
+    const msg = document.getElementById('warn-msg-input')?.value || '';
+    if (!msg.trim()) { toast('Enter a message', 'var(--y)'); return; }
+    try { await api({ action: 'warn', address, message: msg }); toast('Warning sent to ' + name, 'var(--y)'); }
+    catch (e) { toast('Error: ' + e.message, 'var(--r)'); }
+  }, `<input id="warn-msg-input" class="warn-input" type="text" placeholder="Warning message…" maxlength="120">`);
+}
+
+async function applyBan(address, name) {
+  const reason = document.getElementById('gban-reason')?.value || '';
+  const dur = _gameDur;
+  openModal(
+    'Confirm Game Ban',
+    `Ban ${name} for ${dur.toUpperCase()}?${reason ? '\nReason: ' + reason : ''}\nThis will also kick them immediately if online.`,
+    'BAN PLAYER',
+    async () => {
+      try {
+        await api({ action: 'ban', address, duration: dur, reason });
+        toast(`${name} banned (${dur})`, 'var(--r)');
+        _curPlayer = null;
+        searchPlayer();
+      } catch (e) { toast('Error: ' + e.message, 'var(--r)'); }
+    }
+  );
+}
+
+function confirmUnban(address, name) {
+  openModal('Remove Game Ban', `Remove the game ban for ${name}?`, 'UNBAN', async () => {
+    try {
+      await api({ action: 'unban', address });
+      toast('Game ban removed: ' + name, 'var(--g)');
+      searchPlayer();
+    } catch (e) { toast('Error: ' + e.message, 'var(--r)'); }
+  });
+}
+
+async function applyVoiceBan(address, name) {
+  const reason = document.getElementById('vban-reason')?.value || '';
+  const dur = _voiceDur;
+  openModal(
+    'Confirm Voice Ban',
+    `Voice-ban ${name} for ${dur.toUpperCase()}?${reason ? '\nReason: ' + reason : ''}`,
+    'VOICE BAN',
+    async () => {
+      try {
+        await api({ action: 'voiceban', address, duration: dur, reason });
+        toast(`${name} voice-banned (${dur})`, 'var(--pk)');
+        searchPlayer();
+      } catch (e) { toast('Error: ' + e.message, 'var(--r)'); }
+    }
+  );
+}
+
+function confirmUnvoiceBan(address, name) {
+  openModal('Remove Voice Ban', `Remove the voice ban for ${name}?`, 'UNBAN', async () => {
+    try {
+      await api({ action: 'unvoiceban', address });
+      toast('Voice ban removed: ' + name, 'var(--g)');
+      searchPlayer();
+    } catch (e) { toast('Error: ' + e.message, 'var(--r)'); }
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BANS TAB
+// ══════════════════════════════════════════════════════════════════════════════
+function renderBans() {
+  const c = document.getElementById('content');
+  c.innerHTML = `
+    <div class="section-title">🚫 ACTIVE GAME BANS</div>
+    <div id="bans-body"><div class="spinner" style="margin:40px auto;display:block;"></div></div>`;
+  loadBanList('getbans', 'bans-body', 'unban');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// VOICE BANS TAB
+// ══════════════════════════════════════════════════════════════════════════════
+function renderVoice() {
+  const c = document.getElementById('content');
+  c.innerHTML = `
+    <div class="section-title">🔇 ACTIVE VOICE BANS</div>
+    <div id="voice-body"><div class="spinner" style="margin:40px auto;display:block;"></div></div>`;
+  loadBanList('getvoicebans', 'voice-body', 'unvoiceban');
+}
+
+async function loadBanList(action, bodyId, unbanAction) {
+  const body = document.getElementById(bodyId);
+  try {
+    const d = await api({ action });
+    const bans = d.bans || [];
+    if (!bans.length) {
+      body.innerHTML = `<div style="text-align:center;padding:40px;color:var(--muted);">No active bans.</div>`;
+      return;
+    }
+    body.innerHTML = bans.map(b => {
+      const short = b.address.length > 20 ? b.address.slice(0,8)+'…'+b.address.slice(-6) : b.address;
+      const expStr = b.type === 'perm' ? 'PERMANENT' : (b.until ? 'Expires ' + new Date(b.until).toLocaleString() : '');
+      return `<div class="ban-row">
+        <div style="flex:1;min-width:0;">
+          <div class="ban-addr" title="${esc(b.address)}">${esc(short)}</div>
+          <div class="ban-exp">${esc(expStr)}</div>
+          ${b.reason ? `<div class="ban-reason">Reason: ${esc(b.reason)}</div>` : ''}
+        </div>
+        <div style="display:flex;gap:8px;flex-shrink:0;">
+          <button class="btn btn-xs btn-c" onclick="lookupPlayer('${esc(b.address)}')">VIEW</button>
+          <button class="btn btn-xs btn-g" onclick="doUnban('${esc(b.address)}','${esc(unbanAction)}','${esc(bodyId)}','${esc(action)}')">UNBAN</button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    body.innerHTML = `<div style="color:var(--r);padding:20px;">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+function doUnban(address, unbanAction, bodyId, listAction) {
+  openModal('Remove Ban', `Remove ban for ${address.slice(0,10)}…?`, 'REMOVE', async () => {
+    try {
+      await api({ action: unbanAction, address });
+      toast('Ban removed', 'var(--g)');
+      loadBanList(listAction, bodyId, unbanAction);
+    } catch (e) { toast('Error: ' + e.message, 'var(--r)'); }
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// LOG TAB
+// ══════════════════════════════════════════════════════════════════════════════
+function renderLog() {
+  const c = document.getElementById('content');
+  c.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+      <div class="section-title" style="margin:0;">📋 MOD ACTION LOG</div>
+      <button class="btn btn-sm btn-y" onclick="renderLog()">↻ REFRESH</button>
+    </div>
+    <div class="card" id="log-body"><div class="spinner" style="margin:40px auto;display:block;"></div></div>`;
+  loadLog();
+}
+
+const ACTION_CLS = {
+  kick:'la-kick', ban:'la-ban', unban:'la-unban', warn:'la-warn',
+  voiceban:'la-voiceban', unvoiceban:'la-unvoiceban', endgame:'la-endgame',
+};
+function actionCls(a) {
+  for (const [k,v] of Object.entries(ACTION_CLS)) if (a.startsWith(k)) return v;
+  return 'la-default';
+}
+
+async function loadLog() {
+  const body = document.getElementById('log-body');
+  try {
+    const d = await api({ action: 'getlogs' });
+    const logs = d.logs || [];
+    if (!logs.length) { body.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;">No actions logged yet.</div>'; return; }
+    body.innerHTML = logs.map(l => {
+      const ts    = new Date(l.ts).toLocaleString();
+      const short = l.target && l.target.length > 16 ? l.target.slice(0,8)+'…'+l.target.slice(-5) : l.target;
+      return `<div class="log-row">
+        <div class="log-ts">${esc(ts)}</div>
+        <div class="log-action ${actionCls(l.action)}">${esc(l.action)}</div>
+        <div style="flex:1;min-width:0;">
+          <div class="log-target" title="${esc(l.target)}">${esc(short||'—')}</div>
+          ${l.detail ? `<div class="log-detail">${esc(l.detail)}</div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    body.innerHTML = `<div style="color:var(--r);">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+// ── Utils ─────────────────────────────────────────────────────────────────────
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>

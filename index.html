@@ -1694,6 +1694,20 @@ async function pkConnect(roomId, gameToken){
       if(isSpectating){ addToast('🏁 GAME OVER — returning to lobby…','#FF6B6B'); _leaveSpecTimer=setTimeout(leaveSpectate,3000); }
     });
 
+    // ── Admin / moderator events ────────────────────────────────────────────────
+    _sio.on('admin-kick',(d)=>{
+      const why=d&&d.reason?d.reason:'Kicked by moderator';
+      addToast('⛔ '+why,'#FF4444',8000);
+      setTimeout(()=>{ showScreen('scr-home'); },1500);
+    });
+    _sio.on('admin-warn',(d)=>{
+      const msg=d&&d.message?d.message:'Warning from moderator';
+      addToast('⚠ MOD WARNING: '+msg,'#FFD700',12000);
+    });
+    _sio.on('admin-endgame',()=>{
+      addToast('🛑 Game ended by moderator','#FF4444',5000);
+    });
+
     _sio.on('disconnect',(reason)=>{
       if(reason==='io client disconnect') return;
       addToast('Connection lost — reconnecting…','#FFD700');

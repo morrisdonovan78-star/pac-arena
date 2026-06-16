@@ -2,7 +2,8 @@
 const fs   = require('fs');
 const path = require('path');
 
-let _cached = null;
+let _cached      = null;
+let _adminCached = null;
 
 // OG preview image — served at /og so it stays within the 12-function Hobby limit
 const OG_SVG = `<svg width="1200" height="630" xmlns="http://www.w3.org/2000/svg">
@@ -33,8 +34,21 @@ const OG_SVG = `<svg width="1200" height="630" xmlns="http://www.w3.org/2000/svg
 </svg>`;
 
 module.exports = function handler(req, res) {
+  const reqPath = (req.url || '/').split('?')[0];
+
+  // ── Admin panel ───────────────────────────────────────────────────────────────
+  if (reqPath === '/admin' || reqPath === '/admin/') {
+    try {
+      if (!_adminCached) _adminCached = fs.readFileSync(path.resolve('admin.html'), 'utf8');
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      res.setHeader('X-Robots-Tag', 'noindex,nofollow');
+      return res.status(200).send(_adminCached);
+    } catch (e) { return res.status(500).send('Admin panel not found: ' + e.message); }
+  }
+
   // ── OG preview image ─────────────────────────────────────────────────────────
-  const path = (req.url || '/').split('?')[0];
+  const path = reqPath;
   if (path === '/og' || path === '/og-image') {
     res.setHeader('Content-Type', 'image/svg+xml');
     res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
