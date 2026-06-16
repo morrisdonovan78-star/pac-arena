@@ -1480,6 +1480,13 @@ async function pkConnect(roomId, gameToken){
           hat:'none', trail:'none', eyes:'dot', aura:'none'
         }));
         initGame(allPlayers);
+        // Seed spectator count from init payload
+        if(data.spec!==undefined){
+          const el=document.getElementById('spec-count');
+          const box=document.getElementById('spec-count-box');
+          if(el) el.textContent=data.spec;
+          if(box) box.style.display=data.spec>0?'flex':'none';
+        }
         document.getElementById('mm-sub').textContent='Connected!';
         lg('mm-log','Joined with '+allPlayers.length+' player(s)','lok');
         setTimeout(()=>launchGame(),300);
@@ -2108,6 +2115,8 @@ let _wakaPhase=0, _lastWakaTs=0;
 // Core oscillator tone — used by all SFX
 function _tone(freq,durMs,vol,type){
   if(!_audioCtx) return;
+  // Chrome suspends AudioContext until user interaction — resume silently if needed
+  if(_audioCtx.state==='suspended') _audioCtx.resume().catch(()=>{});
   try{
     const o=_audioCtx.createOscillator();
     const g=_audioCtx.createGain();
@@ -2125,6 +2134,7 @@ function startPacManMusic(){
   if(_audioCtx) return;
   try{
     _audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    _audioCtx.resume().catch(()=>{}); // ensure running — Chrome may auto-suspend
     if(_muted) _audioCtx.suspend().catch(()=>{});
   }catch(e){}
 }
