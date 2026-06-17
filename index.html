@@ -1699,7 +1699,9 @@ async function pkConnect(roomId, gameToken){
     _sio.on('admin-kick',(d)=>{
       const why=d&&d.reason?d.reason:'Kicked by moderator';
       addToast('⛔ '+why,'#FF4444',8000);
-      setTimeout(()=>{ showScreen('scr-home'); },1500);
+      ST.wagerSol=0; ST.cashoutLamports=0; // block cashout immediately
+      try{ _sio.io.opts.reconnection=false; _sio.disconnect(); }catch(_){}
+      setTimeout(()=>{ showScreen('scr-home'); },2000);
     });
     _sio.on('admin-warn',(d)=>{
       const msg=d&&d.message?d.message:'Warning from moderator';
