@@ -1472,6 +1472,7 @@ let _myHelloTs=0;
 
 async function pkConnect(roomId, gameToken){
   if(_sio){ try{ _sio.disconnect(); }catch(_){} _sio=null; }
+  _kickedOut=false;
   pkRoomId=roomId;
   myPid=ST.address||('anon-'+Math.random().toString(36).slice(2,8));
   isHost=false;
@@ -1699,11 +1700,11 @@ async function pkConnect(roomId, gameToken){
     // ── Admin / moderator events ────────────────────────────────────────────────
     _sio.on('admin-kick',(d)=>{
       const why=d&&d.reason?d.reason:'Kicked by moderator';
+      _kickedOut=true; ST.wagerSol=0; ST.cashoutLamports=0; _cashoutInProgress=false;
       addToast('⛔ '+why,'#FF4444',8000);
-      ST.wagerSol=0; ST.cashoutLamports=0;
       try{ _sio.io.opts.reconnection=false; _sio.disconnect(); }catch(_){}
       _sio=null;
-      setTimeout(()=>{ go('scr-home'); },2000);
+      go('scr-home');
     });
     _sio.on('admin-warn',(d)=>{
       const msg=d&&d.message?d.message:'Warning from moderator';
@@ -1711,7 +1712,12 @@ async function pkConnect(roomId, gameToken){
     });
     _sio.on('admin-endgame',()=>{
       addToast('🛑 Game ended by moderator','#FF4444',5000);
-      setTimeout(()=>{ go('scr-home'); },2000);
+      if(isSpectating){
+        if(_leaveSpecTimer) clearTimeout(_leaveSpecTimer);
+        _leaveSpecTimer=setTimeout(leaveSpectate,2000);
+      } else {
+        setTimeout(()=>{ go('scr-home'); },2000);
+      }
     });
     _sio.on('admin-broadcast',(d)=>{
       const msg=d&&d.message?d.message:'';
@@ -2096,6 +2102,7 @@ let isSpectating=false;                           // spectate mode flag
 let _spectateKillerPid=null;                      // pid of player who killed us — camera follows them while spectating
 let _hostPid=null;                                // authenticated host clientId — only messages from this id are trusted for host-only events
 let _cashoutInProgress=false;                     // debounce: prevent duplicate cashout requests
+let _kickedOut=false;                             // set on admin-kick; blocks cashout until clean rejoin
 let _leaveSpecTimer=null;                         // tracks setTimeout(leaveSpectate) — cancelled on manual leave to prevent double-disconnect
 let _zoomSliderEl=null;                           // cached zoom slider element — updated each frame
 let _joyDrawFn=null;                              // joystick draw function — called from main game loop
@@ -4570,6 +4577,7 @@ function setMaxCashout(){
 // ── Game cashout overlay (Space key) — 10% fee, no dest needed ──
 // ── Game cashout (Space key) — player leaves game, others keep playing ──
 async function instantCashout(){
+  if(_kickedOut) return;
   if(!ST.address) return;
   if(isSpectating){
     // Distinguish eliminated (rejoin overlay open) vs. already cashed out
@@ -4654,6 +4662,7 @@ async function instantCashout(){
 // openGameCashout / closeGameCashout / doGameCashout removed — SPACE calls instantCashout() directly
 
 async function doCashout(){
+  if(_kickedOut) return;
   const amt=parseFloat(document.getElementById('co-amt').value);
   const dest=(document.getElementById('co-dest').value||'').trim();
   const btn=document.getElementById('co-send-btn');
