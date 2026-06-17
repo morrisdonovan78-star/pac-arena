@@ -1701,7 +1701,9 @@ async function pkConnect(roomId, gameToken){
       const why=d&&d.reason?d.reason:'Kicked by moderator';
       addToast('⛔ '+why,'#FF4444',8000);
       ST.wagerSol=0; ST.cashoutLamports=0;
-      setTimeout(()=>{ showScreen('scr-home'); },2000);
+      try{ _sio.io.opts.reconnection=false; _sio.disconnect(); }catch(_){}
+      _sio=null;
+      setTimeout(()=>{ go('scr-home'); },2000);
     });
     _sio.on('admin-warn',(d)=>{
       const msg=d&&d.message?d.message:'Warning from moderator';
@@ -1709,7 +1711,7 @@ async function pkConnect(roomId, gameToken){
     });
     _sio.on('admin-endgame',()=>{
       addToast('🛑 Game ended by moderator','#FF4444',5000);
-      setTimeout(()=>{ showScreen('scr-home'); },2000);
+      setTimeout(()=>{ go('scr-home'); },2000);
     });
     _sio.on('admin-broadcast',(d)=>{
       const msg=d&&d.message?d.message:'';
@@ -3155,10 +3157,10 @@ function _menuGpRaf(){
                 const _profHint=document.getElementById('lb-profile-gp-hint');
                 if(_profHint) _profHint.style.display=_profOpen?'block':'none';
                 if(rose(0)&&!_profOpen){openLbProfile(_lbFocusIdx);}
-                if(rose(1)){if(_profOpen){closeLbProfile();}else{showScreen('scr-home');}}
+                if(rose(1)){if(_profOpen){closeLbProfile();}else{go('scr-home');}}
                 if(rose(2)&&_profOpen&&_lbProfileAddr){lbCopyAddr(_lbProfileAddr);}
                 if(rose(3)&&!_profOpen){_openLbOsk();}
-                if(rose(8)){if(_profOpen){closeLbProfile();}else{showScreen('scr-home');}}
+                if(rose(8)){if(_profOpen){closeLbProfile();}else{go('scr-home');}}
               }
             }
           } else {
