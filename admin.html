@@ -305,7 +305,7 @@ function openModal(title, msg, confirmLabel, cb, extra) {
   document.getElementById('modal-bg').classList.add('open');
 }
 function closeModal() { document.getElementById('modal-bg').classList.remove('open'); _modalCb = null; }
-function modalConfirm() { closeModal(); if (_modalCb) _modalCb(); }
+function modalConfirm() { const cb = _modalCb; closeModal(); if (cb) cb(); }
 
 // ── Nav ───────────────────────────────────────────────────────────────────────
 const TABS = ['live','player','bans','voice','log'];
