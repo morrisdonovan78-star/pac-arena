@@ -1712,12 +1712,8 @@ async function pkConnect(roomId, gameToken){
     });
     _sio.on('admin-endgame',()=>{
       addToast('🛑 Game ended by moderator','#FF4444',5000);
-      if(isSpectating){
-        if(_leaveSpecTimer) clearTimeout(_leaveSpecTimer);
-        _leaveSpecTimer=setTimeout(leaveSpectate,2000);
-      } else {
-        setTimeout(()=>{ go('scr-home'); },2000);
-      }
+      _kickedOut=true; ST.wagerSol=0; ST.cashoutLamports=0; _cashoutInProgress=false;
+      leaveSpectate();
     });
     _sio.on('admin-broadcast',(d)=>{
       const msg=d&&d.message?d.message:'';
