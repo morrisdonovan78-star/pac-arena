@@ -270,6 +270,23 @@ function startSessionTimer() {
   setInterval(tick, 30000);
 }
 
+// ── Session-expired UI (replaces content area — does NOT hide shell) ──────────
+function showSessionExpiredUI() {
+  closeModal();
+  clearInterval(_liveTimer);
+  _liveTimer = null;
+  const c = document.getElementById('content');
+  if (!c) { doLogout(); return; }
+  c.innerHTML = `
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:40px;text-align:center;">
+      <div style="font-family:'Press Start 2P',monospace;font-size:10px;color:var(--r);margin-bottom:14px;">SESSION EXPIRED</div>
+      <div style="color:var(--muted);font-size:11px;margin-bottom:22px;line-height:1.8;">
+        Your session has expired or is invalid.<br>Click below to log in again.
+      </div>
+      <button class="btn btn-y" onclick="doLogout()">🔐 LOG IN AGAIN</button>
+    </div>`;
+}
+
 // ── API helper ────────────────────────────────────────────────────────────────
 async function api(body) {
   const ctrl = new AbortController();
@@ -282,7 +299,7 @@ async function api(body) {
       signal: ctrl.signal,
     });
     const d = await r.json();
-    if (r.status === 403) { doLogout(); throw new Error('Session expired'); }
+    if (r.status === 403) { showSessionExpiredUI(); throw new Error('Session expired'); }
     if (!r.ok) throw new Error(d.error || 'Server error');
     return d;
   } finally {
