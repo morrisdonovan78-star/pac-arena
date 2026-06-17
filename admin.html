@@ -194,7 +194,7 @@ let _token   = sessionStorage.getItem('adm_tok') || '';
 let _tokenExp= parseInt(sessionStorage.getItem('adm_exp')) || 0;
 let _tab     = 'live';
 let _liveTimer = null;
-let _liveCountdown = 0;
+let _liveLoading = false;
 let _modalCb = null;
 let _curPlayer = null;
 let _gameDur   = '24h';
@@ -343,35 +343,55 @@ function renderLive() {
     </div>
     <div class="refresh-bar">
       <span class="dot-live"></span>
-      Auto-refresh: <span id="live-cd">10</span>s &nbsp;
+      <span style="font-size:10px;color:var(--g);">LIVE — updates every 2s</span> &nbsp;
       <button class="btn btn-sm btn-y" onclick="loadLive()">↻ REFRESH NOW</button>
     </div>
     <div id="live-body"><div style="text-align:center;padding:40px;color:var(--muted);">
       <div class="spinner" style="margin:0 auto 12px;"></div>Loading…</div></div>`;
   loadLive();
-  _liveCountdown = 10;
-  _liveTimer = setInterval(() => {
-    _liveCountdown--;
-    const el = document.getElementById('live-cd');
-    if (el) el.textContent = _liveCountdown;
-    if (_liveCountdown <= 0) { _liveCountdown = 10; loadLive(); }
-  }, 1000);
+  clearInterval(_liveTimer);
+  _liveTimer = setInterval(loadLive, 2000);
 }
 
 async function loadLive() {
-  _liveCountdown = 10;
-  const el = document.getElementById('live-cd');
-  if (el) el.textContent = '…';
+  if (_liveLoading) return;
+  _liveLoading = true;
   let data;
   try { data = await api({ action: 'status' }); }
-  catch (e) { const b=document.getElementById('live-body'); if(b) b.innerHTML=`<div style="color:var(--r);padding:20px;">Error: ${esc(e.message)}</div>`; return; }
+  catch (e) {
+    _liveLoading = false;
+    const b = document.getElementById('live-body');
+    if (b) b.innerHTML = `<div style="color:var(--y);padding:20px;text-align:center;"><div class="spinner" style="margin:0 auto 10px;"></div>Reconnecting…</div>`;
+    return;
+  }
 
   const body = document.getElementById('live-body');
-  if (!body) return;
+  if (!body) { _liveLoading = false; return; }
 
   const servers = data.servers || [];
-  if (!servers.length) { body.innerHTML = '<div style="color:var(--muted);padding:20px;">No server data available.</div>'; return; }
+  if (!servers.length) { body.innerHTML = '<div style="color:var(--muted);padding:20px;">No server data.</div>'; _liveLoading = false; return; }
 
+  function playerRow(p) {
+    const sid   = p.socketId || '';
+    const waddr = p.walletAddress || '';
+    const addr  = waddr || sid || '???';
+    const name  = p.playerName || (sid ? sid.slice(0,8) : 'ANON');
+    const short = addr.length > 12 ? addr.slice(0,6)+'…'+addr.slice(-4) : addr;
+    return `<div class="player-row">
+      <div class="player-info">
+        <div class="player-name">${esc(name)}</div>
+        <div class="player-addr addr-short" title="${esc(addr)}">${esc(short)}</div>
+      </div>
+      <div class="player-actions">
+        <button class="btn btn-xs btn-r"  onclick="quickKick('${esc(waddr)}','${esc(name)}','${esc(sid)}')">KICK</button>
+        <button class="btn btn-xs btn-y"  onclick="quickWarn('${esc(waddr)}','${esc(name)}','${esc(sid)}')">WARN</button>
+        <button class="btn btn-xs btn-pk" onclick="quickVoiceBan('${esc(waddr||sid)}','${esc(name)}')">VBAN</button>
+        <button class="btn btn-xs btn-c"  onclick="lookupPlayer('${esc(addr)}')">MORE</button>
+      </div>
+    </div>`;
+  }
+
+  const LOBBY_LABELS = {'free-lobby':'FREE LOBBY','paid-lobby-1':'$1 LOBBY','paid-lobby-5':'$5 LOBBY','paid-lobby-25':'$25 LOBBY'};
   let html = '';
   for (const srv of servers) {
     const label = srv.server || 'Server';
@@ -379,50 +399,30 @@ async function loadLive() {
       html += `<div class="card"><div class="card-title"><span class="offline-badge">OFFLINE</span> ${esc(label)}</div><div style="color:var(--r);font-size:11px;">${esc(srv.error||'Unreachable')}</div></div>`;
       continue;
     }
-    const rooms = srv.rooms || {};
-    const LOBBY_LABELS = {
-      'free-lobby':'FREE LOBBY','paid-lobby-1':'$1 LOBBY','paid-lobby-5':'$5 LOBBY','paid-lobby-25':'$25 LOBBY'
-    };
+    const rooms  = srv.rooms  || {};
+    const others = srv.others || [];
     html += `<div class="card"><div class="card-title"><span class="online-badge">ONLINE</span> &nbsp;${esc(label)}</div><div class="lobby-grid">`;
-    const lobbyIds = Object.keys(LOBBY_LABELS);
-    for (const lid of lobbyIds) {
+    for (const lid of Object.keys(LOBBY_LABELS)) {
       const players = rooms[lid] || [];
-      html += `<div class="lobby-card">
-        <div class="lobby-card-header">
-          <div class="lobby-name">${LOBBY_LABELS[lid]}</div>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <div class="lobby-count">${players.length} player${players.length===1?'':'s'}</div>
-            ${players.length>0?`<button class="btn btn-xs btn-c" onclick="confirmEndGame('${lid}')">⏹ END</button>`:''}
-          </div>
-        </div>`;
-      if (!players.length) {
-        html += `<div class="empty-lobby">— Empty —</div>`;
-      } else {
-        for (const p of players) {
-          const sid   = p.socketId || '';
-          const waddr = p.walletAddress || '';
-          const addr  = waddr || sid || '???';
-          const name  = p.playerName || (sid ? sid.slice(0,8) : 'ANON');
-          const short = addr.length > 12 ? addr.slice(0,6)+'…'+addr.slice(-4) : addr;
-          html += `<div class="player-row">
-            <div class="player-info">
-              <div class="player-name">${esc(name)}</div>
-              <div class="player-addr addr-short" title="${esc(addr)}">${esc(short)}</div>
-            </div>
-            <div class="player-actions">
-              <button class="btn btn-xs btn-r"  onclick="quickKick('${esc(waddr)}','${esc(name)}','${esc(sid)}')">KICK</button>
-              <button class="btn btn-xs btn-y"  onclick="quickWarn('${esc(waddr)}','${esc(name)}','${esc(sid)}')">WARN</button>
-              <button class="btn btn-xs btn-pk" onclick="quickVoiceBan('${esc(waddr||sid)}','${esc(name)}')">VBAN</button>
-              <button class="btn btn-xs btn-c"  onclick="lookupPlayer('${esc(addr)}')">MORE</button>
-            </div>
-          </div>`;
-        }
-      }
+      html += `<div class="lobby-card"><div class="lobby-card-header">
+        <div class="lobby-name">${LOBBY_LABELS[lid]}</div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div class="lobby-count">${players.length} player${players.length===1?'':'s'}</div>
+          ${players.length>0?`<button class="btn btn-xs btn-c" onclick="confirmEndGame('${lid}')">⏹ END</button>`:''}
+        </div></div>`;
+      html += players.length ? players.map(playerRow).join('') : `<div class="empty-lobby">— Empty —</div>`;
       html += `</div>`;
     }
-    html += `</div></div>`;
+    html += `</div>`;
+    if (others.length) {
+      html += `<div style="margin-top:10px;"><div class="card-title" style="font-size:7px;color:var(--muted);margin-bottom:8px;">⚡ IN GAME (${others.length})</div>`;
+      html += others.map(playerRow).join('');
+      html += `</div>`;
+    }
+    html += `</div>`;
   }
-  body.innerHTML = html || '<div style="color:var(--muted);padding:20px;">No rooms found.</div>';
+  body.innerHTML = html || '<div style="color:var(--muted);padding:20px;">No players connected.</div>';
+  _liveLoading = false;
 }
 
 function confirmEndGame(lobbyId) {
