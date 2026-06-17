@@ -1707,6 +1707,7 @@ async function pkConnect(roomId, gameToken){
     });
     _sio.on('admin-endgame',()=>{
       addToast('🛑 Game ended by moderator','#FF4444',5000);
+      setTimeout(()=>{ showScreen('scr-home'); },2000);
     });
     _sio.on('admin-broadcast',(d)=>{
       const msg=d&&d.message?d.message:'';
@@ -2131,8 +2132,8 @@ async function claimKillReward(victimSol, victimAddress, killProof, killTs){
 
 // ── Toast notifications drawn on canvas ──────────────────────
 let _toasts=[];
-function addToast(msg,color='#FFD700'){
-  _toasts.push({msg,ttl:120,color}); // 120 ticks = 4 seconds at 30fps
+function addToast(msg,color='#FFD700',ms=3500){
+  _toasts.push({msg,exp:Date.now()+ms,color});
 }
 
 // ── Pac-Man background music (Web Audio API) ─────────────────
@@ -3920,9 +3921,9 @@ function draw(){
   }
 
   // ── Toast notifications (kill rewards, etc.) ──────────────────
-  for(let i=_toasts.length-1;i>=0;i--){ if(--_toasts[i].ttl<=0) _toasts.splice(i,1); }
+  const _tNow=Date.now(); for(let i=_toasts.length-1;i>=0;i--){ if(_tNow>=_toasts[i].exp) _toasts.splice(i,1); }
   _toasts.forEach((t,i)=>{
-    const alpha=Math.min(1,t.ttl/25);
+    const alpha=Math.min(1,(t.exp-Date.now())/800);
     const fs=Math.floor(T*0.52);
     const ty=canvas.height*0.15+i*34;
     ctx.save();
