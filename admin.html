@@ -207,6 +207,15 @@ let _voiceDur  = '24h';
   }
 })();
 
+// Surface any uncaught JS errors as visible red toasts so failures are never silent
+window.onerror = function(msg, _s, line) {
+  if (typeof toast === 'function') toast('JS ERR line ' + line + ': ' + msg, 'var(--r)', 10000);
+  return false;
+};
+window.addEventListener('unhandledrejection', function(e) {
+  if (typeof toast === 'function') toast('ASYNC ERR: ' + ((e.reason && e.reason.message) || String(e.reason || 'unknown')), 'var(--r)', 8000);
+});
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 async function doLogin() {
   const pw = document.getElementById('pw').value;
@@ -242,6 +251,7 @@ function doLogout() {
   _token = ''; _tokenExp = 0;
   sessionStorage.removeItem('adm_tok');
   sessionStorage.removeItem('adm_exp');
+  sessionStorage.removeItem('adm_live_cache');
   clearInterval(_liveTimer);
   document.getElementById('shell').style.display = 'none';
   document.getElementById('login').style.display = 'flex';
@@ -336,7 +346,8 @@ const TABS = ['live','player','bans','voice','log'];
 function openTab(t) {
   _tab = t;
   TABS.forEach(id => {
-    document.getElementById('nav-' + id).classList.toggle('active', id === t);
+    const el = document.getElementById('nav-' + id);
+    if (el) el.classList.toggle('active', id === t);
   });
   clearInterval(_liveTimer);
   const renders = { live: renderLive, player: renderPlayer, bans: renderBans, voice: renderVoice, log: renderLog };
@@ -372,6 +383,14 @@ function renderLive() {
     </div>
     <div id="live-body"><div style="text-align:center;padding:40px;color:var(--muted);">
       <div class="spinner" style="margin:0 auto 12px;"></div>Loading…</div></div>`;
+  // Instantly show last-known data from cache so panel never looks blank after refresh
+  try {
+    const raw = sessionStorage.getItem('adm_live_cache');
+    if (raw) {
+      const b = document.getElementById('live-body');
+      if (b) b.innerHTML = _buildLiveHtml(JSON.parse(raw));
+    }
+  } catch (_) {}
   loadLive();
   clearInterval(_liveTimer);
   _liveTimer = setInterval(loadLive, 2000);
@@ -397,6 +416,41 @@ function _playerRow(p) {
   </div>`;
 }
 
+function _buildLiveHtml(servers) {
+  if (!servers || !servers.length) return '<div style="color:var(--muted);padding:20px;">No server data.</div>';
+  const LOBBY_LABELS = {'free-lobby':'FREE LOBBY','paid-lobby-1':'$1 LOBBY','paid-lobby-5':'$5 LOBBY','paid-lobby-25':'$25 LOBBY'};
+  let html = '';
+  for (const srv of servers) {
+    const label = String(srv.server || 'Server');
+    if (srv.offline || srv.error) {
+      html += `<div class="card"><div class="card-title"><span class="offline-badge">OFFLINE</span> ${esc(label)}</div><div style="color:var(--r);font-size:11px;">${esc(String(srv.error||'Unreachable'))}</div></div>`;
+      continue;
+    }
+    const rooms  = srv.rooms  || {};
+    const others = Array.isArray(srv.others) ? srv.others : [];
+    html += `<div class="card"><div class="card-title"><span class="online-badge">ONLINE</span> &nbsp;${esc(label)}</div><div class="lobby-grid">`;
+    for (const lid of Object.keys(LOBBY_LABELS)) {
+      const players = Array.isArray(rooms[lid]) ? rooms[lid] : [];
+      html += `<div class="lobby-card"><div class="lobby-card-header">
+        <div class="lobby-name">${LOBBY_LABELS[lid]}</div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div class="lobby-count">${players.length} player${players.length===1?'':'s'}</div>
+          ${players.length>0?`<button class="btn btn-xs btn-c" onclick="confirmEndGame('${lid}')">⏹ END</button>`:''}
+        </div></div>`;
+      html += players.length ? players.map(_playerRow).join('') : `<div class="empty-lobby">— Empty —</div>`;
+      html += `</div>`;
+    }
+    html += `</div>`;
+    if (others.length) {
+      html += `<div style="margin-top:10px;"><div class="card-title" style="font-size:7px;color:var(--muted);margin-bottom:8px;">⚡ IN GAME (${others.length})</div>`;
+      html += others.map(_playerRow).join('');
+      html += `</div>`;
+    }
+    html += `</div>`;
+  }
+  return html || '<div style="color:var(--muted);padding:20px;">No players connected.</div>';
+}
+
 async function loadLive() {
   if (_liveLoading) return;
   _liveLoading = true;
@@ -404,47 +458,15 @@ async function loadLive() {
     const data = await api({ action: 'status' });
     const body = document.getElementById('live-body');
     if (!body) return;
-
     const servers = data.servers || [];
-    if (!servers.length) {
-      body.innerHTML = '<div style="color:var(--muted);padding:20px;">No server data.</div>';
-      return;
-    }
-
-    const LOBBY_LABELS = {'free-lobby':'FREE LOBBY','paid-lobby-1':'$1 LOBBY','paid-lobby-5':'$5 LOBBY','paid-lobby-25':'$25 LOBBY'};
-    let html = '';
-    for (const srv of servers) {
-      const label = String(srv.server || 'Server');
-      if (srv.offline || srv.error) {
-        html += `<div class="card"><div class="card-title"><span class="offline-badge">OFFLINE</span> ${esc(label)}</div><div style="color:var(--r);font-size:11px;">${esc(String(srv.error||'Unreachable'))}</div></div>`;
-        continue;
-      }
-      const rooms  = srv.rooms  || {};
-      const others = Array.isArray(srv.others) ? srv.others : [];
-      html += `<div class="card"><div class="card-title"><span class="online-badge">ONLINE</span> &nbsp;${esc(label)}</div><div class="lobby-grid">`;
-      for (const lid of Object.keys(LOBBY_LABELS)) {
-        const players = Array.isArray(rooms[lid]) ? rooms[lid] : [];
-        html += `<div class="lobby-card"><div class="lobby-card-header">
-          <div class="lobby-name">${LOBBY_LABELS[lid]}</div>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <div class="lobby-count">${players.length} player${players.length===1?'':'s'}</div>
-            ${players.length>0?`<button class="btn btn-xs btn-c" onclick="confirmEndGame('${lid}')">⏹ END</button>`:''}
-          </div></div>`;
-        html += players.length ? players.map(_playerRow).join('') : `<div class="empty-lobby">— Empty —</div>`;
-        html += `</div>`;
-      }
-      html += `</div>`;
-      if (others.length) {
-        html += `<div style="margin-top:10px;"><div class="card-title" style="font-size:7px;color:var(--muted);margin-bottom:8px;">⚡ IN GAME (${others.length})</div>`;
-        html += others.map(_playerRow).join('');
-        html += `</div>`;
-      }
-      html += `</div>`;
-    }
-    body.innerHTML = html || '<div style="color:var(--muted);padding:20px;">No players connected.</div>';
+    try { sessionStorage.setItem('adm_live_cache', JSON.stringify(servers)); } catch (_) {}
+    body.innerHTML = _buildLiveHtml(servers);
   } catch (e) {
     const b = document.getElementById('live-body');
-    if (b) b.innerHTML = `<div style="color:var(--y);padding:20px;text-align:center;"><div class="spinner" style="margin:0 auto 10px;"></div>Reconnecting…</div>`;
+    // Only show reconnecting spinner if there's no cached data already visible
+    if (b && !sessionStorage.getItem('adm_live_cache')) {
+      b.innerHTML = `<div style="color:var(--y);padding:20px;text-align:center;"><div class="spinner" style="margin:0 auto 10px;"></div>Reconnecting…</div>`;
+    }
   } finally {
     _liveLoading = false;
   }

@@ -4,6 +4,7 @@ const path = require('path');
 
 let _cached      = null;
 let _adminCached = null;
+let _bgCached    = null;
 
 // OG preview image — served at /og so it stays within the 12-function Hobby limit
 const OG_SVG = `<svg width="1200" height="630" xmlns="http://www.w3.org/2000/svg">
@@ -52,6 +53,17 @@ module.exports = function handler(req, res) {
       res.setHeader('X-Robots-Tag', 'noindex,nofollow');
       return res.status(200).send(_adminCached);
     } catch (e) { return res.status(500).send('Admin panel not found: ' + e.message); }
+  }
+
+  // ── Arena background image ────────────────────────────────────────────────────
+  if (reqPath === '/arena-bg.png') {
+    try {
+      if (!_bgCached) _bgCached = fs.readFileSync(path.resolve('arena-bg.png'));
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+      res.setHeader('Vercel-CDN-Cache-Control', 'public, max-age=604800, immutable');
+      return res.status(200).send(_bgCached);
+    } catch (e) { return res.status(404).send('Not found'); }
   }
 
   // ── OG preview image ─────────────────────────────────────────────────────────
