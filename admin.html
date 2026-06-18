@@ -189,9 +189,19 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0;}
 
 <script>
 'use strict';
+// Surface any uncaught JS errors as visible red toasts — registered BEFORE init()
+window.onerror = function(msg, _s, line) {
+  if (typeof toast === 'function') toast('JS ERR line ' + line + ': ' + msg, 'var(--r)', 10000);
+  return false;
+};
+window.addEventListener('unhandledrejection', function(e) {
+  if (typeof toast === 'function') toast('ASYNC ERR: ' + ((e.reason && e.reason.message) || String(e.reason || 'unknown')), 'var(--r)', 8000);
+});
+
 // ── State ─────────────────────────────────────────────────────────────────────
-let _token   = sessionStorage.getItem('adm_tok') || '';
-let _tokenExp= parseInt(sessionStorage.getItem('adm_exp')) || 0;
+// localStorage so token survives hard refresh, tab close, and any browser quirk
+let _token   = localStorage.getItem('adm_tok') || '';
+let _tokenExp= parseInt(localStorage.getItem('adm_exp')) || 0;
 let _tab     = 'live';
 let _liveTimer = null;
 let _liveLoading = false;
@@ -206,15 +216,6 @@ let _voiceDur  = '24h';
     showShell();
   }
 })();
-
-// Surface any uncaught JS errors as visible red toasts so failures are never silent
-window.onerror = function(msg, _s, line) {
-  if (typeof toast === 'function') toast('JS ERR line ' + line + ': ' + msg, 'var(--r)', 10000);
-  return false;
-};
-window.addEventListener('unhandledrejection', function(e) {
-  if (typeof toast === 'function') toast('ASYNC ERR: ' + ((e.reason && e.reason.message) || String(e.reason || 'unknown')), 'var(--r)', 8000);
-});
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 async function doLogin() {
@@ -238,8 +239,8 @@ async function doLogin() {
     }
     _token    = d.token;
     _tokenExp = Math.floor(Date.now() / 1000) + (d.ttl || 28800);
-    sessionStorage.setItem('adm_tok', _token);
-    sessionStorage.setItem('adm_exp', String(_tokenExp));
+    localStorage.setItem('adm_tok', _token);
+    localStorage.setItem('adm_exp', String(_tokenExp));
     showShell();
   } catch (e) {
     err.textContent = 'Network error: ' + e.message;
@@ -249,8 +250,8 @@ async function doLogin() {
 
 function doLogout() {
   _token = ''; _tokenExp = 0;
-  sessionStorage.removeItem('adm_tok');
-  sessionStorage.removeItem('adm_exp');
+  localStorage.removeItem('adm_tok');
+  localStorage.removeItem('adm_exp');
   sessionStorage.removeItem('adm_live_cache');
   clearInterval(_liveTimer);
   document.getElementById('shell').style.display = 'none';
@@ -358,6 +359,7 @@ function openTab(t) {
 // LIVE TAB
 // ══════════════════════════════════════════════════════════════════════════════
 function renderLive() {
+  _liveLoading = false; // cancel any in-flight guard so the fresh call below always runs
   const c = document.getElementById('content');
   c.innerHTML = `
     <div class="section-title">🔴 LIVE GAME STATUS</div>
