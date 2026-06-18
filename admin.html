@@ -210,12 +210,7 @@ let _curPlayer = null;
 let _gameDur   = '24h';
 let _voiceDur  = '24h';
 
-// ── Boot ─────────────────────────────────────────────────────────────────────
-(function init() {
-  if (_token && _tokenExp > Date.now() / 1000) {
-    showShell();
-  }
-})();
+// ── Boot — runs at end of file so all consts (TABS etc.) are initialised first
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 async function doLogin() {
@@ -853,6 +848,13 @@ function esc(s) {
   if (s == null) return '';
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+
+// Boot — all consts including TABS are now initialised
+(function init() {
+  if (_token && _tokenExp > Date.now() / 1000) {
+    showShell();
+  }
+})();
 </script>
 </body>
 </html>
