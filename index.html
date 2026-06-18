@@ -148,9 +148,9 @@ html,body{background-image:linear-gradient(rgba(7,7,15,0.62),rgba(7,7,15,0.62)),
 .scr{display:none;min-height:100vh;flex-direction:column;align-items:center;justify-content:center;padding:1.5rem 1rem;}
 .scr.on{display:flex;}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:2rem 1.75rem;width:100%;max-width:440px;}
-.logo{font-family:'Press Start 2P',monospace;font-size:clamp(22px,5vw,38px);color:var(--y);text-shadow:0 0 24px rgba(255,215,0,.6);animation:glow 2.2s ease-in-out infinite;}
-.logo-sub{font-family:'Press Start 2P',monospace;font-size:clamp(7px,1.5vw,10px);color:var(--c);letter-spacing:4px;margin-top:6px;}
-@keyframes glow{0%,100%{text-shadow:0 0 24px rgba(255,215,0,.6);}50%{text-shadow:0 0 40px #ffd700;}}
+.logo{font-family:'Press Start 2P',monospace;font-size:clamp(28px,6.5vw,54px);color:var(--y);text-shadow:0 0 20px rgba(255,215,0,.95),0 0 50px rgba(255,215,0,.6),0 0 90px rgba(255,215,0,.3);animation:glow 2.2s ease-in-out infinite;letter-spacing:4px;}
+.logo-sub{font-family:'Press Start 2P',monospace;font-size:clamp(7px,1.4vw,11px);color:var(--c);letter-spacing:5px;margin-top:10px;text-shadow:0 0 14px rgba(0,255,255,.7);}
+@keyframes glow{0%,100%{text-shadow:0 0 20px rgba(255,215,0,.95),0 0 50px rgba(255,215,0,.6),0 0 90px rgba(255,215,0,.3);}50%{text-shadow:0 0 30px #ffd700,0 0 70px rgba(255,215,0,.8),0 0 120px rgba(255,215,0,.4);}}
 .btn{display:flex;align-items:center;justify-content:center;gap:8px;font-family:'Press Start 2P',monospace;font-size:9px;letter-spacing:1px;padding:13px 20px;border-radius:8px;border:2px solid;cursor:pointer;transition:all .15s;width:100%;background:transparent;}
 .btn:disabled{opacity:.35;cursor:not-allowed;}
 .btn:active:not(:disabled){transform:scale(.97);}
@@ -292,9 +292,9 @@ body{touch-action:manipulation;}
     <span class="gf"><svg xmlns="http://www.w3.org/2000/svg" width="26" height="34" viewBox="-14 -22 28 44" style="display:inline-block;vertical-align:middle;overflow:visible"><g transform="rotate(-30)"><ellipse cy="3" rx="4.8" ry="10.5" fill="#AA3300"/><ellipse cy="2.5" rx="4" ry="9.3" fill="#E85000"/><ellipse cx="-1.5" cy="-1" rx="1.6" ry="4.8" fill="#FF8C00"/><ellipse cx="-1.9" cy="-5" rx="1.9" ry="1.2" fill="rgba(255,255,255,0.48)"/><ellipse cy="-9" rx="3.2" ry="1.7" fill="#228B22"/><line x1="0.8" y1="-10.2" x2="4.2" y2="-14.5" stroke="#228B22" stroke-width="2.4" stroke-linecap="round"/></g></svg></span>
   </div>
   <div style="text-align:center;margin-bottom:2rem;">
-    <div class="logo">PAC MONEY</div>
-    <div class="logo-sub">REAL PVP · ON-CHAIN · SOLANA</div>
-    <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:#FF8C00;letter-spacing:1px;margin-top:4px;margin-bottom:2px;">SKILL-BASED BETTING · BEST PLAYER WINS</div>
+    <div class="logo">PAC ARENA</div>
+    <div class="logo-sub">≡ SOLANA PVP WAGER ARENA ≡</div>
+    <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:#FF8C00;letter-spacing:1px;margin-top:6px;margin-bottom:2px;">SKILL-BASED BETTING · BEST PLAYER WINS</div>
     <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v3</div>
   </div>
   <div id="home-on" class="card" style="display:none;text-align:center;max-width:880px;">
