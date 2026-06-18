@@ -88,23 +88,24 @@ async function logAction(action, target, detail) {
 
 // ── Game server calls ─────────────────────────────────────────────────────────
 const SERVERS = [
-  process.env.GAME_SERVER_URL    || 'http://149.28.119.247:3001',
-  process.env.GAME_SERVER_EU_URL || '',
-].filter(Boolean);
+  { url: process.env.GAME_SERVER_URL    || 'http://149.28.119.247:3001', label: '🇺🇸 CHICAGO (NA)', key: 'NA' },
+  { url: process.env.GAME_SERVER_EU_URL || 'http://136.244.81.138:3001', label: '🇩🇪 FRANKFURT (EU)', key: 'EU' },
+].filter(s => s.url);
 
-async function callAllServers(path, method, body) {
+async function callAllServers(path, method, body, serverKey) {
   const secret = getSecret();
-  return Promise.all(SERVERS.map(async url => {
+  const targets = serverKey ? SERVERS.filter(s => s.key === serverKey) : SERVERS;
+  return Promise.all(targets.map(async srv => {
     try {
-      const r = await fetch(url + '/admin/' + path, {
+      const r = await fetch(srv.url + '/admin/' + path, {
         method,
         headers: { 'Content-Type': 'application/json', 'x-admin-secret': secret },
         body: body ? JSON.stringify(body) : undefined,
         signal: AbortSignal.timeout(6000),
       });
-      if (!r.ok) return { server: url, error: 'HTTP ' + r.status };
-      return { server: url, ...(await r.json()) };
-    } catch (e) { return { server: url, error: e.message, offline: true }; }
+      if (!r.ok) return { server: srv.label, key: srv.key, error: 'HTTP ' + r.status };
+      return { server: srv.label, key: srv.key, ...(await r.json()) };
+    } catch (e) { return { server: srv.label, key: srv.key, error: e.message, offline: true }; }
   }));
 }
 
@@ -195,7 +196,7 @@ module.exports = async function handler(req, res) {
 
   if (action === 'endgame') {
     if (!lobbyId) return res.status(400).json({ error: 'lobbyId required' });
-    const results = await callAllServers('endgame', 'POST', { lobbyId, reason });
+    const results = await callAllServers('endgame', 'POST', { lobbyId, reason }, req.body.serverKey || null);
     await logAction('endgame', lobbyId, reason);
     return res.json({ ok: true, results });
   }

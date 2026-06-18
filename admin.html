@@ -432,7 +432,7 @@ function _buildLiveHtml(servers) {
         <div class="lobby-name">${LOBBY_LABELS[lid]}</div>
         <div style="display:flex;align-items:center;gap:8px;">
           <div class="lobby-count">${players.length} player${players.length===1?'':'s'}</div>
-          ${players.length>0?`<button class="btn btn-xs btn-c" onclick="confirmEndGame('${lid}')">⏹ END</button>`:''}
+          ${players.length>0?`<button class="btn btn-xs btn-c" onclick="confirmEndGame('${lid}','${srv.key||''}')">⏹ END</button>`:''}
         </div></div>`;
       html += players.length ? players.map(_playerRow).join('') : `<div class="empty-lobby">— Empty —</div>`;
       html += `</div>`;
@@ -469,10 +469,10 @@ async function loadLive() {
   }
 }
 
-function confirmEndGame(lobbyId) {
+function confirmEndGame(lobbyId, serverKey) {
   openModal('Force-End Game', `Force-end the "${lobbyId}" match? All players will be returned to lobby.`, 'END GAME', async () => {
     try {
-      await api({ action: 'endgame', lobbyId });
+      await api({ action: 'endgame', lobbyId, serverKey: serverKey || null });
       toast('Game ended: ' + lobbyId, 'var(--c)');
       loadLive();
     } catch (e) { toast('Error: ' + e.message, 'var(--r)'); }
