@@ -347,7 +347,7 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
 // ══ CONSTANTS ════════════════════════════════════════════════
 const ARENA_R      = 3000;  // world radius
 const SNAKE_SPD    = 4.5;   // px/tick normal  (~135 px/sec at 30 TPS)
-const BOOST_SPD    = 8.0;   // px/tick boost   (~240 px/sec, 78% faster)
+const BOOST_SPD    = 9.0;   // px/tick boost   (2× normal — damnbruh exact ratio)
 const TICK_MS      = 33;    // 30 TPS
 // damnbruh.com exact physics constants (extracted from page-d38402305f41a2e6.js)
 const SIZE_PER_SEGMENT   = 5;    // segments = floor(size / 5)
@@ -1124,6 +1124,8 @@ function snakeTick(){
   // Advance all snakes
   SG.snakes.forEach(snake=>{
     if(!snake.alive)return;
+    // damnbruh: can't boost below minimum size
+    if(snake.boost&&snake.numSections<=MIN_SECTIONS+3)snake.boost=false;
     const spd=snake.boost?BOOST_SPD:SNAKE_SPD;
     const head=snake.path[0];
     snake.path.unshift({x:head.x+Math.cos(snake.angle)*spd,y:head.y+Math.sin(snake.angle)*spd});
@@ -1168,7 +1170,13 @@ function snakeTick(){
         const bs=bPts[k]; if(!bs)continue;
         const dx=ah.x-bs.x,dy=ah.y-bs.y;
         if(dx*dx+dy*dy<(aR+bR)*(aR+bR)){
-          eliminateSnake(a.id,a.id===b.id?null:b.id);
+          if(k===0&&b.id!==a.id){
+            // head-to-head: damnbruh — smaller snake dies, equal size both die
+            if(a.numSections<=b.numSections) eliminateSnake(a.id,b.id);
+            if(b.numSections<=a.numSections) eliminateSnake(b.id,a.id);
+          } else {
+            eliminateSnake(a.id,a.id===b.id?null:b.id);
+          }
           break;
         }
       }
@@ -1282,6 +1290,7 @@ function applyRemoteState(d){
         }
         path.push({x:sd.segs[sd.segs.length-1][0],y:sd.segs[sd.segs.length-1][1]});
         s.path=path;
+        s._predTs=0; // reset so dead reckoning starts fresh from this packet
       }
     });
   }
@@ -1410,17 +1419,35 @@ function rafDraw(ts){
       // Scale turn and speed proportionally to frame time
       const da=angleDiff(targetAngleToMouse(my),my.angle);
       my.angle+=Math.max(-MAX_TURN*frac,Math.min(MAX_TURN*frac,da));
-      my.boost=_mouseBoost;
+      // damnbruh: no boost below minimum size
+      my.boost=_mouseBoost&&my.numSections>MIN_SECTIONS+3;
       const spd=(my.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=my.path[0];
       my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
       if(my.growQueue>0){my.growQueue--;my.numSections++;}
-      // Path points are sub-tick-sized, so allow ~2x buffer for trim
       const pathNeeded=Math.ceil(my.numSections*sectionRadius(my)*SEGMENT_SPACING/Math.max(spd,0.5))+10;
       if(my.path.length>pathNeeded)my.path.length=pathNeeded;
       const nh=my.path[0];
       if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead)endSnakeGame('eliminated',null);
     }
+  }
+
+  // Dead reckoning for remote snakes — advance every frame so they look smooth
+  // (same principle as damnbruh.com's client-side headPath accumulation)
+  if(SG&&!SG.over){
+    SG.snakes.forEach(s=>{
+      if(s.id===myPid||!s.alive||!s.path.length)return;
+      const dt=Math.min(s._predTs?ts-s._predTs:TICK_MS,80);
+      s._predTs=ts;
+      if(dt<=1)return;
+      const frac=dt/TICK_MS;
+      const spd=(s.boost?BOOST_SPD:SNAKE_SPD)*frac;
+      const h=s.path[0];
+      s.path.unshift({x:h.x+Math.cos(s.angle)*spd,y:h.y+Math.sin(s.angle)*spd});
+      if(s.growQueue>0){s.growQueue--;s.numSections++;}
+      const pn=Math.ceil(s.numSections*sectionRadius(s)*SEGMENT_SPACING/Math.max(spd,0.5))+10;
+      if(s.path.length>pn)s.path.length=pn;
+    });
   }
 
   // Host: boundary death feedback
