@@ -1314,10 +1314,10 @@ function startGuestLoop(){
     const my=SG.snakes.get(myPid);
     if(!my||!my.alive)return;
     const targetAngle=targetAngleToMouse(my);
-    my.boost=_mouseBoost;
-    // Always send x,y so host tracks the guest's real position (not its own random spawn)
+    const canBoost=_mouseBoost&&my.numSections>MIN_SECTIONS+3;
+    my.boost=canBoost;
     const h=my.path[0];
-    _sio.emit('ssin',{id:myPid,angle:targetAngle,boost:_mouseBoost,x:Math.round(h.x),y:Math.round(h.y)});
+    _sio.emit('ssin',{id:myPid,angle:targetAngle,boost:canBoost,x:Math.round(h.x),y:Math.round(h.y)});
   },40);
 }
 
@@ -1360,6 +1360,7 @@ function onResize(){if(canvas){canvas.width=window.innerWidth;canvas.height=wind
 function onMouseMove(e){_mouseX=e.clientX;_mouseY=e.clientY;}
 function onTouchMove(e){e.preventDefault();if(e.touches.length){_mouseX=e.touches[0].clientX;_mouseY=e.touches[0].clientY;}}
 function onGameKey(e){
+  if(e.repeat)return;
   if(e.key===' '||e.key==='Shift')_mouseBoost=true;
   if(e.key==='q'||e.key==='Q'){
     if(SG&&!SG.over&&!_localDead){
