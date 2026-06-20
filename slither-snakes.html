@@ -1484,6 +1484,7 @@ async function endSnakeGame(reason,killerId){
     document.getElementById('rs-result').style.color='var(--g)';
   }
 
+  _gpadLastBtn=[]; _gpadNavTs=0; _padBoost=false;
   go('scr-result');
   if(cashed&&ST.lobbyUsd>0)await settle('p1');
   else if(elim&&ST.lobbyUsd>0)await settle('p2');
@@ -1526,6 +1527,8 @@ function pollGamepad(){
     }
   } else {
     // Menu: stick/d-pad to navigate, A to confirm, B to back
+    const ae=document.activeElement;
+    if(!ae||ae===document.body)gpadFocus(0);
     const sy=axes[1]||0,sx=axes[0]||0;
     const dUp=cur(12)||sy<-0.5,dDown=cur(13)||sy>0.5;
     const dLeft=cur(14)||sx<-0.5,dRight=cur(15)||sx>0.5;
@@ -1542,8 +1545,10 @@ function pollGamepad(){
   _gpadLastBtn=Array.from(btns).map(b=>!!(b&&b.pressed));
 }
 function gpadFocus(dir){
+  const vw=window.innerWidth,vh=window.innerHeight;
   const all=[...document.querySelectorAll('button:not([disabled]),input:not([disabled])')].filter(e=>{
-    const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&e.offsetParent!==null;
+    const r=e.getBoundingClientRect();
+    return r.width>0&&r.height>0&&r.bottom>0&&r.right>0&&r.top<vh&&r.left<vw;
   });
   if(!all.length)return;
   const i=all.indexOf(document.activeElement);
@@ -1577,7 +1582,7 @@ function rafDraw(ts){
       const h=my.path[0];
       my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
       if(my.growQueue>0){my.growQueue--;my.numSections=Math.min(MAX_SECTIONS,my.numSections+1);}
-      const pathNeeded=Math.ceil(my.numSections*sectionRadius(my)*SEGMENT_SPACING/Math.max(spd,0.5))+10;
+      const pathNeeded=Math.ceil(my.numSections*sectionRadius(my)*SEGMENT_SPACING/SNAKE_SPD)+10;
       if(my.path.length>pathNeeded)my.path.length=pathNeeded;
       const nh=my.path[0];
       if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead)endSnakeGame('eliminated',null);
@@ -1597,7 +1602,7 @@ function rafDraw(ts){
       const h=s.path[0];
       s.path.unshift({x:h.x+Math.cos(s.angle)*spd,y:h.y+Math.sin(s.angle)*spd});
       if(s.growQueue>0){s.growQueue--;s.numSections=Math.min(MAX_SECTIONS,s.numSections+1);}
-      const pn=Math.ceil(s.numSections*sectionRadius(s)*SEGMENT_SPACING/Math.max(spd,0.5))+10;
+      const pn=Math.ceil(s.numSections*sectionRadius(s)*SEGMENT_SPACING/SNAKE_SPD)+10;
       if(s.path.length>pn)s.path.length=pn;
     });
   }
@@ -1615,7 +1620,7 @@ function rafDraw(ts){
       const spd=(my.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=my.path[0];
       my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
-      const pathNeeded=Math.ceil(my.numSections*sectionRadius(my)*SEGMENT_SPACING/Math.max(spd,0.5))+10;
+      const pathNeeded=Math.ceil(my.numSections*sectionRadius(my)*SEGMENT_SPACING/SNAKE_SPD)+10;
       if(my.path.length>pathNeeded)my.path.length=pathNeeded;
       const nh=my.path[0];
       if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead)endSnakeGame('eliminated',null);
