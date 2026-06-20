@@ -356,7 +356,7 @@ const BASE_RADIUS        = 8;    // minimum snake radius
 const RADIUS_GROWTH      = 0.6;  // exponent for radius curve
 const RADIUS_SCALE       = 0.8;  // multiplier for radius curve
 // radius = BASE_RADIUS + size^RADIUS_GROWTH * RADIUS_SCALE
-const FOOD_TARGET  = 600;
+const FOOD_TARGET  = 300;
 const FOOD_GROW    = 3;     // sections added per food orb
 const MIN_SECTIONS = 8;     // die below this
 const INIT_SECTIONS= 30;    // starting section count (same as real slither.io)
@@ -1047,6 +1047,7 @@ function foodColor(f){return FOOD_COLORS[f.ci]||FOOD_COLORS[0];}
 
 function initSnakeGame(players){
   _localDead=false;
+  _foodSendCounter=0;
   SG={snakes:new Map(),food:[],tick:0,over:false};
   const myColor=_playerMeta.get(myPid)?.color||colorFromId(myPid);
   SG.snakes.set(myPid,makeSnake(myPid,myColor,getMyName()));
@@ -1111,7 +1112,7 @@ function snakeTick(){
     mySnake.boost=_mouseBoost;
   }
 
-  // Turn guest snakes
+  // Apply guest inputs — use guest's reported x,y as authoritative position
   const now=Date.now();
   _guestInputs.forEach((inp,pid)=>{
     if(now-inp.ts>1500)return;
@@ -1119,6 +1120,10 @@ function snakeTick(){
     if(!s||!s.alive)return;
     applyTurn(s,inp.angle);
     s.boost=inp.boost;
+    // Snap to guest's real position so all clients see the same location
+    if(inp.x!=null&&inp.y!=null){
+      s.path.unshift({x:inp.x,y:inp.y});
+    }
   });
 
   // Advance all snakes
@@ -1128,7 +1133,10 @@ function snakeTick(){
     if(snake.boost&&snake.numSections<=MIN_SECTIONS+3)snake.boost=false;
     const spd=snake.boost?BOOST_SPD:SNAKE_SPD;
     const head=snake.path[0];
-    snake.path.unshift({x:head.x+Math.cos(snake.angle)*spd,y:head.y+Math.sin(snake.angle)*spd});
+    // Guest snakes: position already inserted from ssin above — only advance host's own snake
+    if(snake.id===myPid){
+      snake.path.unshift({x:head.x+Math.cos(snake.angle)*spd,y:head.y+Math.sin(snake.angle)*spd});
+    }
 
     // Grow: increment section count from queue
     if(snake.growQueue>0){snake.growQueue--;snake.numSections++;}
@@ -1243,7 +1251,7 @@ function sendSnakeState(){
   _foodSendCounter++;
   const msg={t:'ss',snakes:snakeArr,tick:SG.tick};
   if(_pendingKills.length){msg.kills=[..._pendingKills];_pendingKills.length=0;}
-  if(_foodSendCounter%10===0){
+  if(_foodSendCounter%3===0){
     msg.food=SG.food.map(f=>[Math.round(f.x),Math.round(f.y),f.ci,Math.round(f.size)]);
   }
   pkSend(msg);
@@ -1307,12 +1315,9 @@ function startGuestLoop(){
     if(!my||!my.alive)return;
     const targetAngle=targetAngleToMouse(my);
     my.boost=_mouseBoost;
-    const boostChanged=_mouseBoost!==_lastSentBoost;
-    const angleMoved=Math.abs(angleDiff(targetAngle,_lastSentAngle))>0.012;
-    if(angleMoved||boostChanged){
-      _lastSentAngle=targetAngle; _lastSentBoost=_mouseBoost;
-      _sio.emit('ssin',{id:myPid,angle:targetAngle,boost:_mouseBoost});
-    }
+    // Always send x,y so host tracks the guest's real position (not its own random spawn)
+    const h=my.path[0];
+    _sio.emit('ssin',{id:myPid,angle:targetAngle,boost:_mouseBoost,x:Math.round(h.x),y:Math.round(h.y)});
   },40);
 }
 
