@@ -346,8 +346,8 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
 
 // ══ CONSTANTS ════════════════════════════════════════════════
 const ARENA_R      = 3000;  // world radius
-const SNAKE_SPD    = 4.5;   // px/tick normal  (~135 px/sec at 30 TPS)
-const BOOST_SPD    = 9.0;   // px/tick boost   (2× normal — damnbruh exact ratio)
+const SNAKE_SPD    = 9.0;   // px/tick normal  (~270 px/sec at 30 TPS)
+const BOOST_SPD    = 18.0;  // px/tick boost   (2× normal — damnbruh exact ratio)
 const TICK_MS      = 33;    // 30 TPS
 // damnbruh.com exact physics constants (extracted from page-d38402305f41a2e6.js)
 const SIZE_PER_SEGMENT   = 5;    // segments = floor(size / 5)
@@ -360,8 +360,8 @@ const FOOD_TARGET  = 600;
 const FOOD_GROW    = 3;     // sections added per food orb
 const MIN_SECTIONS = 8;     // die below this
 const INIT_SECTIONS= 30;    // starting section count (same as real slither.io)
-const MAX_TURN     = 0.085; // rad/tick → ~4.9°/tick, 180° turn in ~37 ticks ≈ 1.2 sec
-const BOOST_DRAIN  = 3;     // ticks between boost section-drain
+const MAX_TURN     = 0.12;  // rad/tick → ~6.9°/tick — scaled for 2× speed, same turn radius
+const BOOST_DRAIN  = 8;     // ticks between boost drain (~3.75 drains/sec, ~6s boost from start)
 const SELF_SKIP    = 9999;  // disable self-collision — damnbruh.com: own tail never kills you
 const ESCROW_PUBKEY = '2SYFfCsSmKr8qwK1AfWd36JtAc1BCaRaSSxyECKUJjBb';
 const APP_ID = 'cmq1eo6uz004b0cl8pvk7aakk';
