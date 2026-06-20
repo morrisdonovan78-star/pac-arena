@@ -635,13 +635,16 @@ async function privyCall(path,body){
   return d;
 }
 
+let _otpToken='';
+
 async function sendCode(){
   const email=(document.getElementById('inp-email').value||'').trim();
   if(!email||!email.includes('@')){showErr('Enter a valid email');return;}
   hideErr();
   ST.email=email;
   try{
-    await privyCall('/passwordless/init',{email,create_new_user:true});
+    const d=await privyCall('/passwordless/init',{email});
+    _otpToken=d.token||'';
     showStep('otp');
     setTimeout(()=>document.getElementById('o0').focus(),100);
   }catch(e){showErr('Could not send code — '+e.message);}
@@ -651,7 +654,7 @@ async function verifyCode(){
   if(code.length<6){showErr('Enter 6-digit code','home-err2');return;}
   hideErr('home-err2');
   try{
-    const d=await privyCall('/passwordless/authenticate',{email:ST.email,code,mode:'login-or-create-user'});
+    const d=await privyCall('/passwordless/authenticate',{email:ST.email,code,token:_otpToken});
     _jwt=d.token||d.identity_token||'';
     showStep('wallet');
     document.getElementById('wallet-checking').style.display='block';
