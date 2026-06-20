@@ -417,7 +417,7 @@ let _killFeed=[];
 let _pendingKills=[];
 let _playerMeta=new Map();
 let _ping=0,_pingIv=null;
-let _lastDrawTs=0,_guestPredTs=0;
+let _lastDrawTs=0,_guestPredTs=0,_hostPredTs=0;
 let _lastSentAngle=-999,_lastSentBoost=false;
 let _guestInputLoop=null;
 let _foodSendCounter=0;
@@ -1156,13 +1156,6 @@ function snakeTick(){
   if(!SG||SG.over)return;
   SG.tick++;
 
-  // Turn host's own snake toward mouse
-  const mySnake=SG.snakes.get(myPid);
-  if(mySnake&&mySnake.alive){
-    applyTurn(mySnake,targetAngleToMouse(mySnake));
-    mySnake.boost=_mouseBoost||_padBoost;
-  }
-
   // Apply guest inputs — use guest's reported x,y as authoritative position
   const now=Date.now();
   _guestInputs.forEach((inp,pid)=>{
@@ -1182,12 +1175,6 @@ function snakeTick(){
     if(!snake.alive)return;
     // can't boost at or below starting length
     if(snake.boost&&snake.numSections<=INIT_SECTIONS)snake.boost=false;
-    const spd=snake.boost?BOOST_SPD:SNAKE_SPD;
-    const head=snake.path[0];
-    // Guest snakes: position already inserted from ssin above — only advance host's own snake
-    if(snake.id===myPid){
-      snake.path.unshift({x:head.x+Math.cos(snake.angle)*spd,y:head.y+Math.sin(snake.angle)*spd});
-    }
 
     // Grow: increment section count from queue, cap at MAX_SECTIONS
     if(snake.growQueue>0){snake.growQueue--;snake.numSections=Math.min(MAX_SECTIONS,snake.numSections+1);}
@@ -1615,12 +1602,23 @@ function rafDraw(ts){
     });
   }
 
-  // Host: boundary death feedback
+  // Host: per-frame smooth movement for own snake (same approach as guest prediction)
   if(isHost&&SG&&!SG.over&&!_localDead){
     const my=SG.snakes.get(myPid);
-    if(my&&my.path.length){
+    if(my&&my.alive&&my.path.length){
+      const dt=Math.min(_hostPredTs?ts-_hostPredTs:TICK_MS,80);
+      _hostPredTs=ts;
+      const frac=dt/TICK_MS;
+      const da=angleDiff(targetAngleToMouse(my),my.angle);
+      my.angle+=Math.max(-MAX_TURN*frac,Math.min(MAX_TURN*frac,da));
+      my.boost=(_mouseBoost||_padBoost)&&my.numSections>INIT_SECTIONS;
+      const spd=(my.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=my.path[0];
-      if(h.x*h.x+h.y*h.y>=ARENA_R*ARENA_R) endSnakeGame('eliminated',null);
+      my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
+      const pathNeeded=Math.ceil(my.numSections*sectionRadius(my)*SEGMENT_SPACING/Math.max(spd,0.5))+10;
+      if(my.path.length>pathNeeded)my.path.length=pathNeeded;
+      const nh=my.path[0];
+      if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead)endSnakeGame('eliminated',null);
     }
   }
 
@@ -1630,8 +1628,8 @@ function rafDraw(ts){
   if(mySnake&&mySnake.path.length&&mySnake.alive){
     const h=mySnake.path[0];
     // Instant camera snap (damnbruh: no lerp on camera position)
-    _camX+=(h.x-_camX)*0.35;
-    _camY+=(h.y-_camY)*0.35;
+    _camX=h.x;
+    _camY=h.y;
   }
   // Fixed zoom based on screen size — identical to damnbruh's zoom formula
   _camZoom=Math.max(0.3,Math.min(2.0,Math.min(canvas.width/1920,canvas.height/1080)+_zoomOffset));
