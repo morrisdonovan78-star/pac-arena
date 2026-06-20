@@ -345,19 +345,18 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
 'use strict';
 
 // ══ CONSTANTS ════════════════════════════════════════════════
-const ARENA_R     = 2800;   // world radius
-const SNAKE_SPD   = 3.0;    // px/tick normal
-const BOOST_SPD   = 6.5;    // px/tick boost
-const TICK_MS     = 33;     // 30 TPS
-const PATH_STEP   = 2;      // path positions per collision segment
-const FOOD_TARGET = 600;
-const FOOD_GROW   = 4;      // path positions gained per orb
-const MIN_LEN     = 12;     // die below this (path segments)
-const INIT_LEN    = 60;     // starting path length
-const MAX_TURN    = 0.09;   // rad/tick — slither.io feel (tighter)
-const BOOST_DRAIN = 4;      // ticks between boost-shrink
-const SELF_SKIP   = 10;     // own path points skipped for self-collision
-const DRAW_STEP   = 2;      // path points between each rendered circle
+const ARENA_R      = 3000;  // world radius
+const SNAKE_SPD    = 4.5;   // px/tick normal  (~135 px/sec at 30 TPS)
+const BOOST_SPD    = 8.0;   // px/tick boost   (~240 px/sec, 78% faster)
+const TICK_MS      = 33;    // 30 TPS
+const SECTION_DIST = 14;    // px between body section centers (damnbruh: ~10-14px)
+const FOOD_TARGET  = 600;
+const FOOD_GROW    = 3;     // sections added per food orb
+const MIN_SECTIONS = 8;     // die below this
+const INIT_SECTIONS= 30;    // starting section count (same as real slither.io)
+const MAX_TURN     = 0.065; // rad/tick → ~3.7°/tick, 180° turn in ~49 ticks ≈ 1.6 sec
+const BOOST_DRAIN  = 3;     // ticks between boost section-drain
+const SELF_SKIP    = 3;     // own sections to skip for self-collision
 const ESCROW_PUBKEY = '2SYFfCsSmKr8qwK1AfWd36JtAc1BCaRaSSxyECKUJjBb';
 const APP_ID = 'cmq1eo6uz004b0cl8pvk7aakk';
 const GAME_SERVERS = {
@@ -389,7 +388,7 @@ let _killFeed=[];
 let _pendingKills=[];
 let _playerMeta=new Map();
 let _ping=0,_pingIv=null;
-let _lastDrawTs=0;
+let _lastDrawTs=0,_guestPredTs=0;
 let _lastSentAngle=-999,_lastSentBoost=false;
 let _guestInputLoop=null;
 let _foodSendCounter=0;
@@ -980,33 +979,51 @@ function pkDisconnect(){
   myPid=null;isHost=false;isSpectating=false;pkRoomId=null;_pkTick=0;_pkSentTick=0;_myHelloTs=0;
   _joiningLobby=false;_lobbyIsPaid=false;_hostPid=null;
   _guestInputs.clear();
+  _guestPredTs=0;
 }
 
 // ══ SNAKE GAME LOGIC ════════════════════════════════════════
 
 // ── Path helpers ──────────────────────────────────────────────
-// snake.length = number of body path-points kept
-// snake.path   = ordered array of world positions (head first)
-// segPos used for collision — every PATH_STEP path points
-function segPos(snake,i){
-  const idx=Math.min(i*PATH_STEP, snake.path.length-1);
-  return snake.path[idx];
+// snake.numSections = number of visible body circles
+// snake.path        = dense array of head positions, head-first
+//
+// getBodyPoints: walks path summing actual pixel distances until SECTION_DIST
+// is reached per section — exact same logic as slither.io's findNextPointIndex.
+// This ensures sections are always evenly spaced regardless of speed/framerate.
+function getBodyPoints(snake){
+  const pts=[],path=snake.path,target=snake.numSections;
+  let i=0;
+  while(pts.length<target&&i<path.length){
+    pts.push(path[i]);
+    let cum=0,j=i;
+    while(cum<SECTION_DIST&&j+1<path.length){
+      const dx=path[j+1].x-path[j].x,dy=path[j+1].y-path[j].y;
+      cum+=Math.sqrt(dx*dx+dy*dy);
+      j++;
+    }
+    if(j===i)break;
+    i=j;
+  }
+  return pts;
 }
-function snakeWidth(snake){
-  // grows from 18 → 38 as snake eats; capped at 38
-  return Math.max(18, Math.min(15 + snake.length * 0.12, 38));
+// Section radius grows as snake eats (same as slither.io scale system)
+function sectionRadius(snake){
+  return Math.max(9,Math.min(9+snake.numSections*0.18,26));
 }
 
 function makeSnake(id,color,name){
   const spawnAngle=Math.random()*Math.PI*2;
   const r=(ARENA_R*0.22)+Math.random()*(ARENA_R*0.56);
-  const sx=Math.cos(spawnAngle)*r, sy=Math.sin(spawnAngle)*r;
+  const sx=Math.cos(spawnAngle)*r,sy=Math.sin(spawnAngle)*r;
   const faceAngle=Math.atan2(-sy,-sx);
+  // Pre-fill path: each point SNAKE_SPD apart going backward from spawn
+  const pathLen=Math.ceil(INIT_SECTIONS*SECTION_DIST/SNAKE_SPD)+10;
   const path=[];
-  for(let i=0;i<INIT_LEN;i++){
-    path.push({x:sx-Math.cos(faceAngle)*i*SNAKE_SPD, y:sy-Math.sin(faceAngle)*i*SNAKE_SPD});
+  for(let i=0;i<pathLen;i++){
+    path.push({x:sx-Math.cos(faceAngle)*i*SNAKE_SPD,y:sy-Math.sin(faceAngle)*i*SNAKE_SPD});
   }
-  return{id,color,name,angle:faceAngle,path,length:INIT_LEN,growQueue:0,alive:true,score:0,boost:false};
+  return{id,color,name,angle:faceAngle,path,numSections:INIT_SECTIONS,growQueue:0,alive:true,score:0,boost:false};
 }
 
 function makeFood(){
@@ -1098,22 +1115,24 @@ function snakeTick(){
     if(!snake.alive)return;
     const spd=snake.boost?BOOST_SPD:SNAKE_SPD;
     const head=snake.path[0];
-    snake.path.unshift({x:head.x+Math.cos(snake.angle)*spd, y:head.y+Math.sin(snake.angle)*spd});
+    snake.path.unshift({x:head.x+Math.cos(snake.angle)*spd,y:head.y+Math.sin(snake.angle)*spd});
 
-    // Grow: each queued point just keeps the tail one step longer
-    if(snake.growQueue>0){snake.growQueue--;snake.length++;}
+    // Grow: increment section count from queue
+    if(snake.growQueue>0){snake.growQueue--;snake.numSections++;}
 
-    // Boost drains length — drops a food pellet at the tail
-    if(snake.boost&&SG.tick%BOOST_DRAIN===0&&snake.length>MIN_LEN+4){
-      snake.length--;
-      const tail=snake.path[snake.length];
+    // Boost drains sections — drops food at tail (damnbruh.com mechanic)
+    if(snake.boost&&SG.tick%BOOST_DRAIN===0&&snake.numSections>MIN_SECTIONS+3){
+      snake.numSections--;
+      const bPts=getBodyPoints(snake);
+      const tail=bPts[bPts.length-1];
       if(tail) SG.food.push({x:tail.x+(Math.random()-.5)*6,y:tail.y+(Math.random()-.5)*6,ci:Math.floor(Math.random()*FOOD_COLORS.length),size:4+Math.random()*3});
     }
 
-    // Trim path to body length
-    if(snake.path.length>snake.length+4) snake.path.length=snake.length+4;
+    // Trim path to only what sections need
+    const pathNeeded=Math.ceil(snake.numSections*SECTION_DIST/SNAKE_SPD)+8;
+    if(snake.path.length>pathNeeded)snake.path.length=pathNeeded;
 
-    if(snake.length<MIN_LEN){eliminateSnake(snake.id,null);return;}
+    if(snake.numSections<MIN_SECTIONS){eliminateSnake(snake.id,null);return;}
   });
 
   // Boundary
@@ -1123,21 +1142,22 @@ function snakeTick(){
     if(h.x*h.x+h.y*h.y>=ARENA_R*ARENA_R) eliminateSnake(snake.id,null);
   });
 
-  // Snake-vs-snake head collisions (check head vs every PATH_STEP-th body point)
+  // Head-vs-body collision using getBodyPoints (damnbruh.com: edge circle at head tip)
   const alive=[...SG.snakes.values()].filter(s=>s.alive);
   for(let i=0;i<alive.length;i++){
     const a=alive[i]; if(!a.alive)continue;
     const ah=a.path[0];
-    const aR=snakeWidth(a)*0.45;
+    const aR=sectionRadius(a);
     for(let j=0;j<alive.length;j++){
       const b=alive[j]; if(!b.alive)continue;
-      const bR=snakeWidth(b)*0.45;
+      const bR=sectionRadius(b);
+      const bPts=getBodyPoints(b);
       const startK=(a.id===b.id)?SELF_SKIP:0;
-      for(let k=startK;k<b.path.length;k+=PATH_STEP){
-        const bs=b.path[k]; if(!bs)continue;
-        const dx=ah.x-bs.x, dy=ah.y-bs.y;
+      for(let k=startK;k<bPts.length;k++){
+        const bs=bPts[k]; if(!bs)continue;
+        const dx=ah.x-bs.x,dy=ah.y-bs.y;
         if(dx*dx+dy*dy<(aR+bR)*(aR+bR)){
-          eliminateSnake(a.id, a.id===b.id?null:b.id);
+          eliminateSnake(a.id,a.id===b.id?null:b.id);
           break;
         }
       }
@@ -1145,15 +1165,15 @@ function snakeTick(){
     }
   }
 
-  // Food collection
+  // Food collection — head radius pickup (damnbruh.com style)
   SG.snakes.forEach(snake=>{
     if(!snake.alive)return;
     const h=snake.path[0];
-    const w=snakeWidth(snake);
+    const r=sectionRadius(snake);
     for(let i=SG.food.length-1;i>=0;i--){
       const f=SG.food[i];
       const dx=h.x-f.x,dy=h.y-f.y;
-      if(dx*dx+dy*dy<(w*0.55+f.size)*(w*0.55+f.size)){
+      if(dx*dx+dy*dy<(r+f.size)*(r+f.size)){
         snake.growQueue+=FOOD_GROW;
         snake.score+=10;
         SG.food.splice(i,1);
@@ -1166,9 +1186,6 @@ function snakeTick(){
 
   _pkTick++;
   if(_pkTick%2===0)sendSnakeState();
-  if(_pkTick%2===0&&_pendingKills.length){
-    _pendingKills.length=0;
-  }
 }
 
 function eliminateSnake(id,killerId){
@@ -1199,13 +1216,10 @@ function sendSnakeState(){
   const snakeArr=[];
   SG.snakes.forEach(s=>{
     if(!s.alive)return;
-    // Send every DRAW_STEP path point — matches what guests render
-    const segs=[];
-    const limit=Math.min(s.path.length, s.length+2);
-    for(let i=0;i<limit;i+=DRAW_STEP){
-      segs.push([Math.round(s.path[i].x),Math.round(s.path[i].y)]);
-    }
-    snakeArr.push({id:s.id,segs,angle:s.angle,score:s.score,boost:s.boost,len:s.length,color:s.color,name:s.name});
+    // Send actual body section positions (already SECTION_DIST apart by getBodyPoints)
+    const bPts=getBodyPoints(s);
+    const segs=bPts.map(p=>[Math.round(p.x),Math.round(p.y)]);
+    snakeArr.push({id:s.id,segs,angle:s.angle,score:s.score,boost:s.boost,ns:s.numSections,color:s.color,name:s.name});
   });
   _foodSendCounter++;
   const msg={t:'ss',snakes:snakeArr,tick:SG.tick};
@@ -1218,7 +1232,6 @@ function sendSnakeState(){
 
 function applyRemoteState(d){
   if(!SG||!d)return;
-  // Process kill events sent by host
   if(d.kills){
     d.kills.forEach(k=>{
       const km=_playerMeta.get(k.killerId)||{};
@@ -1240,21 +1253,23 @@ function applyRemoteState(d){
         SG.snakes.set(sd.id,s);
       }
       s.alive=true; s.angle=sd.angle; s.score=sd.score||0; s.boost=sd.boost||false;
-      s.length=sd.len||sd.segs?.length||s.length;
+      s.numSections=sd.ns||(sd.segs&&sd.segs.length)||s.numSections;
       s.color=sd.color||s.color; s.name=sd.name||s.name;
       if(sd.segs&&sd.segs.length>1){
-        // Expand: host sends every DRAW_STEP points; interpolate back to dense path
+        // segs are body-section positions (SECTION_DIST apart).
+        // Reconstruct a dense path by interpolating steps between each section.
+        const steps=Math.max(1,Math.round(SECTION_DIST/SNAKE_SPD));
         const path=[];
         for(let i=0;i<sd.segs.length-1;i++){
-          const a=sd.segs[i], b=sd.segs[i+1];
-          for(let k=0;k<DRAW_STEP;k++){
-            const t=k/DRAW_STEP;
-            path.push({x:a[0]+(b[0]-a[0])*t, y:a[1]+(b[1]-a[1])*t});
+          const a=sd.segs[i],b=sd.segs[i+1];
+          const dx=b[0]-a[0],dy=b[1]-a[1];
+          for(let k=0;k<steps;k++){
+            const t=k/steps;
+            path.push({x:a[0]+dx*t,y:a[1]+dy*t});
           }
         }
-        path.push({x:sd.segs[sd.segs.length-1][0], y:sd.segs[sd.segs.length-1][1]});
+        path.push({x:sd.segs[sd.segs.length-1][0],y:sd.segs[sd.segs.length-1][1]});
         s.path=path;
-        s.length=sd.len||path.length;
       }
     });
   }
@@ -1270,7 +1285,6 @@ function startGuestLoop(){
     const my=SG.snakes.get(myPid);
     if(!my||!my.alive)return;
     const targetAngle=targetAngleToMouse(my);
-    applyTurn(my,targetAngle);
     my.boost=_mouseBoost;
     const boostChanged=_mouseBoost!==_lastSentBoost;
     const angleMoved=Math.abs(angleDiff(targetAngle,_lastSentAngle))>0.012;
@@ -1335,7 +1349,7 @@ async function endSnakeGame(reason,killerId){
 
   const my=SG.snakes.get(myPid);
   const myScore=my?.score||0;
-  const myLen=my?.length||0;
+  const myLen=my?.numSections||0;
   const elim=reason==='eliminated';
 
   document.getElementById('rs-score').textContent=myScore;
@@ -1374,19 +1388,26 @@ function rafDraw(ts){
 
   if(_pendingState){applyRemoteState(_pendingState);_pendingState=null;}
 
-  // Guest: client-side prediction — advance own snake between server packets
+  // Guest: smooth delta-time prediction between server updates
   if(!isHost&&SG&&!SG.over&&!_localDead){
     const my=SG.snakes.get(myPid);
     if(my&&my.alive&&my.path.length){
-      applyTurn(my,targetAngleToMouse(my));
+      const dt=Math.min(_guestPredTs?ts-_guestPredTs:TICK_MS,80);
+      _guestPredTs=ts;
+      const frac=dt/TICK_MS;
+      // Scale turn and speed proportionally to frame time
+      const da=angleDiff(targetAngleToMouse(my),my.angle);
+      my.angle+=Math.max(-MAX_TURN*frac,Math.min(MAX_TURN*frac,da));
       my.boost=_mouseBoost;
-      const spd=my.boost?BOOST_SPD:SNAKE_SPD;
+      const spd=(my.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=my.path[0];
-      my.path.unshift({x:h.x+Math.cos(my.angle)*spd, y:h.y+Math.sin(my.angle)*spd});
-      if(my.growQueue>0){my.growQueue--;my.length++;}
-      if(my.path.length>my.length+4) my.path.length=my.length+4;
+      my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
+      if(my.growQueue>0){my.growQueue--;my.numSections++;}
+      // Path points are sub-tick-sized, so allow ~2x buffer for trim
+      const pathNeeded=Math.ceil(my.numSections*SECTION_DIST/Math.max(spd,0.5))+10;
+      if(my.path.length>pathNeeded)my.path.length=pathNeeded;
       const nh=my.path[0];
-      if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead) endSnakeGame('eliminated',null);
+      if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead)endSnakeGame('eliminated',null);
     }
   }
 
@@ -1405,7 +1426,7 @@ function rafDraw(ts){
     const h=mySnake.path[0];
     _camX+=(h.x-_camX)*0.12;
     _camY+=(h.y-_camY)*0.12;
-    const tgtZoom=Math.max(0.20, 0.60-mySnake.length*0.0008);
+    const tgtZoom=Math.max(0.18, 0.65-mySnake.numSections*0.0025);
     _camZoom+=(tgtZoom-_camZoom)*0.05;
   }
 
@@ -1485,24 +1506,24 @@ function drawFood(){
 
 function drawSnake(snake){
   if(!snake.path||snake.path.length<2)return;
-  const w=snakeWidth(snake);
-  const r=w*0.5;
+  const bPts=getBodyPoints(snake);
+  if(bPts.length<2)return;
+  const r=sectionRadius(snake);
   const col=snake.color;
-  const bodyLen=Math.min(snake.path.length, snake.length+2);
+  const n=bPts.length;
 
-  // Draw tail → head so head circle is on top
-  for(let i=bodyLen-1;i>=0;i-=DRAW_STEP){
-    const p=snake.path[i]; if(!p)continue;
-    // Taper slightly toward tail
-    const frac=i/bodyLen;       // 0=head,1=tail
-    const cr=r*(1-frac*0.22);   // radius shrinks 22% at tail
+  // Draw tail → head (same order as damnbruh.com — head renders on top)
+  for(let i=n-1;i>=1;i--){
+    const p=bPts[i]; if(!p)continue;
+    const frac=i/n;              // 0=head, 1=tail
+    const cr=r*(1-frac*0.28);   // taper 28% thinner at tail
     _drawBodyCircle(p.x,p.y,cr,col);
   }
 
-  // Head circle (slightly larger, drawn last = on top)
-  const h=snake.path[0]; if(!h)return;
-  _drawHeadCircle(snake,r*1.12);
-  _drawNameTag(snake,h,w);
+  // Head — larger, with eyes/tongue/boost flame
+  const h=bPts[0]; if(!h)return;
+  _drawHeadCircle(snake,r*1.18);
+  _drawNameTag(snake,h,r*2);
 }
 
 function _drawBodyCircle(x,y,r,col){
@@ -1620,11 +1641,11 @@ function drawKillFeedHUD(){
 function drawHUD(mySnake){
   const el=id=>document.getElementById(id);
   if(mySnake){
-    if(el('hud-len'))el('hud-len').textContent=mySnake.length||0;
+    if(el('hud-len'))el('hud-len').textContent=mySnake.numSections||0;
     if(el('hud-score'))el('hud-score').textContent=mySnake.score||0;
   }
   const hint=el('boost-hint');
-  if(hint&&mySnake)hint.style.display=mySnake.length>MIN_LEN+4?'block':'none';
+  if(hint&&mySnake)hint.style.display=mySnake.numSections>MIN_SECTIONS+4?'block':'none';
 }
 
 function drawMinimap(mySnake){
