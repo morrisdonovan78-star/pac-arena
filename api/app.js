@@ -2,9 +2,10 @@
 const fs   = require('fs');
 const path = require('path');
 
-let _cached      = null;
-let _adminCached = null;
-let _bgCached    = null;
+let _cached        = null;
+let _adminCached   = null;
+let _bgCached      = null;
+let _slitherCached = null;
 
 // OG preview image — served at /og so it stays within the 12-function Hobby limit
 const OG_SVG = `<svg width="1200" height="630" xmlns="http://www.w3.org/2000/svg">
@@ -42,6 +43,16 @@ module.exports = function handler(req, res) {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Access-Control-Allow-Origin', '*');
     return res.status(200).json({ v: process.env.VERCEL_DEPLOYMENT_ID || process.env.VERCEL_GIT_COMMIT_SHA || 'dev' });
+  }
+
+  // ── Slither Snakes game ───────────────────────────────────────────────────────
+  if (reqPath === '/slither-snakes' || reqPath === '/slither-snakes.html' || reqPath === '/slither-snakes/') {
+    try {
+      if (!_slitherCached) _slitherCached = fs.readFileSync(path.resolve('slither-snakes.html'), 'utf8');
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      return res.status(200).send(_slitherCached);
+    } catch (e) { return res.status(500).send('Slither Snakes not found: ' + e.message); }
   }
 
   // ── Admin panel ───────────────────────────────────────────────────────────────

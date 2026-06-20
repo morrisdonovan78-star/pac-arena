@@ -608,15 +608,40 @@ function doLogout(){
 }
 
 // ── Privy email auth ─────────────────────────────────────────
+async function privyCall(path,body){
+  const PRIVY_APP_ID='cmq1eo6uz004b0cl8pvk7aakk';
+  const target='https://auth.privy.io/api/v1'+path;
+  const h={'Content-Type':'application/json','privy-app-id':PRIVY_APP_ID,'privy-client':'react-auth:1.92.3'};
+  if(_jwt) h['Authorization']='Bearer '+_jwt;
+  const opts={method:body?'POST':'GET',headers:h,body:body?JSON.stringify(body):undefined};
+  // 1. Vercel server-side proxy
+  try{
+    const r=await fetch('/api/privy?path='+encodeURIComponent(path),opts);
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error('Privy '+(d.cause||d.error||d.message||r.status));
+    return d;
+  }catch(e){if(e.message.startsWith('Privy'))throw e;}
+  // 2. Local dev proxy (server.py)
+  try{
+    const r=await fetch('http://localhost:8080/privy-proxy?path='+encodeURIComponent(path),opts);
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error('Privy '+(d.cause||d.error||d.message||r.status));
+    return d;
+  }catch(e){if(e.message.startsWith('Privy'))throw e;}
+  // 3. Direct (if Privy CORS allows)
+  const r=await fetch(target,opts);
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error('Privy '+(d.cause||d.error||d.message||r.status));
+  return d;
+}
+
 async function sendCode(){
   const email=(document.getElementById('inp-email').value||'').trim();
   if(!email||!email.includes('@')){showErr('Enter a valid email');return;}
   hideErr();
   ST.email=email;
   try{
-    const r=await fetch('/privy-proxy?path=/passwordless/init',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({email,create_new_user:true})});
-    if(!r.ok)throw new Error('Failed');
+    await privyCall('/passwordless/init',{email,create_new_user:true});
     showStep('otp');
     setTimeout(()=>document.getElementById('o0').focus(),100);
   }catch(e){showErr('Could not send code — '+e.message);}
@@ -626,10 +651,7 @@ async function verifyCode(){
   if(code.length<6){showErr('Enter 6-digit code','home-err2');return;}
   hideErr('home-err2');
   try{
-    const r=await fetch('/privy-proxy?path=/passwordless/authenticate',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({email:ST.email,code,mode:'login-or-create-user'})});
-    const d=await r.json();
-    if(!r.ok)throw new Error(d.message||'Invalid code');
+    const d=await privyCall('/passwordless/authenticate',{email:ST.email,code,mode:'login-or-create-user'});
     _jwt=d.token||d.identity_token||'';
     showStep('wallet');
     document.getElementById('wallet-checking').style.display='block';
