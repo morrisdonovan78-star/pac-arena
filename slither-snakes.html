@@ -408,7 +408,7 @@ let SG=null;
 let canvas=null,ctx=null,mmCanvas=null,mmCtx=null;
 let rafHandle=null,_hostRaf=null,_lastTickTs=0;
 let _camX=0,_camY=0,_camZoom=0.6,_zoomOffset=0;
-let _mouseX=0,_mouseY=0,_mouseBoost=false,_cashoutTimer=null;
+let _mouseX=0,_mouseY=0,_mouseBoost=false,_padBoost=false,_cashoutTimer=null;
 let _pendingState=null;
 let _gpadLastBtn=[],_gpadNavTs=0;
 const GPAD_DEADZONE=0.2,GPAD_NAV_MS=180;
@@ -1098,7 +1098,7 @@ function foodColor(f){return FOOD_COLORS[f.ci]||FOOD_COLORS[0];}
 
 function initSnakeGame(players){
   _localDead=false;
-  _foodSendCounter=0;
+  _foodSendCounter=2; // init so first sendSnakeState (→3) immediately includes food
   SG={snakes:new Map(),food:[],tick:0,over:false};
   const myColor=_playerMeta.get(myPid)?.color||colorFromId(myPid);
   SG.snakes.set(myPid,makeSnake(myPid,myColor,getMyName()));
@@ -1160,7 +1160,7 @@ function snakeTick(){
   const mySnake=SG.snakes.get(myPid);
   if(mySnake&&mySnake.alive){
     applyTurn(mySnake,targetAngleToMouse(mySnake));
-    mySnake.boost=_mouseBoost;
+    mySnake.boost=_mouseBoost||_padBoost;
   }
 
   // Apply guest inputs — use guest's reported x,y as authoritative position
@@ -1339,10 +1339,11 @@ function applyRemoteState(d){
       s.numSections=sd.ns||(sd.segs&&sd.segs.length)||s.numSections;
       s.color=sd.color||s.color; s.name=sd.name||s.name;
       if(sd.segs&&sd.segs.length>1){
-        const _segR=BASE_RADIUS+Math.pow(s.numSections*SIZE_PER_SEGMENT,RADIUS_GROWTH)*RADIUS_SCALE;
-        const steps=Math.max(1,Math.round(_segR*SEGMENT_SPACING/SNAKE_SPD));
+        const serverHead={x:sd.segs[0][0],y:sd.segs[0][1]};
         if(!s.path.length){
-          // First packet — full reconstruction
+          // First packet or teleport — full path reconstruction
+          const _segR=BASE_RADIUS+Math.pow(s.numSections*SIZE_PER_SEGMENT,RADIUS_GROWTH)*RADIUS_SCALE;
+          const steps=Math.max(1,Math.round(_segR*SEGMENT_SPACING/SNAKE_SPD));
           const path=[];
           for(let i=0;i<sd.segs.length-1;i++){
             const a=sd.segs[i],b=sd.segs[i+1];
@@ -1352,13 +1353,13 @@ function applyRemoteState(d){
           path.push({x:sd.segs[sd.segs.length-1][0],y:sd.segs[sd.segs.length-1][1]});
           s.path=path; s._predTs=0;
         } else {
-          // Smooth correction: blend local head toward server head, only snap on large drift
-          const serverHead={x:sd.segs[0][0],y:sd.segs[0][1]};
           const h=s.path[0];
-          const dx=serverHead.x-h.x, dy=serverHead.y-h.y;
+          const dx=serverHead.x-h.x,dy=serverHead.y-h.y;
           const dist=Math.sqrt(dx*dx+dy*dy);
-          if(dist>SNAKE_SPD*10){
-            // Large drift — snap to server
+          if(dist>SNAKE_SPD*15){
+            // Large teleport-level drift — full rebuild
+            const _segR=BASE_RADIUS+Math.pow(s.numSections*SIZE_PER_SEGMENT,RADIUS_GROWTH)*RADIUS_SCALE;
+            const steps=Math.max(1,Math.round(_segR*SEGMENT_SPACING/SNAKE_SPD));
             const path=[];
             for(let i=0;i<sd.segs.length-1;i++){
               const a=sd.segs[i],b=sd.segs[i+1];
@@ -1368,8 +1369,8 @@ function applyRemoteState(d){
             path.push({x:sd.segs[sd.segs.length-1][0],y:sd.segs[sd.segs.length-1][1]});
             s.path=path; s._predTs=0;
           } else {
-            // Small drift — gentle blend (no lurch)
-            s.path[0]={x:h.x+dx*0.2,y:h.y+dy*0.2};
+            // Normal update — snap head to server, body trails naturally via dead reckoning
+            s.path[0]=serverHead;
           }
         }
       }
@@ -1387,7 +1388,7 @@ function startGuestLoop(){
     const my=SG.snakes.get(myPid);
     if(!my||!my.alive)return;
     const targetAngle=targetAngleToMouse(my);
-    const canBoost=_mouseBoost&&my.numSections>INIT_SECTIONS;
+    const canBoost=(_mouseBoost||_padBoost)&&my.numSections>INIT_SECTIONS;
     my.boost=canBoost;
     const h=my.path[0];
     _sio.emit('ssin',{id:myPid,angle:targetAngle,boost:canBoost,x:Math.round(h.x),y:Math.round(h.y)});
@@ -1524,7 +1525,7 @@ function pollGamepad(){
       const r=Math.min(cx,cy)*0.8;
       _mouseX=cx+ax*r; _mouseY=cy+ay*r;
     }
-    _mouseBoost=cur(0); // A button
+    _padBoost=cur(0); // A button — stored separately so keyboard boost isn't overridden
     // Right stick X (axes[2]) — zoom in/out
     const rsx=axes[2]||0;
     if(Math.abs(rsx)>GPAD_DEADZONE) _zoomOffset=Math.max(-0.5,Math.min(0.8,_zoomOffset-rsx*0.004));
@@ -1561,8 +1562,8 @@ function gpadFocus(dir){
   const i=all.indexOf(document.activeElement);
   all[i<0?0:(i+dir+all.length)%all.length].focus();
 }
-// Persistent gamepad loop for menu navigation (game rAF covers in-game)
-;(function _gpadMenuLoop(){requestAnimationFrame(_gpadMenuLoop);if(!rafHandle)pollGamepad();})();
+// Single persistent gamepad loop — runs every frame regardless of game state
+;(function _gpadMenuLoop(){requestAnimationFrame(_gpadMenuLoop);pollGamepad();})();
 
 // ══ RENDERING ════════════════════════════════════════════════
 
@@ -1570,7 +1571,6 @@ function rafDraw(ts){
   if(!canvas||!ctx){rafHandle=null;return;}
   rafHandle=requestAnimationFrame(rafDraw);
   _lastDrawTs=ts;
-  pollGamepad();
 
   if(_pendingState){applyRemoteState(_pendingState);_pendingState=null;}
 
@@ -1585,7 +1585,7 @@ function rafDraw(ts){
       const da=angleDiff(targetAngleToMouse(my),my.angle);
       my.angle+=Math.max(-MAX_TURN*frac,Math.min(MAX_TURN*frac,da));
       // damnbruh: no boost below minimum size
-      my.boost=_mouseBoost&&my.numSections>INIT_SECTIONS;
+      my.boost=(_mouseBoost||_padBoost)&&my.numSections>INIT_SECTIONS;
       const spd=(my.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=my.path[0];
       my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
