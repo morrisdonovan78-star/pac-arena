@@ -1361,16 +1361,20 @@ function onMouseMove(e){_mouseX=e.clientX;_mouseY=e.clientY;}
 function onTouchMove(e){e.preventDefault();if(e.touches.length){_mouseX=e.touches[0].clientX;_mouseY=e.touches[0].clientY;}}
 function onGameKey(e){
   if(e.key===' '||e.key==='Shift')_mouseBoost=true;
-  if((e.key==='q'||e.key==='Q')&&!_cashoutTimer&&SG&&!SG.over&&!_localDead){
-    addToast('HOLD Q — CASHING OUT IN 1s…','#FFD700');
-    _cashoutTimer=setTimeout(()=>{_cashoutTimer=null;endSnakeGame('cashout',null);},1000);
+  if(e.key==='q'||e.key==='Q'){
+    if(SG&&!SG.over&&!_localDead){
+      if(!_cashoutTimer){
+        addToast('CASHING OUT IN 1s… (Q again to cancel)','#FFD700');
+        _cashoutTimer=setTimeout(()=>{_cashoutTimer=null;endSnakeGame('cashout',null);},1000);
+      }else{
+        clearTimeout(_cashoutTimer);_cashoutTimer=null;
+        addToast('Cashout cancelled','#888');
+      }
+    }
   }
 }
 function onGameKeyUp(e){
   if(e.key===' '||e.key==='Shift')_mouseBoost=false;
-  if(e.key==='q'||e.key==='Q'){
-    if(_cashoutTimer){clearTimeout(_cashoutTimer);_cashoutTimer=null;addToast('Cashout cancelled','#888');}
-  }
 }
 
 async function endSnakeGame(reason,killerId){
