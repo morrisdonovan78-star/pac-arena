@@ -70,6 +70,7 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
 .btn{display:flex;align-items:center;justify-content:center;gap:8px;font-family:'Press Start 2P',monospace;font-size:9px;letter-spacing:1px;padding:13px 20px;border-radius:8px;border:2px solid;cursor:pointer;transition:all .15s;width:100%;background:transparent;}
 .btn:disabled{opacity:.35;cursor:not-allowed;}
 .btn:active:not(:disabled){transform:scale(.97);}
+.btn:focus-visible,.copy-btn:focus-visible,input:focus-visible{outline:2px solid var(--y);outline-offset:2px;}
 .btn-y{background:var(--y);color:#120f00;border-color:var(--y);}
 .btn-y:hover:not(:disabled){box-shadow:0 0 24px rgba(255,215,0,.5);}
 .btn-g{background:var(--g);color:#001500;border-color:var(--g);}
@@ -245,7 +246,25 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
       <button id="srv-eu" class="btn btn-c btn-sm" onclick="setGameServer('EU')" style="flex:1;">🇩🇪 EU</button>
     </div>
     <button class="btn btn-g" onclick="go('scr-lobby');populateLobby();" style="margin-bottom:10px;font-size:11px;letter-spacing:2px;">▶ PLAY NOW</button>
+    <button class="btn btn-c btn-sm" onclick="showWithdraw()" style="margin-bottom:10px;">💸 WITHDRAW SOL</button>
     <button class="btn btn-r btn-sm" onclick="doLogout()" style="margin:0 auto;width:auto;">LOGOUT</button>
+  </div>
+</div>
+
+<!-- Withdrawal modal -->
+<div id="wd-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;display:none;align-items:center;justify-content:center;">
+  <div class="card" style="max-width:420px;width:90%;padding:1.5rem;">
+    <div style="font-family:'Press Start 2P',monospace;font-size:12px;color:var(--acc);margin-bottom:1.2rem;text-align:center;">WITHDRAW SOL</div>
+    <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">DESTINATION WALLET</div>
+    <input id="wd-addr" placeholder="Solana wallet address…" autocomplete="off"
+      style="width:100%;box-sizing:border-box;background:rgba(0,0,0,.4);border:1px solid rgba(57,255,20,.3);border-radius:6px;color:#fff;font-size:11px;padding:9px 10px;outline:none;margin-bottom:10px;"/>
+    <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">AMOUNT (SOL)</div>
+    <input id="wd-amt" type="number" min="0.001" step="0.001" placeholder="0.00"
+      style="width:100%;box-sizing:border-box;background:rgba(0,0,0,.4);border:1px solid rgba(57,255,20,.3);border-radius:6px;color:#fff;font-size:11px;padding:9px 10px;outline:none;margin-bottom:1rem;"/>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-g btn-sm" onclick="doWithdraw()" style="flex:1;">SEND</button>
+      <button class="btn btn-r btn-sm" onclick="document.getElementById('wd-modal').style.display='none'" style="flex:1;">CANCEL</button>
+    </div>
   </div>
 </div>
 
@@ -356,12 +375,14 @@ const BASE_RADIUS        = 8;    // minimum snake radius
 const RADIUS_GROWTH      = 0.6;  // exponent for radius curve
 const RADIUS_SCALE       = 0.8;  // multiplier for radius curve
 // radius = BASE_RADIUS + size^RADIUS_GROWTH * RADIUS_SCALE
-const FOOD_TARGET  = 300;
-const FOOD_GROW    = 3;     // sections added per food orb
+const FOOD_TARGET  = 180;   // 180 pebbles on map
+const FOOD_GROW    = 2;     // sections added per food orb
 const MIN_SECTIONS = 8;     // die below this
-const INIT_SECTIONS= 30;    // starting section count (same as real slither.io)
-const MAX_TURN     = 0.211; // rad/tick — scaled +30% with speed
-const BOOST_DRAIN  = 8;     // ticks between boost drain (~3.75 drains/sec, ~6s boost from start)
+const INIT_SECTIONS= 24;    // starting section count
+const MAX_SECTIONS = 90;    // hard cap on snake length
+const MAX_TURN     = 0.211; // rad/tick
+const BOOST_DRAIN  = 8;     // ticks between boost drain events
+const BOOST_DRAIN_AMT = 3;  // sections lost per drain event (3× faster drain)
 const SELF_SKIP    = 9999;  // disable self-collision — damnbruh.com: own tail never kills you
 const ESCROW_PUBKEY = '2SYFfCsSmKr8qwK1AfWd36JtAc1BCaRaSSxyECKUJjBb';
 const APP_ID = 'cmq1eo6uz004b0cl8pvk7aakk';
@@ -389,6 +410,8 @@ let rafHandle=null,_hostRaf=null,_lastTickTs=0;
 let _camX=0,_camY=0,_camZoom=0.6;
 let _mouseX=0,_mouseY=0,_mouseBoost=false,_cashoutTimer=null;
 let _pendingState=null;
+let _gpadLastBtn=[],_gpadNavTs=0;
+const GPAD_DEADZONE=0.2,GPAD_NAV_MS=180;
 let _guestInputs=new Map();
 let _killFeed=[];
 let _pendingKills=[];
@@ -604,6 +627,34 @@ async function checkSession(){
     document.getElementById('home-on').style.display='block';
     syncServerBtns();
   }catch(e){localStorage.removeItem('ss_last');}
+}
+
+function showWithdraw(){
+  document.getElementById('wd-addr').value='';
+  document.getElementById('wd-amt').value='';
+  document.getElementById('wd-modal').style.display='flex';
+}
+async function doWithdraw(){
+  const toAddr=document.getElementById('wd-addr').value.trim();
+  const amt=parseFloat(document.getElementById('wd-amt').value);
+  if(!toAddr||isNaN(amt)||amt<=0){addToast('Enter a valid address and amount','#f55');return;}
+  if(!_keypair||!ST.conn){addToast('Wallet not loaded','#f55');return;}
+  try{
+    const from=new solanaWeb3.PublicKey(ST.address);
+    const to=new solanaWeb3.PublicKey(toAddr);
+    const lamps=Math.floor(amt*solanaWeb3.LAMPORTS_PER_SOL);
+    const tx=new solanaWeb3.Transaction().add(
+      solanaWeb3.SystemProgram.transfer({fromPubkey:from,toPubkey:to,lamports:lamps})
+    );
+    const lb=await ST.conn.getLatestBlockhash('confirmed');
+    tx.recentBlockhash=lb.blockhash; tx.feePayer=from;
+    tx.sign(_keypair);
+    const sig=await ST.conn.sendRawTransaction(tx.serialize(),{skipPreflight:false});
+    await ST.conn.confirmTransaction(sig,'confirmed');
+    addToast('✓ Sent '+amt+' SOL!','#39FF14');
+    document.getElementById('wd-modal').style.display='none';
+    await refreshBal();
+  }catch(e){addToast('Withdraw failed: '+(e.message||e),'#f55');console.warn('[withdraw]',e);}
 }
 
 function doLogout(){
@@ -903,7 +954,7 @@ async function pkConnect(roomId,gameToken){
     // Guest input from guests → host
     _sio.on('ssin',(data)=>{
       if(!isHost||!data||!data.id||data.id===myPid)return;
-      _guestInputs.set(data.id,{angle:data.angle||0,boost:!!data.boost,ts:Date.now()});
+      _guestInputs.set(data.id,{angle:data.angle||0,boost:!!data.boost,x:data.x,y:data.y,ts:Date.now()});
     });
 
     _sio.on('join',(h)=>{
@@ -1129,8 +1180,8 @@ function snakeTick(){
   // Advance all snakes
   SG.snakes.forEach(snake=>{
     if(!snake.alive)return;
-    // damnbruh: can't boost below minimum size
-    if(snake.boost&&snake.numSections<=MIN_SECTIONS+3)snake.boost=false;
+    // can't boost at or below starting length
+    if(snake.boost&&snake.numSections<=INIT_SECTIONS)snake.boost=false;
     const spd=snake.boost?BOOST_SPD:SNAKE_SPD;
     const head=snake.path[0];
     // Guest snakes: position already inserted from ssin above — only advance host's own snake
@@ -1138,12 +1189,12 @@ function snakeTick(){
       snake.path.unshift({x:head.x+Math.cos(snake.angle)*spd,y:head.y+Math.sin(snake.angle)*spd});
     }
 
-    // Grow: increment section count from queue
-    if(snake.growQueue>0){snake.growQueue--;snake.numSections++;}
+    // Grow: increment section count from queue, cap at MAX_SECTIONS
+    if(snake.growQueue>0){snake.growQueue--;snake.numSections=Math.min(MAX_SECTIONS,snake.numSections+1);}
 
-    // Boost drains sections — drops food at tail (damnbruh.com mechanic)
-    if(snake.boost&&SG.tick%BOOST_DRAIN===0&&snake.numSections>MIN_SECTIONS+3){
-      snake.numSections--;
+    // Boost drains sections — stops at INIT_SECTIONS (can't boost below starting length)
+    if(snake.boost&&SG.tick%BOOST_DRAIN===0&&snake.numSections>INIT_SECTIONS){
+      snake.numSections=Math.max(INIT_SECTIONS,snake.numSections-BOOST_DRAIN_AMT);
       const bPts=getBodyPoints(snake);
       const tail=bPts[bPts.length-1];
       if(tail) SG.food.push({x:tail.x+(Math.random()-.5)*6,y:tail.y+(Math.random()-.5)*6,ci:Math.floor(Math.random()*FOOD_COLORS.length),size:4+Math.random()*3});
@@ -1212,7 +1263,7 @@ function snakeTick(){
   while(SG.food.length<FOOD_TARGET)SG.food.push(makeFood());
 
   _pkTick++;
-  if(_pkTick%2===0)sendSnakeState();
+  sendSnakeState();
 }
 
 function eliminateSnake(id,killerId){
@@ -1272,7 +1323,12 @@ function applyRemoteState(d){
   }
   if(d.snakes){
     d.snakes.forEach(sd=>{
-      if(sd.id===myPid)return;
+      // Own snake: sync size from host but never touch path (we predict locally)
+      if(sd.id===myPid){
+        const own=SG.snakes.get(myPid);
+        if(own&&sd.ns)own.numSections=sd.ns;
+        return;
+      }
       let s=SG.snakes.get(sd.id);
       if(!s){
         const meta=_playerMeta.get(sd.id)||{};
@@ -1283,22 +1339,39 @@ function applyRemoteState(d){
       s.numSections=sd.ns||(sd.segs&&sd.segs.length)||s.numSections;
       s.color=sd.color||s.color; s.name=sd.name||s.name;
       if(sd.segs&&sd.segs.length>1){
-        // segs are body-section positions (spacing = radius*0.5 apart).
-        // Reconstruct a dense path by interpolating steps between each section.
         const _segR=BASE_RADIUS+Math.pow(s.numSections*SIZE_PER_SEGMENT,RADIUS_GROWTH)*RADIUS_SCALE;
         const steps=Math.max(1,Math.round(_segR*SEGMENT_SPACING/SNAKE_SPD));
-        const path=[];
-        for(let i=0;i<sd.segs.length-1;i++){
-          const a=sd.segs[i],b=sd.segs[i+1];
-          const dx=b[0]-a[0],dy=b[1]-a[1];
-          for(let k=0;k<steps;k++){
-            const t=k/steps;
-            path.push({x:a[0]+dx*t,y:a[1]+dy*t});
+        if(!s.path.length){
+          // First packet — full reconstruction
+          const path=[];
+          for(let i=0;i<sd.segs.length-1;i++){
+            const a=sd.segs[i],b=sd.segs[i+1];
+            const dx=b[0]-a[0],dy=b[1]-a[1];
+            for(let k=0;k<steps;k++){path.push({x:a[0]+dx*(k/steps),y:a[1]+dy*(k/steps)});}
+          }
+          path.push({x:sd.segs[sd.segs.length-1][0],y:sd.segs[sd.segs.length-1][1]});
+          s.path=path; s._predTs=0;
+        } else {
+          // Smooth correction: blend local head toward server head, only snap on large drift
+          const serverHead={x:sd.segs[0][0],y:sd.segs[0][1]};
+          const h=s.path[0];
+          const dx=serverHead.x-h.x, dy=serverHead.y-h.y;
+          const dist=Math.sqrt(dx*dx+dy*dy);
+          if(dist>SNAKE_SPD*10){
+            // Large drift — snap to server
+            const path=[];
+            for(let i=0;i<sd.segs.length-1;i++){
+              const a=sd.segs[i],b=sd.segs[i+1];
+              const ddx=b[0]-a[0],ddy=b[1]-a[1];
+              for(let k=0;k<steps;k++){path.push({x:a[0]+ddx*(k/steps),y:a[1]+ddy*(k/steps)});}
+            }
+            path.push({x:sd.segs[sd.segs.length-1][0],y:sd.segs[sd.segs.length-1][1]});
+            s.path=path; s._predTs=0;
+          } else {
+            // Small drift — gentle blend (no lurch)
+            s.path[0]={x:h.x+dx*0.2,y:h.y+dy*0.2};
           }
         }
-        path.push({x:sd.segs[sd.segs.length-1][0],y:sd.segs[sd.segs.length-1][1]});
-        s.path=path;
-        s._predTs=0; // reset so dead reckoning starts fresh from this packet
       }
     });
   }
@@ -1314,7 +1387,7 @@ function startGuestLoop(){
     const my=SG.snakes.get(myPid);
     if(!my||!my.alive)return;
     const targetAngle=targetAngleToMouse(my);
-    const canBoost=_mouseBoost&&my.numSections>MIN_SECTIONS+3;
+    const canBoost=_mouseBoost&&my.numSections>INIT_SECTIONS;
     my.boost=canBoost;
     const h=my.path[0];
     _sio.emit('ssin',{id:myPid,angle:targetAngle,boost:canBoost,x:Math.round(h.x),y:Math.round(h.y)});
@@ -1363,19 +1436,17 @@ function onGameKey(e){
   if(e.repeat)return;
   if(e.key===' '||e.key==='Shift')_mouseBoost=true;
   if(e.key==='q'||e.key==='Q'){
-    if(SG&&!SG.over&&!_localDead){
-      if(!_cashoutTimer){
-        addToast('CASHING OUT IN 1s… (Q again to cancel)','#FFD700');
-        _cashoutTimer=setTimeout(()=>{_cashoutTimer=null;endSnakeGame('cashout',null);},1000);
-      }else{
-        clearTimeout(_cashoutTimer);_cashoutTimer=null;
-        addToast('Cashout cancelled','#888');
-      }
+    if(SG&&!SG.over&&!_localDead&&!_cashoutTimer){
+      addToast('HOLD Q to cash out… release to cancel','#FFD700');
+      _cashoutTimer=setTimeout(()=>{_cashoutTimer=null;endSnakeGame('cashout',null);},1000);
     }
   }
 }
 function onGameKeyUp(e){
   if(e.key===' '||e.key==='Shift')_mouseBoost=false;
+  if(e.key==='q'||e.key==='Q'){
+    if(_cashoutTimer){clearTimeout(_cashoutTimer);_cashoutTimer=null;addToast('Cashout cancelled','#888');}
+  }
 }
 
 async function endSnakeGame(reason,killerId){
@@ -1432,12 +1503,71 @@ async function endSnakeGame(reason,killerId){
   pkDisconnect();
 }
 
+// ── Gamepad support ──────────────────────────────────────────
+function pollGamepad(){
+  if(!navigator.getGamepads)return;
+  const pads=navigator.getGamepads();
+  let gpad=null;
+  for(let i=0;i<pads.length;i++){if(pads[i]&&pads[i].connected){gpad=pads[i];break;}}
+  if(!gpad)return;
+  const axes=gpad.axes, btns=gpad.buttons;
+  const now=performance.now();
+  function cur(i){return !!(btns[i]&&btns[i].pressed);}
+  function pressed(i){return cur(i)&&!(_gpadLastBtn[i]||false);}
+  function released(i){return !cur(i)&&(_gpadLastBtn[i]||false);}
+
+  if(SG&&!SG.over&&canvas){
+    // In-game: left stick → aim direction, A → boost, Y → cashout (hold)
+    const ax=axes[0]||0,ay=axes[1]||0;
+    if(Math.sqrt(ax*ax+ay*ay)>GPAD_DEADZONE){
+      const cx=canvas.width/2,cy=canvas.height/2;
+      const r=Math.min(cx,cy)*0.8;
+      _mouseX=cx+ax*r; _mouseY=cy+ay*r;
+    }
+    _mouseBoost=cur(0); // A button
+    // Y button (index 3) — hold 1s to cashout
+    if(pressed(3)&&!_cashoutTimer&&!_localDead){
+      addToast('HOLD Y to cash out…','#FFD700');
+      _cashoutTimer=setTimeout(()=>{_cashoutTimer=null;endSnakeGame('cashout',null);},1000);
+    }
+    if(released(3)&&_cashoutTimer){
+      clearTimeout(_cashoutTimer);_cashoutTimer=null;addToast('Cashout cancelled','#888');
+    }
+  } else {
+    // Menu: stick/d-pad to navigate, A to confirm, B to back
+    const sy=axes[1]||0,sx=axes[0]||0;
+    const dUp=cur(12)||sy<-0.5,dDown=cur(13)||sy>0.5;
+    const dLeft=cur(14)||sx<-0.5,dRight=cur(15)||sx>0.5;
+    if((dUp||dDown||dLeft||dRight)&&now-_gpadNavTs>GPAD_NAV_MS){
+      _gpadNavTs=now;
+      gpadFocus((dDown||dRight)?1:-1);
+    }
+    if(pressed(0)){const f=document.activeElement;if(f)f.click();}
+    if(pressed(1)){
+      const back=document.querySelector('.scr[style*="flex"] .copy-btn,[id="wd-modal"] .btn-r');
+      if(back)back.click();
+    }
+  }
+  _gpadLastBtn=Array.from(btns).map(b=>!!(b&&b.pressed));
+}
+function gpadFocus(dir){
+  const all=[...document.querySelectorAll('button:not([disabled]),input:not([disabled])')].filter(e=>{
+    const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&e.offsetParent!==null;
+  });
+  if(!all.length)return;
+  const i=all.indexOf(document.activeElement);
+  all[i<0?0:(i+dir+all.length)%all.length].focus();
+}
+// Persistent gamepad loop for menu navigation (game rAF covers in-game)
+;(function _gpadMenuLoop(){requestAnimationFrame(_gpadMenuLoop);if(!rafHandle)pollGamepad();})();
+
 // ══ RENDERING ════════════════════════════════════════════════
 
 function rafDraw(ts){
   if(!canvas||!ctx){rafHandle=null;return;}
   rafHandle=requestAnimationFrame(rafDraw);
   _lastDrawTs=ts;
+  pollGamepad();
 
   if(_pendingState){applyRemoteState(_pendingState);_pendingState=null;}
 
@@ -1452,11 +1582,11 @@ function rafDraw(ts){
       const da=angleDiff(targetAngleToMouse(my),my.angle);
       my.angle+=Math.max(-MAX_TURN*frac,Math.min(MAX_TURN*frac,da));
       // damnbruh: no boost below minimum size
-      my.boost=_mouseBoost&&my.numSections>MIN_SECTIONS+3;
+      my.boost=_mouseBoost&&my.numSections>INIT_SECTIONS;
       const spd=(my.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=my.path[0];
       my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
-      if(my.growQueue>0){my.growQueue--;my.numSections++;}
+      if(my.growQueue>0){my.growQueue--;my.numSections=Math.min(MAX_SECTIONS,my.numSections+1);}
       const pathNeeded=Math.ceil(my.numSections*sectionRadius(my)*SEGMENT_SPACING/Math.max(spd,0.5))+10;
       if(my.path.length>pathNeeded)my.path.length=pathNeeded;
       const nh=my.path[0];
@@ -1476,7 +1606,7 @@ function rafDraw(ts){
       const spd=(s.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=s.path[0];
       s.path.unshift({x:h.x+Math.cos(s.angle)*spd,y:h.y+Math.sin(s.angle)*spd});
-      if(s.growQueue>0){s.growQueue--;s.numSections++;}
+      if(s.growQueue>0){s.growQueue--;s.numSections=Math.min(MAX_SECTIONS,s.numSections+1);}
       const pn=Math.ceil(s.numSections*sectionRadius(s)*SEGMENT_SPACING/Math.max(spd,0.5))+10;
       if(s.path.length>pn)s.path.length=pn;
     });
@@ -1662,14 +1792,6 @@ function _drawHeadCircle(snake,r){
   ctx.fillStyle='rgba(255,255,255,0.75)';
   ctx.beginPath();ctx.arc(eFwd+eR*0.05,-eSide-eR*0.18,eR*0.22,0,Math.PI*2);ctx.fill();
   ctx.beginPath();ctx.arc(eFwd+eR*0.05, eSide-eR*0.18,eR*0.22,0,Math.PI*2);ctx.fill();
-
-  // Tongue flick
-  if(SG&&SG.tick%20<10){
-    ctx.strokeStyle='#ff2255';ctx.lineWidth=r*0.13;ctx.lineCap='round';
-    ctx.beginPath();ctx.moveTo(r*0.88,0);ctx.lineTo(r*1.55,0);ctx.stroke();
-    ctx.beginPath();ctx.moveTo(r*1.55,0);ctx.lineTo(r*2.0,-r*0.3);ctx.stroke();
-    ctx.beginPath();ctx.moveTo(r*1.55,0);ctx.lineTo(r*2.0, r*0.3);ctx.stroke();
-  }
 
   // Boost flame behind head
   if(snake.boost){
