@@ -121,7 +121,7 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
 .ldot{width:6px;height:6px;border-radius:50%;}.gold .ldot{background:var(--y);}.diam .ldot{background:var(--c);}.free .ldot{background:var(--g);}
 .otp-box{width:44px;height:52px;background:rgba(255,255,255,.04);border:2px solid var(--border);border-radius:8px;font-family:'Press Start 2P',monospace;font-size:20px;text-align:center;color:var(--y);outline:none;}
 .otp-box:focus{border-color:var(--g);box-shadow:0 0 0 3px rgba(57,255,20,.1);}
-#scr-game.on{position:fixed;top:0;left:0;width:100vw;height:100vh;padding:0;overflow:hidden;z-index:50;background:#000;display:flex;align-items:center;justify-content:center;}
+#scr-game.on{position:fixed;top:0;left:0;width:100vw;height:100vh;padding:0;overflow:hidden;z-index:50;background:#000;display:flex;align-items:center;justify-content:center;cursor:none;}
 #gc{display:block;touch-action:none;cursor:none;}
 #game-hud{position:fixed;top:6px;left:50%;transform:translateX(-50%);display:flex;align-items:stretch;background:rgba(7,7,15,0.88);border:1px solid rgba(57,255,20,0.25);border-radius:8px;padding:3px 0;z-index:100;font-family:'Press Start 2P',monospace;white-space:nowrap;pointer-events:none;}
 .gi{text-align:center;padding:2px 10px;}.gi+.gi{border-left:1px solid rgba(255,255,255,0.08);}
@@ -360,7 +360,7 @@ const FOOD_TARGET  = 600;
 const FOOD_GROW    = 3;     // sections added per food orb
 const MIN_SECTIONS = 8;     // die below this
 const INIT_SECTIONS= 30;    // starting section count (same as real slither.io)
-const MAX_TURN     = 0.065; // rad/tick → ~3.7°/tick, 180° turn in ~49 ticks ≈ 1.6 sec
+const MAX_TURN     = 0.085; // rad/tick → ~4.9°/tick, 180° turn in ~37 ticks ≈ 1.2 sec
 const BOOST_DRAIN  = 3;     // ticks between boost section-drain
 const SELF_SKIP    = 9999;  // disable self-collision — damnbruh.com: own tail never kills you
 const ESCROW_PUBKEY = '2SYFfCsSmKr8qwK1AfWd36JtAc1BCaRaSSxyECKUJjBb';
@@ -387,7 +387,7 @@ let SG=null;
 let canvas=null,ctx=null,mmCanvas=null,mmCtx=null;
 let rafHandle=null,_hostRaf=null,_lastTickTs=0;
 let _camX=0,_camY=0,_camZoom=0.6;
-let _mouseX=0,_mouseY=0,_mouseBoost=false;
+let _mouseX=0,_mouseY=0,_mouseBoost=false,_cashoutTimer=null;
 let _pendingState=null;
 let _guestInputs=new Map();
 let _killFeed=[];
@@ -1332,9 +1332,9 @@ function launchSnakeGame(){
 
   document.getElementById('hud-pot').textContent=ST.lobbyUsd===0?'FREE':'$'+(ST.lobbyUsd*2);
 
-  canvas.addEventListener('mousemove',onMouseMove);
-  canvas.addEventListener('mousedown',e=>{if(e.button===0)_mouseBoost=true;});
-  canvas.addEventListener('mouseup',e=>{if(e.button===0)_mouseBoost=false;});
+  document.addEventListener('mousemove',onMouseMove);
+  document.addEventListener('mousedown',e=>{if(e.button===0)_mouseBoost=true;});
+  document.addEventListener('mouseup',e=>{if(e.button===0)_mouseBoost=false;});
   canvas.addEventListener('contextmenu',e=>e.preventDefault());
   canvas.addEventListener('touchmove',onTouchMove,{passive:false});
   canvas.addEventListener('touchstart',e=>{e.preventDefault();_mouseBoost=true;onTouchMove(e);},{passive:false});
@@ -1354,8 +1354,19 @@ function launchSnakeGame(){
 function onResize(){if(canvas){canvas.width=window.innerWidth;canvas.height=window.innerHeight;}}
 function onMouseMove(e){_mouseX=e.clientX;_mouseY=e.clientY;}
 function onTouchMove(e){e.preventDefault();if(e.touches.length){_mouseX=e.touches[0].clientX;_mouseY=e.touches[0].clientY;}}
-function onGameKey(e){if(e.key===' '||e.key==='Shift')_mouseBoost=true;}
-function onGameKeyUp(e){if(e.key===' '||e.key==='Shift')_mouseBoost=false;}
+function onGameKey(e){
+  if(e.key===' '||e.key==='Shift')_mouseBoost=true;
+  if((e.key==='q'||e.key==='Q')&&!_cashoutTimer&&SG&&!SG.over&&!_localDead){
+    addToast('HOLD Q — CASHING OUT IN 1s…','#FFD700');
+    _cashoutTimer=setTimeout(()=>{_cashoutTimer=null;endSnakeGame('cashout',null);},1000);
+  }
+}
+function onGameKeyUp(e){
+  if(e.key===' '||e.key==='Shift')_mouseBoost=false;
+  if(e.key==='q'||e.key==='Q'){
+    if(_cashoutTimer){clearTimeout(_cashoutTimer);_cashoutTimer=null;addToast('Cashout cancelled','#888');}
+  }
+}
 
 async function endSnakeGame(reason,killerId){
   if(!SG||SG.over||_localDead)return;
@@ -1363,7 +1374,10 @@ async function endSnakeGame(reason,killerId){
   stopHostLoop();
   clearInterval(_guestInputLoop);_guestInputLoop=null;
   if(rafHandle){cancelAnimationFrame(rafHandle);rafHandle=null;}
-  canvas&&canvas.removeEventListener('mousemove',onMouseMove);
+  if(_cashoutTimer){clearTimeout(_cashoutTimer);_cashoutTimer=null;}
+  document.removeEventListener('mousemove',onMouseMove);
+  document.removeEventListener('mousedown',()=>{});
+  document.removeEventListener('mouseup',()=>{});
   document.removeEventListener('keydown',onGameKey);
   document.removeEventListener('keyup',onGameKeyUp);
   window.removeEventListener('resize',onResize);
@@ -1372,11 +1386,12 @@ async function endSnakeGame(reason,killerId){
   const myScore=my?.score||0;
   const myLen=my?.numSections||0;
   const elim=reason==='eliminated';
+  const cashed=reason==='cashout';
 
   document.getElementById('rs-score').textContent=myScore;
   document.getElementById('rs-len').textContent=myLen;
   document.getElementById('rs-wager').textContent=ST.lobbyUsd===0?'FREE':'$'+ST.lobbyUsd;
-  document.getElementById('rs-result').textContent=elim?'ELIMINATED':'GAME OVER';
+  document.getElementById('rs-result').textContent=cashed?'CASHED OUT':elim?'ELIMINATED':'GAME OVER';
 
   const rcard=document.getElementById('rcard');
   if(elim){
@@ -1386,6 +1401,12 @@ async function endSnakeGame(reason,killerId){
     const kname=(_playerMeta.get(killerId)?.name||'the wall').toUpperCase();
     document.getElementById('rsub').textContent=ST.lobbyUsd===0?'Better luck next time!':'Eliminated by '+kname;
     document.getElementById('rs-result').style.color='var(--r)';
+  }else if(cashed){
+    rcard.className='rcard win';
+    document.getElementById('rico').textContent='💰';
+    document.getElementById('rhead').textContent='CASHED OUT!';
+    document.getElementById('rsub').textContent=ST.lobbyUsd===0?'Nice run!':'Winnings secured!';
+    document.getElementById('rs-result').style.color='var(--y)';
   }else{
     rcard.className='rcard win';
     document.getElementById('rico').textContent='🏆';
@@ -1395,7 +1416,8 @@ async function endSnakeGame(reason,killerId){
   }
 
   go('scr-result');
-  if(elim&&ST.lobbyUsd>0)await settle('p2');
+  if(cashed&&ST.lobbyUsd>0)await settle('p1');
+  else if(elim&&ST.lobbyUsd>0)await settle('p2');
   await refreshBal();
   pkDisconnect();
 }
@@ -1487,6 +1509,23 @@ function rafDraw(ts){
   drawHUD(mySnake);
   drawKillFeedHUD();
   drawMinimap(mySnake);
+
+  // Custom crosshair cursor (replaces system cursor hidden by cursor:none)
+  if(SG&&!SG.over&&!_localDead){
+    const cx=_mouseX,cy=_mouseY;
+    ctx.save();
+    ctx.strokeStyle='rgba(255,255,255,0.9)';
+    ctx.lineWidth=1.5;
+    ctx.beginPath();
+    ctx.moveTo(cx-10,cy);ctx.lineTo(cx-3,cy);
+    ctx.moveTo(cx+3,cy); ctx.lineTo(cx+10,cy);
+    ctx.moveTo(cx,cy-10);ctx.lineTo(cx,cy-3);
+    ctx.moveTo(cx,cy+3); ctx.lineTo(cx,cy+10);
+    ctx.stroke();
+    ctx.beginPath();ctx.arc(cx,cy,2,0,Math.PI*2);
+    ctx.fillStyle='rgba(255,255,255,0.95)';ctx.fill();
+    ctx.restore();
+  }
 }
 
 function drawArena(){
