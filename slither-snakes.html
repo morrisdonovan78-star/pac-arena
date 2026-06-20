@@ -345,18 +345,19 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
 'use strict';
 
 // ══ CONSTANTS ════════════════════════════════════════════════
-const ARENA_R     = 2400;   // world radius
-const SNAKE_SPD   = 3.5;    // px/tick normal
-const BOOST_SPD   = 7.5;    // px/tick boost
+const ARENA_R     = 2800;   // world radius
+const SNAKE_SPD   = 3.0;    // px/tick normal
+const BOOST_SPD   = 6.5;    // px/tick boost
 const TICK_MS     = 33;     // 30 TPS
-const PATH_STEP   = 3;      // path points between each visual segment
-const FOOD_TARGET = 500;
-const FOOD_GROW   = 3;      // segments gained per orb
-const MIN_LEN     = 10;     // die below this
-const INIT_LEN    = 24;
-const MAX_TURN    = 0.13;   // rad/tick — damnbruh feel
-const BOOST_DRAIN = 3;      // ticks between boost-shrink
-const SELF_SKIP   = 6;      // own segments skipped for self-collision
+const PATH_STEP   = 2;      // path positions per collision segment
+const FOOD_TARGET = 600;
+const FOOD_GROW   = 4;      // path positions gained per orb
+const MIN_LEN     = 12;     // die below this (path segments)
+const INIT_LEN    = 60;     // starting path length
+const MAX_TURN    = 0.09;   // rad/tick — slither.io feel (tighter)
+const BOOST_DRAIN = 4;      // ticks between boost-shrink
+const SELF_SKIP   = 10;     // own path points skipped for self-collision
+const DRAW_STEP   = 2;      // path points between each rendered circle
 const ESCROW_PUBKEY = '2SYFfCsSmKr8qwK1AfWd36JtAc1BCaRaSSxyECKUJjBb';
 const APP_ID = 'cmq1eo6uz004b0cl8pvk7aakk';
 const GAME_SERVERS = {
@@ -385,6 +386,7 @@ let _mouseX=0,_mouseY=0,_mouseBoost=false;
 let _pendingState=null;
 let _guestInputs=new Map();
 let _killFeed=[];
+let _pendingKills=[];
 let _playerMeta=new Map();
 let _ping=0,_pingIv=null;
 let _lastDrawTs=0;
@@ -888,13 +890,13 @@ async function pkConnect(roomId,gameToken){
       setTimeout(()=>{try{go('scr-lobby');}catch(_){}},3000);
     });
 
-    // Receive game state (from host) or input (if host receiving guest)
-    _sio.on('s',(data)=>{
+    // Snake state from host → guests
+    _sio.on('ss',(data)=>{
       if(!SG||(SG.over&&!isSpectating))return;
       _pendingState=data;
     });
-    // Also handle 'in' event directly (server may relay guest input as 'in')
-    _sio.on('in',(data)=>{
+    // Guest input from guests → host
+    _sio.on('ssin',(data)=>{
       if(!isHost||!data||!data.id||data.id===myPid)return;
       _guestInputs.set(data.id,{angle:data.angle||0,boost:!!data.boost,ts:Date.now()});
     });
@@ -983,28 +985,26 @@ function pkDisconnect(){
 // ══ SNAKE GAME LOGIC ════════════════════════════════════════
 
 // ── Path helpers ──────────────────────────────────────────────
+// snake.length = number of body path-points kept
+// snake.path   = ordered array of world positions (head first)
+// segPos used for collision — every PATH_STEP path points
 function segPos(snake,i){
   const idx=Math.min(i*PATH_STEP, snake.path.length-1);
   return snake.path[idx];
 }
 function snakeWidth(snake){
-  return 10 + Math.min(snake.length * 0.12, 18);
+  // grows from 18 → 38 as snake eats; capped at 38
+  return Math.max(18, Math.min(15 + snake.length * 0.12, 38));
 }
 
 function makeSnake(id,color,name){
   const spawnAngle=Math.random()*Math.PI*2;
-  const r=(ARENA_R*0.25)+Math.random()*(ARENA_R*0.5);
-  const sx=Math.cos(spawnAngle)*r;
-  const sy=Math.sin(spawnAngle)*r;
-  // Face inward toward center
+  const r=(ARENA_R*0.22)+Math.random()*(ARENA_R*0.56);
+  const sx=Math.cos(spawnAngle)*r, sy=Math.sin(spawnAngle)*r;
   const faceAngle=Math.atan2(-sy,-sx);
   const path=[];
-  const pathLen=INIT_LEN*PATH_STEP+20;
-  for(let i=0;i<pathLen;i++){
-    path.push({
-      x:sx - Math.cos(faceAngle)*i*(SNAKE_SPD*0.9),
-      y:sy - Math.sin(faceAngle)*i*(SNAKE_SPD*0.9)
-    });
+  for(let i=0;i<INIT_LEN;i++){
+    path.push({x:sx-Math.cos(faceAngle)*i*SNAKE_SPD, y:sy-Math.sin(faceAngle)*i*SNAKE_SPD});
   }
   return{id,color,name,angle:faceAngle,path,length:INIT_LEN,growQueue:0,alive:true,score:0,boost:false};
 }
@@ -1093,53 +1093,51 @@ function snakeTick(){
     s.boost=inp.boost;
   });
 
-  // Advance all snakes along their path
+  // Advance all snakes
   SG.snakes.forEach(snake=>{
     if(!snake.alive)return;
     const spd=snake.boost?BOOST_SPD:SNAKE_SPD;
     const head=snake.path[0];
     snake.path.unshift({x:head.x+Math.cos(snake.angle)*spd, y:head.y+Math.sin(snake.angle)*spd});
 
-    // Grow or trim
+    // Grow: each queued point just keeps the tail one step longer
     if(snake.growQueue>0){snake.growQueue--;snake.length++;}
-    // Boost drains length
-    if(snake.boost&&SG.tick%BOOST_DRAIN===0&&snake.length>MIN_LEN+2){
+
+    // Boost drains length — drops a food pellet at the tail
+    if(snake.boost&&SG.tick%BOOST_DRAIN===0&&snake.length>MIN_LEN+4){
       snake.length--;
-      // Drop a food orb at tail
-      const tail=segPos(snake,snake.length);
-      if(tail) SG.food.push({x:tail.x+(Math.random()-.5)*8,y:tail.y+(Math.random()-.5)*8,ci:Math.floor(Math.random()*FOOD_COLORS.length),size:4+Math.random()*3});
+      const tail=snake.path[snake.length];
+      if(tail) SG.food.push({x:tail.x+(Math.random()-.5)*6,y:tail.y+(Math.random()-.5)*6,ci:Math.floor(Math.random()*FOOD_COLORS.length),size:4+Math.random()*3});
     }
 
-    // Trim path
-    const need=snake.length*PATH_STEP+8;
-    if(snake.path.length>need)snake.path.length=need;
+    // Trim path to body length
+    if(snake.path.length>snake.length+4) snake.path.length=snake.length+4;
 
-    // Die too short
     if(snake.length<MIN_LEN){eliminateSnake(snake.id,null);return;}
   });
 
-  // Boundary check
+  // Boundary
   SG.snakes.forEach(snake=>{
     if(!snake.alive)return;
     const h=snake.path[0];
-    if(h.x*h.x+h.y*h.y>=ARENA_R*ARENA_R){eliminateSnake(snake.id,null);}
+    if(h.x*h.x+h.y*h.y>=ARENA_R*ARENA_R) eliminateSnake(snake.id,null);
   });
 
-  // Snake-vs-snake collisions
+  // Snake-vs-snake head collisions (check head vs every PATH_STEP-th body point)
   const alive=[...SG.snakes.values()].filter(s=>s.alive);
   for(let i=0;i<alive.length;i++){
     const a=alive[i]; if(!a.alive)continue;
     const ah=a.path[0];
-    const aR=snakeWidth(a)*0.48;
+    const aR=snakeWidth(a)*0.45;
     for(let j=0;j<alive.length;j++){
       const b=alive[j]; if(!b.alive)continue;
-      const bW=snakeWidth(b)*0.45;
-      const skip=(a.id===b.id)?SELF_SKIP:0;
-      for(let k=skip;k<b.length;k++){
-        const bs=segPos(b,k); if(!bs)continue;
-        const dx=ah.x-bs.x,dy=ah.y-bs.y;
-        if(dx*dx+dy*dy<(aR+bW)*(aR+bW)){
-          eliminateSnake(a.id,a.id===b.id?null:b.id);
+      const bR=snakeWidth(b)*0.45;
+      const startK=(a.id===b.id)?SELF_SKIP:0;
+      for(let k=startK;k<b.path.length;k+=PATH_STEP){
+        const bs=b.path[k]; if(!bs)continue;
+        const dx=ah.x-bs.x, dy=ah.y-bs.y;
+        if(dx*dx+dy*dy<(aR+bR)*(aR+bR)){
+          eliminateSnake(a.id, a.id===b.id?null:b.id);
           break;
         }
       }
@@ -1168,6 +1166,9 @@ function snakeTick(){
 
   _pkTick++;
   if(_pkTick%2===0)sendSnakeState();
+  if(_pkTick%2===0&&_pendingKills.length){
+    _pendingKills.length=0;
+  }
 }
 
 function eliminateSnake(id,killerId){
@@ -1179,15 +1180,16 @@ function eliminateSnake(id,killerId){
   const vm=_playerMeta.get(id)||{};
   _killFeed.push({kName:(km.name||'ARENA').slice(0,10),kColor:km.color||'#FFD700',vName:(vm.name||'SNAKE').slice(0,10),vColor:vm.color||'#FF69B4',ts:Date.now()});
   if(_killFeed.length>5)_killFeed.shift();
-  pkSend({t:'elim',id,killerId:killerId||null});
+  // Queue kill event so it goes out in the next ss state packet
+  _pendingKills.push({id,killerId:killerId||null});
   if(id===myPid)endSnakeGame('eliminated',killerId);
 }
 
 function spawnFoodFromSnake(snake){
   if(!snake||!snake.path)return;
-  const step=Math.max(PATH_STEP,Math.floor(snake.path.length/40));
+  const step=Math.max(2,Math.floor(snake.path.length/60));
   for(let i=0;i<snake.path.length;i+=step){
-    SG.food.push({x:snake.path[i].x+(Math.random()-.5)*16,y:snake.path[i].y+(Math.random()-.5)*16,ci:Math.floor(Math.random()*FOOD_COLORS.length),size:5+Math.random()*5});
+    SG.food.push({x:snake.path[i].x+(Math.random()-.5)*20,y:snake.path[i].y+(Math.random()-.5)*20,ci:Math.floor(Math.random()*FOOD_COLORS.length),size:5+Math.random()*6});
   }
   while(SG.food.length>FOOD_TARGET*2)SG.food.shift();
 }
@@ -1197,14 +1199,18 @@ function sendSnakeState(){
   const snakeArr=[];
   SG.snakes.forEach(s=>{
     if(!s.alive)return;
-    // Send every visual segment position
+    // Send every DRAW_STEP path point — matches what guests render
     const segs=[];
-    for(let i=0;i<s.length;i++){const p=segPos(s,i);if(p)segs.push([Math.round(p.x),Math.round(p.y)]);}
+    const limit=Math.min(s.path.length, s.length+2);
+    for(let i=0;i<limit;i+=DRAW_STEP){
+      segs.push([Math.round(s.path[i].x),Math.round(s.path[i].y)]);
+    }
     snakeArr.push({id:s.id,segs,angle:s.angle,score:s.score,boost:s.boost,len:s.length,color:s.color,name:s.name});
   });
   _foodSendCounter++;
-  const msg={t:'s',snakes:snakeArr,tick:SG.tick};
-  if(_foodSendCounter%12===0){
+  const msg={t:'ss',snakes:snakeArr,tick:SG.tick};
+  if(_pendingKills.length){msg.kills=[..._pendingKills];_pendingKills.length=0;}
+  if(_foodSendCounter%10===0){
     msg.food=SG.food.map(f=>[Math.round(f.x),Math.round(f.y),f.ci,Math.round(f.size)]);
   }
   pkSend(msg);
@@ -1212,9 +1218,17 @@ function sendSnakeState(){
 
 function applyRemoteState(d){
   if(!SG||!d)return;
-  if(d.t==='in'&&isHost){
-    if(d.id&&d.id!==myPid)_guestInputs.set(d.id,{angle:d.angle||0,boost:!!d.boost,ts:Date.now()});
-    return;
+  // Process kill events sent by host
+  if(d.kills){
+    d.kills.forEach(k=>{
+      const km=_playerMeta.get(k.killerId)||{};
+      const vm=_playerMeta.get(k.id)||{};
+      _killFeed.push({kName:(km.name||'ARENA').slice(0,10),kColor:km.color||'#FFD700',vName:(vm.name||'SNAKE').slice(0,10),vColor:vm.color||'#FF69B4',ts:Date.now()});
+      if(_killFeed.length>5)_killFeed.shift();
+      const dead=SG.snakes.get(k.id);
+      if(dead&&dead.alive){spawnFoodFromSnake(dead);dead.alive=false;}
+      if(k.id===myPid&&!_localDead)endSnakeGame('eliminated',k.killerId);
+    });
   }
   if(d.snakes){
     d.snakes.forEach(sd=>{
@@ -1228,18 +1242,19 @@ function applyRemoteState(d){
       s.alive=true; s.angle=sd.angle; s.score=sd.score||0; s.boost=sd.boost||false;
       s.length=sd.len||sd.segs?.length||s.length;
       s.color=sd.color||s.color; s.name=sd.name||s.name;
-      // Use received segment positions as the path (guest renders directly from these)
       if(sd.segs&&sd.segs.length>1){
-        s.path=[];
-        for(let i=0;i<sd.segs.length;i++){
-          // Expand: each seg becomes PATH_STEP path points by lerping to next
-          const cur=sd.segs[i],nxt=sd.segs[i+1]||cur;
-          for(let k=0;k<PATH_STEP;k++){
-            const t=k/PATH_STEP;
-            s.path.push({x:cur[0]+(nxt[0]-cur[0])*t,y:cur[1]+(nxt[1]-cur[1])*t});
+        // Expand: host sends every DRAW_STEP points; interpolate back to dense path
+        const path=[];
+        for(let i=0;i<sd.segs.length-1;i++){
+          const a=sd.segs[i], b=sd.segs[i+1];
+          for(let k=0;k<DRAW_STEP;k++){
+            const t=k/DRAW_STEP;
+            path.push({x:a[0]+(b[0]-a[0])*t, y:a[1]+(b[1]-a[1])*t});
           }
         }
-        s.length=sd.segs.length;
+        path.push({x:sd.segs[sd.segs.length-1][0], y:sd.segs[sd.segs.length-1][1]});
+        s.path=path;
+        s.length=sd.len||path.length;
       }
     });
   }
@@ -1258,12 +1273,12 @@ function startGuestLoop(){
     applyTurn(my,targetAngle);
     my.boost=_mouseBoost;
     const boostChanged=_mouseBoost!==_lastSentBoost;
-    const angleMoved=Math.abs(angleDiff(targetAngle,_lastSentAngle))>0.015;
+    const angleMoved=Math.abs(angleDiff(targetAngle,_lastSentAngle))>0.012;
     if(angleMoved||boostChanged){
       _lastSentAngle=targetAngle; _lastSentBoost=_mouseBoost;
-      _sio.emit('in',{t:'in',id:myPid,angle:targetAngle,boost:_mouseBoost});
+      _sio.emit('ssin',{id:myPid,angle:targetAngle,boost:_mouseBoost});
     }
-  },50);
+  },40);
 }
 
 // ══ LAUNCH / END GAME ═══════════════════════════════════════
@@ -1359,7 +1374,7 @@ function rafDraw(ts){
 
   if(_pendingState){applyRemoteState(_pendingState);_pendingState=null;}
 
-  // Guest: client-side prediction for own snake
+  // Guest: client-side prediction — advance own snake between server packets
   if(!isHost&&SG&&!SG.over&&!_localDead){
     const my=SG.snakes.get(myPid);
     if(my&&my.alive&&my.path.length){
@@ -1369,31 +1384,29 @@ function rafDraw(ts){
       const h=my.path[0];
       my.path.unshift({x:h.x+Math.cos(my.angle)*spd, y:h.y+Math.sin(my.angle)*spd});
       if(my.growQueue>0){my.growQueue--;my.length++;}
-      const need=my.length*PATH_STEP+8;
-      if(my.path.length>need)my.path.length=need;
-      // Local boundary death
+      if(my.path.length>my.length+4) my.path.length=my.length+4;
       const nh=my.path[0];
-      if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead)endSnakeGame('eliminated',null);
+      if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead) endSnakeGame('eliminated',null);
     }
   }
 
-  // Host: local boundary death for immediate feedback
+  // Host: boundary death feedback
   if(isHost&&SG&&!SG.over&&!_localDead){
     const my=SG.snakes.get(myPid);
     if(my&&my.path.length){
       const h=my.path[0];
-      if(h.x*h.x+h.y*h.y>=ARENA_R*ARENA_R)endSnakeGame('eliminated',null);
+      if(h.x*h.x+h.y*h.y>=ARENA_R*ARENA_R) endSnakeGame('eliminated',null);
     }
   }
 
-  // Camera follows local snake head
+  // Camera — smooth follow, zoom out as snake grows
   const mySnake=SG&&SG.snakes.get(myPid);
   if(mySnake&&mySnake.path.length&&mySnake.alive){
     const h=mySnake.path[0];
-    _camX+=(h.x-_camX)*0.1;
-    _camY+=(h.y-_camY)*0.1;
-    const tgtZoom=Math.max(0.22,0.65-mySnake.length*0.0015);
-    _camZoom+=(tgtZoom-_camZoom)*0.04;
+    _camX+=(h.x-_camX)*0.12;
+    _camY+=(h.y-_camY)*0.12;
+    const tgtZoom=Math.max(0.20, 0.60-mySnake.length*0.0008);
+    _camZoom+=(tgtZoom-_camZoom)*0.05;
   }
 
   const W=canvas.width,H=canvas.height;
@@ -1468,107 +1481,112 @@ function drawFood(){
   });
 }
 
-function getSnakePoints(snake){
-  const pts=[];
-  for(let i=0;i<snake.length;i++){const p=segPos(snake,i);if(p)pts.push(p);}
-  return pts;
-}
+// ── Circle-based body rendering (slither.io / damnbruh.com style) ─────────────
 
 function drawSnake(snake){
-  const pts=getSnakePoints(snake);
-  if(pts.length<2)return;
+  if(!snake.path||snake.path.length<2)return;
   const w=snakeWidth(snake);
+  const r=w*0.5;
   const col=snake.color;
+  const bodyLen=Math.min(snake.path.length, snake.length+2);
 
-  ctx.save();
-  ctx.lineCap='round';ctx.lineJoin='round';
-
-  // Glow pass
-  ctx.globalAlpha=0.2;
-  ctx.shadowColor=col;ctx.shadowBlur=w*1.5;
-  _strokePath(pts,w+10,col);
-  ctx.globalAlpha=1;ctx.shadowBlur=0;
-
-  // Main body — gradient from bright head to dimmer tail
-  _strokePath(pts,w,col);
-
-  // Dark center stripe for depth
-  _strokePath(pts,w*0.35,'rgba(0,0,0,0.3)');
-
-  ctx.restore();
-
-  drawSnakeHead(snake,w);
-  drawNameTag(snake,pts[0],w);
-}
-
-function _strokePath(pts,width,style){
-  ctx.beginPath();
-  ctx.moveTo(pts[0].x,pts[0].y);
-  for(let i=1;i<pts.length-1;i++){
-    const mx=(pts[i].x+pts[i+1].x)*0.5;
-    const my=(pts[i].y+pts[i+1].y)*0.5;
-    ctx.quadraticCurveTo(pts[i].x,pts[i].y,mx,my);
+  // Draw tail → head so head circle is on top
+  for(let i=bodyLen-1;i>=0;i-=DRAW_STEP){
+    const p=snake.path[i]; if(!p)continue;
+    // Taper slightly toward tail
+    const frac=i/bodyLen;       // 0=head,1=tail
+    const cr=r*(1-frac*0.22);   // radius shrinks 22% at tail
+    _drawBodyCircle(p.x,p.y,cr,col);
   }
-  ctx.lineTo(pts[pts.length-1].x,pts[pts.length-1].y);
-  ctx.strokeStyle=style;ctx.lineWidth=width;ctx.stroke();
-}
 
-function drawSnakeHead(snake,w){
+  // Head circle (slightly larger, drawn last = on top)
   const h=snake.path[0]; if(!h)return;
-  const r=w*0.72;
+  _drawHeadCircle(snake,r*1.12);
+  _drawNameTag(snake,h,w);
+}
+
+function _drawBodyCircle(x,y,r,col){
+  ctx.beginPath();
+  ctx.arc(x,y,r,0,Math.PI*2);
+  ctx.fillStyle=col;
+  ctx.fill();
+  // Dark inner shadow for depth (offset slightly up-left)
+  ctx.beginPath();
+  ctx.arc(x+r*0.1,y+r*0.12,r*0.62,0,Math.PI*2);
+  ctx.fillStyle='rgba(0,0,0,0.28)';
+  ctx.fill();
+  // Top highlight
+  ctx.beginPath();
+  ctx.arc(x-r*0.22,y-r*0.28,r*0.28,0,Math.PI*2);
+  ctx.fillStyle='rgba(255,255,255,0.22)';
+  ctx.fill();
+}
+
+function _drawHeadCircle(snake,r){
+  const h=snake.path[0]; if(!h)return;
+  const angle=snake.angle;
   ctx.save();
-  ctx.translate(h.x,h.y);ctx.rotate(snake.angle);
-  // Head fill with glow
+  ctx.translate(h.x,h.y);
+  ctx.rotate(angle);
+
+  // Head body
   ctx.beginPath();ctx.arc(0,0,r,0,Math.PI*2);
-  ctx.fillStyle=snake.color;
-  ctx.shadowColor=snake.color;ctx.shadowBlur=r*1.5;
-  ctx.fill();ctx.shadowBlur=0;
-  // Sheen
-  ctx.beginPath();ctx.arc(-r*0.1,-r*0.15,r*0.55,0,Math.PI*2);
-  ctx.fillStyle='rgba(255,255,255,0.12)';ctx.fill();
-  // Eyes
-  const er=r*0.28,ex=r*0.32,ey=r*0.35;
+  ctx.fillStyle=snake.color;ctx.fill();
+  // Depth shadow
+  ctx.beginPath();ctx.arc(r*0.08,r*0.1,r*0.65,0,Math.PI*2);
+  ctx.fillStyle='rgba(0,0,0,0.25)';ctx.fill();
+  // Highlight
+  ctx.beginPath();ctx.arc(-r*0.2,-r*0.25,r*0.3,0,Math.PI*2);
+  ctx.fillStyle='rgba(255,255,255,0.25)';ctx.fill();
+
+  // Eyes — positioned at ±35° from forward on the front face
+  const eR=r*0.30, eFwd=r*0.38, eSide=r*0.38;
+  // White sclera
   ctx.fillStyle='#fff';
-  ctx.beginPath();ctx.arc(ex,-ey,er,0,Math.PI*2);ctx.fill();
-  ctx.beginPath();ctx.arc(ex,ey,er,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(eFwd,-eSide,eR,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(eFwd, eSide,eR,0,Math.PI*2);ctx.fill();
+  // Pupil
   ctx.fillStyle='#111';
-  ctx.beginPath();ctx.arc(ex+er*0.3,-ey,er*0.55,0,Math.PI*2);ctx.fill();
-  ctx.beginPath();ctx.arc(ex+er*0.3,ey,er*0.55,0,Math.PI*2);ctx.fill();
-  // Eye shine
-  ctx.fillStyle='rgba(255,255,255,0.7)';
-  ctx.beginPath();ctx.arc(ex+er*0.1,-ey-er*0.15,er*0.22,0,Math.PI*2);ctx.fill();
-  ctx.beginPath();ctx.arc(ex+er*0.1,ey-er*0.15,er*0.22,0,Math.PI*2);ctx.fill();
-  // Tongue
-  if(SG&&SG.tick%18<9){
-    ctx.strokeStyle='#ff2266';ctx.lineWidth=r*0.15;ctx.lineCap='round';
-    ctx.beginPath();ctx.moveTo(r*0.9,0);ctx.lineTo(r*1.65,0);ctx.stroke();
-    ctx.beginPath();ctx.moveTo(r*1.65,0);ctx.lineTo(r*2.1,-r*0.28);ctx.stroke();
-    ctx.beginPath();ctx.moveTo(r*1.65,0);ctx.lineTo(r*2.1,r*0.28);ctx.stroke();
+  ctx.beginPath();ctx.arc(eFwd+eR*0.3,-eSide,eR*0.55,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(eFwd+eR*0.3, eSide,eR*0.55,0,Math.PI*2);ctx.fill();
+  // Shine
+  ctx.fillStyle='rgba(255,255,255,0.75)';
+  ctx.beginPath();ctx.arc(eFwd+eR*0.05,-eSide-eR*0.18,eR*0.22,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(eFwd+eR*0.05, eSide-eR*0.18,eR*0.22,0,Math.PI*2);ctx.fill();
+
+  // Tongue flick
+  if(SG&&SG.tick%20<10){
+    ctx.strokeStyle='#ff2255';ctx.lineWidth=r*0.13;ctx.lineCap='round';
+    ctx.beginPath();ctx.moveTo(r*0.88,0);ctx.lineTo(r*1.55,0);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(r*1.55,0);ctx.lineTo(r*2.0,-r*0.3);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(r*1.55,0);ctx.lineTo(r*2.0, r*0.3);ctx.stroke();
   }
-  // Boost flame
+
+  // Boost flame behind head
   if(snake.boost){
     ctx.rotate(Math.PI);
-    const g=ctx.createRadialGradient(0,0,0,0,0,r*1.8);
-    g.addColorStop(0,'rgba(255,200,0,0.95)');
-    g.addColorStop(0.4,'rgba(255,80,0,0.6)');
+    const g=ctx.createRadialGradient(0,0,0,0,0,r*2.2);
+    g.addColorStop(0,'rgba(255,220,0,0.9)');
+    g.addColorStop(0.45,'rgba(255,80,0,0.55)');
     g.addColorStop(1,'transparent');
     ctx.fillStyle=g;
-    ctx.beginPath();ctx.arc(0,0,r*1.8,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.arc(0,0,r*2.2,0,Math.PI*2);ctx.fill();
   }
+
   ctx.restore();
 }
 
-function drawNameTag(snake,head,w){
+function _drawNameTag(snake,head,w){
   if(!head)return;
-  const fs=Math.max(10,Math.round(w+4));
+  const fs=Math.max(9,Math.min(Math.round(w*0.7+4),18));
   ctx.save();
   ctx.font=`bold ${fs}px 'Exo 2',sans-serif`;
   ctx.textAlign='center';ctx.textBaseline='bottom';
-  const ny=head.y-w-6;
+  const ny=head.y-w*0.6-8;
   const tw=ctx.measureText(snake.name).width;
-  ctx.fillStyle='rgba(0,0,0,0.55)';
+  ctx.fillStyle='rgba(0,0,0,0.58)';
   ctx.fillRect(head.x-tw/2-4,ny-fs-1,tw+8,fs+3);
-  ctx.strokeStyle='rgba(0,0,0,0.9)';ctx.lineWidth=3;
+  ctx.strokeStyle='rgba(0,0,0,0.95)';ctx.lineWidth=3;
   ctx.strokeText(snake.name,head.x,ny);
   ctx.fillStyle='#fff';
   ctx.fillText(snake.name,head.x,ny);
@@ -1580,17 +1598,19 @@ function drawKillFeedHUD(){
   _killFeed=_killFeed.filter(k=>now-k.ts<5000);
   if(!_killFeed.length||!canvas)return;
   ctx.save();
-  ctx.font='bold 12px "Exo 2",sans-serif';ctx.textAlign='right';ctx.textBaseline='middle';
-  const rx=canvas.width-14;let sy=50;
+  ctx.font='bold 13px "Exo 2",sans-serif';ctx.textAlign='right';ctx.textBaseline='middle';
+  const rx=canvas.width-14;let sy=52;
   _killFeed.forEach(k=>{
     const age=now-k.ts;
     ctx.globalAlpha=age<3500?1:Math.max(0,1-(age-3500)/1500);
-    const part1=k.kName+' ☠ ';
-    const part2=k.vName;
-    const tw1=ctx.measureText(part1).width,tw2=ctx.measureText(part2).width;
-    ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(rx-tw1-tw2-8,sy-9,tw1+tw2+16,19);
-    ctx.fillStyle=k.kColor;ctx.fillText(k.kName,rx-tw2-ctx.measureText(' ☠ ').width,sy);
-    ctx.fillStyle='rgba(255,255,255,0.6)';ctx.fillText(' ☠ ',rx-tw2,sy);
+    const skull=' ☠ ';
+    const skullW=ctx.measureText(skull).width;
+    const kW=ctx.measureText(k.kName).width;
+    const vW=ctx.measureText(k.vName).width;
+    const totalW=kW+skullW+vW;
+    ctx.fillStyle='rgba(0,0,0,0.65)';ctx.fillRect(rx-totalW-8,sy-9,totalW+16,19);
+    ctx.fillStyle=k.kColor;ctx.fillText(k.kName,rx-skullW-vW,sy);
+    ctx.fillStyle='rgba(255,255,255,0.55)';ctx.fillText(skull,rx-vW,sy);
     ctx.fillStyle=k.vColor;ctx.fillText(k.vName,rx,sy);
     sy+=22;
   });
@@ -1614,26 +1634,25 @@ function drawMinimap(mySnake){
   mm.clearRect(0,0,mw,mh);
   mm.save();
   mm.beginPath();mm.arc(mw/2,mh/2,mw/2,0,Math.PI*2);mm.clip();
-  mm.fillStyle='rgba(7,7,26,0.85)';mm.fillRect(0,0,mw,mh);
-  // Food
+  mm.fillStyle='rgba(6,6,18,0.88)';mm.fillRect(0,0,mw,mh);
+  // Food dots
   SG.food.forEach(f=>{
-    mm.fillStyle=foodColor(f)+'66';
+    mm.fillStyle=foodColor(f)+'88';
     mm.fillRect(mw/2+f.x*scale-1,mh/2+f.y*scale-1,2,2);
   });
-  // Snakes
+  // Snake dots
   SG.snakes.forEach(s=>{
     if(!s.alive||!s.path.length)return;
     const h=s.path[0];
-    const mx=mw/2+h.x*scale,my=mh/2+h.y*scale;
+    const mx=mw/2+h.x*scale, my=mh/2+h.y*scale;
     const isMe=s.id===myPid;
     mm.beginPath();mm.arc(mx,my,isMe?5:3,0,Math.PI*2);
     mm.fillStyle=s.color;mm.fill();
     if(isMe){mm.strokeStyle='#fff';mm.lineWidth=1.5;mm.stroke();}
   });
   mm.restore();
-  // Border
   mm.beginPath();mm.arc(mw/2,mh/2,mw/2-1,0,Math.PI*2);
-  mm.strokeStyle='rgba(0,255,255,0.4)';mm.lineWidth=2;mm.stroke();
+  mm.strokeStyle='rgba(0,255,255,0.45)';mm.lineWidth=2;mm.stroke();
 }
 
 // ══ INIT ════════════════════════════════════════════════════
