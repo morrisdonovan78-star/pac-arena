@@ -349,7 +349,13 @@ const ARENA_R      = 3000;  // world radius
 const SNAKE_SPD    = 4.5;   // px/tick normal  (~135 px/sec at 30 TPS)
 const BOOST_SPD    = 8.0;   // px/tick boost   (~240 px/sec, 78% faster)
 const TICK_MS      = 33;    // 30 TPS
-const SECTION_DIST = 14;    // px between body section centers (damnbruh: ~10-14px)
+// damnbruh.com exact physics constants (extracted from page-d38402305f41a2e6.js)
+const SIZE_PER_SEGMENT   = 5;    // segments = floor(size / 5)
+const SEGMENT_SPACING    = 0.5;  // segmentSpacing = radius * 0.5
+const BASE_RADIUS        = 8;    // minimum snake radius
+const RADIUS_GROWTH      = 0.6;  // exponent for radius curve
+const RADIUS_SCALE       = 0.8;  // multiplier for radius curve
+// radius = BASE_RADIUS + size^RADIUS_GROWTH * RADIUS_SCALE
 const FOOD_TARGET  = 600;
 const FOOD_GROW    = 3;     // sections added per food orb
 const MIN_SECTIONS = 8;     // die below this
@@ -988,28 +994,32 @@ function pkDisconnect(){
 // snake.numSections = number of visible body circles
 // snake.path        = dense array of head positions, head-first
 //
-// getBodyPoints: walks path summing actual pixel distances until SECTION_DIST
-// is reached per section — exact same logic as slither.io's findNextPointIndex.
-// This ensures sections are always evenly spaced regardless of speed/framerate.
+// damnbruh.com exact updateSegments — nth segment placed at n*spacing from head via interpolation.
+// spacing = radius * SEGMENT_SPACING_FACTOR (0.5) — dynamic, not fixed.
 function getBodyPoints(snake){
-  const pts=[],path=snake.path,target=snake.numSections;
-  let i=0;
-  while(pts.length<target&&i<path.length){
-    pts.push(path[i]);
-    let cum=0,j=i;
-    while(cum<SECTION_DIST&&j+1<path.length){
-      const dx=path[j+1].x-path[j].x,dy=path[j+1].y-path[j].y;
-      cum+=Math.sqrt(dx*dx+dy*dy);
-      j++;
+  const path=snake.path,target=snake.numSections;
+  const r=sectionRadius(snake),spacing=r*SEGMENT_SPACING;
+  const pts=[];
+  if(!path.length)return pts;
+  pts.push(path[0]);
+  let cum=0;
+  for(let o=0;o+1<path.length&&pts.length<target;o++){
+    const dx=path[o+1].x-path[o].x,dy=path[o+1].y-path[o].y;
+    const d=Math.hypot(dx,dy);
+    if(d>0){
+      while(pts.length<target&&cum+d>=spacing*pts.length){
+        const frac=(spacing*pts.length-cum)/d;
+        pts.push({x:path[o].x+frac*dx,y:path[o].y+frac*dy});
+      }
     }
-    if(j===i)break;
-    i=j;
+    cum+=d;
   }
   return pts;
 }
-// Section radius grows as snake eats (same as slither.io scale system)
+// damnbruh.com exact radius: BASE_RADIUS + size^RADIUS_GROWTH * RADIUS_SCALE
 function sectionRadius(snake){
-  return Math.max(9,Math.min(9+snake.numSections*0.18,26));
+  const size=snake.numSections*SIZE_PER_SEGMENT;
+  return BASE_RADIUS+Math.pow(size,RADIUS_GROWTH)*RADIUS_SCALE;
 }
 
 function makeSnake(id,color,name){
@@ -1018,7 +1028,8 @@ function makeSnake(id,color,name){
   const sx=Math.cos(spawnAngle)*r,sy=Math.sin(spawnAngle)*r;
   const faceAngle=Math.atan2(-sy,-sx);
   // Pre-fill path: each point SNAKE_SPD apart going backward from spawn
-  const pathLen=Math.ceil(INIT_SECTIONS*SECTION_DIST/SNAKE_SPD)+10;
+  const initR=BASE_RADIUS+Math.pow(INIT_SECTIONS*SIZE_PER_SEGMENT,RADIUS_GROWTH)*RADIUS_SCALE;
+  const pathLen=Math.ceil(INIT_SECTIONS*initR*SEGMENT_SPACING/SNAKE_SPD)+10;
   const path=[];
   for(let i=0;i<pathLen;i++){
     path.push({x:sx-Math.cos(faceAngle)*i*SNAKE_SPD,y:sy-Math.sin(faceAngle)*i*SNAKE_SPD});
@@ -1128,8 +1139,8 @@ function snakeTick(){
       if(tail) SG.food.push({x:tail.x+(Math.random()-.5)*6,y:tail.y+(Math.random()-.5)*6,ci:Math.floor(Math.random()*FOOD_COLORS.length),size:4+Math.random()*3});
     }
 
-    // Trim path to only what sections need
-    const pathNeeded=Math.ceil(snake.numSections*SECTION_DIST/SNAKE_SPD)+8;
+    // Trim path to only what sections need (dynamic spacing = radius * 0.5)
+    const pathNeeded=Math.ceil(snake.numSections*sectionRadius(snake)*SEGMENT_SPACING/SNAKE_SPD)+8;
     if(snake.path.length>pathNeeded)snake.path.length=pathNeeded;
 
     if(snake.numSections<MIN_SECTIONS){eliminateSnake(snake.id,null);return;}
@@ -1216,7 +1227,7 @@ function sendSnakeState(){
   const snakeArr=[];
   SG.snakes.forEach(s=>{
     if(!s.alive)return;
-    // Send actual body section positions (already SECTION_DIST apart by getBodyPoints)
+    // Send actual body section positions (radius*0.5 apart per damnbruh updateSegments)
     const bPts=getBodyPoints(s);
     const segs=bPts.map(p=>[Math.round(p.x),Math.round(p.y)]);
     snakeArr.push({id:s.id,segs,angle:s.angle,score:s.score,boost:s.boost,ns:s.numSections,color:s.color,name:s.name});
@@ -1256,9 +1267,10 @@ function applyRemoteState(d){
       s.numSections=sd.ns||(sd.segs&&sd.segs.length)||s.numSections;
       s.color=sd.color||s.color; s.name=sd.name||s.name;
       if(sd.segs&&sd.segs.length>1){
-        // segs are body-section positions (SECTION_DIST apart).
+        // segs are body-section positions (spacing = radius*0.5 apart).
         // Reconstruct a dense path by interpolating steps between each section.
-        const steps=Math.max(1,Math.round(SECTION_DIST/SNAKE_SPD));
+        const _segR=BASE_RADIUS+Math.pow(s.numSections*SIZE_PER_SEGMENT,RADIUS_GROWTH)*RADIUS_SCALE;
+        const steps=Math.max(1,Math.round(_segR*SEGMENT_SPACING/SNAKE_SPD));
         const path=[];
         for(let i=0;i<sd.segs.length-1;i++){
           const a=sd.segs[i],b=sd.segs[i+1];
@@ -1404,7 +1416,7 @@ function rafDraw(ts){
       my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
       if(my.growQueue>0){my.growQueue--;my.numSections++;}
       // Path points are sub-tick-sized, so allow ~2x buffer for trim
-      const pathNeeded=Math.ceil(my.numSections*SECTION_DIST/Math.max(spd,0.5))+10;
+      const pathNeeded=Math.ceil(my.numSections*sectionRadius(my)*SEGMENT_SPACING/Math.max(spd,0.5))+10;
       if(my.path.length>pathNeeded)my.path.length=pathNeeded;
       const nh=my.path[0];
       if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead)endSnakeGame('eliminated',null);
@@ -1426,7 +1438,8 @@ function rafDraw(ts){
     const h=mySnake.path[0];
     _camX+=(h.x-_camX)*0.12;
     _camY+=(h.y-_camY)*0.12;
-    const tgtZoom=Math.max(0.18, 0.65-mySnake.numSections*0.0025);
+    // Zoom keeps ~16px screen-space snake radius — scales with damnbruh's actual radius
+    const tgtZoom=Math.max(0.15, 16/sectionRadius(mySnake));
     _camZoom+=(tgtZoom-_camZoom)*0.05;
   }
 
@@ -1512,17 +1525,15 @@ function drawSnake(snake){
   const col=snake.color;
   const n=bPts.length;
 
-  // Draw tail → head (same order as damnbruh.com — head renders on top)
+  // Draw tail → head (damnbruh: all segments same radius, no taper)
   for(let i=n-1;i>=1;i--){
     const p=bPts[i]; if(!p)continue;
-    const frac=i/n;              // 0=head, 1=tail
-    const cr=r*(1-frac*0.28);   // taper 28% thinner at tail
-    _drawBodyCircle(p.x,p.y,cr,col);
+    _drawBodyCircle(p.x,p.y,r,col);
   }
 
-  // Head — larger, with eyes/tongue/boost flame
+  // Head — same radius as body, with eyes/tongue/boost flame
   const h=bPts[0]; if(!h)return;
-  _drawHeadCircle(snake,r*1.18);
+  _drawHeadCircle(snake,r);
   _drawNameTag(snake,h,r*2);
 }
 
@@ -1560,8 +1571,8 @@ function _drawHeadCircle(snake,r){
   ctx.beginPath();ctx.arc(-r*0.2,-r*0.25,r*0.3,0,Math.PI*2);
   ctx.fillStyle='rgba(255,255,255,0.25)';ctx.fill();
 
-  // Eyes — positioned at ±35° from forward on the front face
-  const eR=r*0.30, eFwd=r*0.38, eSide=r*0.38;
+  // Eyes — damnbruh.com exact ratios from tP() function
+  const eR=r*0.38, eFwd=r*0.34, eSide=r*0.42;
   // White sclera
   ctx.fillStyle='#fff';
   ctx.beginPath();ctx.arc(eFwd,-eSide,eR,0,Math.PI*2);ctx.fill();
