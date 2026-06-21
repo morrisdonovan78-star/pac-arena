@@ -1323,10 +1323,12 @@ function snakeTick(){
             const aFwd=(Math.cos(a.angle)*toBx+Math.sin(a.angle)*toBy)/d2;
             const bFwd=(-Math.cos(b.angle)*toBx-Math.sin(b.angle)*toBy)/d2;
             if(Math.abs(aFwd-bFwd)<0.15){
-              // Near-symmetric head-on: lower screen position (higher canvas Y) dies.
-              // Never kills both — Y ties are effectively impossible with float coords.
-              if(ah.y>=bs.y) eliminateSnake(a.id,b.id);
-              else            eliminateSnake(b.id,a.id);
+              // Near-symmetric head-on: whichever head has advanced further along its
+              // own forward axis (past the other's head) is "in front" and survives.
+              // The one whose head contacted closer to the other's body (behind the tip) dies.
+              const aFwdProgress=(ah.x-bs.x)*Math.cos(a.angle)+(ah.y-bs.y)*Math.sin(a.angle);
+              if(aFwdProgress>=0) eliminateSnake(b.id,a.id); // A ahead → B dies
+              else                 eliminateSnake(a.id,b.id); // B ahead → A dies
             } else if(aFwd>bFwd){
               eliminateSnake(a.id,b.id); // A charging more directly → A dies
             } else {
@@ -1478,8 +1480,16 @@ function applyRemoteState(d){
             path.push({x:sd.segs[sd.segs.length-1][0],y:sd.segs[sd.segs.length-1][1]});
             s.path=path; s._predTs=0;
           } else {
-            // Normal update — snap head to server, body trails naturally via dead reckoning
-            s.path[0]=serverHead;
+            // Snap head to server — but skip if it would put path[0] behind path[1].
+            // During boost + latency the server head lags behind dead-reckoning by
+            // latency*BOOST_SPD px; snapping it backward makes getBodyPoints walk a
+            // reversed segment → snake appears 2× as long while boosting.
+            const p1=s.path[1];
+            const wouldReverse=p1&&(
+              (serverHead.x-p1.x)*(s.path[0].x-p1.x)+
+              (serverHead.y-p1.y)*(s.path[0].y-p1.y)<0
+            );
+            if(!wouldReverse)s.path[0]=serverHead;
           }
         }
       }
