@@ -427,6 +427,7 @@ let _lastDrawTs=0,_guestPredTs=0,_hostPredTs=0;
 let _lastSentAngle=-999,_lastSentBoost=false;
 let _guestInputLoop=null;
 let _foodSendCounter=0;
+let _forceFoodSend=false;
 let _localDead=false;
 let _lastRoomId=null;
 
@@ -962,17 +963,30 @@ async function pkConnect(roomId,gameToken){
     // Snake state from host → guests
     _sio.on('ss',(data)=>{
       if(!SG||(SG.over&&!isSpectating))return;
+      // Merge kills from any previous pending state that is being overwritten
+      if(_pendingState&&_pendingState.kills&&_pendingState.kills.length){
+        if(!data.kills)data.kills=[];
+        data.kills=[..._pendingState.kills,...data.kills];
+      }
       _pendingState=data;
     });
     // Guest input from guests → host
     _sio.on('ssin',(data)=>{
       if(!isHost||!data||!data.id||data.id===myPid)return;
-      // Auto-create snake if 'join' was missed or arrived late
-      if(SG&&!SG.over&&!SG.snakes.has(data.id)){
-        const m=_playerMeta.get(data.id)||{};
-        addSnakePlayer(data.id,m.color||colorFromId(data.id),m.name||'SNAKE');
+      // Auto-create snake if 'join' was missed or player rejoined after death
+      if(SG&&!SG.over){
+        const ex=SG.snakes.get(data.id);
+        if(!ex||!ex.alive){
+          const m=_playerMeta.get(data.id)||{};
+          addSnakePlayer(data.id,m.color||colorFromId(data.id),m.name||'SNAKE');
+          // Snap to actual reported position immediately so collision is correct from frame 1
+          if(data.x!=null&&data.y!=null){
+            const ns=SG.snakes.get(data.id);
+            if(ns)ns.path[0]={x:data.x,y:data.y};
+          }
+        }
       }
-      _guestInputs.set(data.id,{angle:data.angle||0,boost:!!data.boost,x:data.x,y:data.y,ts:Date.now()});
+      _guestInputs.set(data.id,{angle:data.angle||0,boost:!!data.boost,x:data.x,y:data.y,ts:Date.now(),fresh:true});
     });
 
     _sio.on('join',(h)=>{
@@ -980,8 +994,12 @@ async function pkConnect(roomId,gameToken){
       const hid=h.id||h.pid; // server may send pid instead of id
       if(!hid)return;
       _playerMeta.set(hid,{color:h.color||colorFromId(hid),name:h.name||'SNAKE'});
-      if(SG&&!SG.over&&!SG.snakes.has(hid)){
-        addSnakePlayer(hid,h.color||colorFromId(hid),h.name||'SNAKE');
+      if(SG&&!SG.over){
+        const existing=SG.snakes.get(hid);
+        if(!existing||!existing.alive){
+          addSnakePlayer(hid,h.color||colorFromId(hid),h.name||'SNAKE');
+        }
+        _forceFoodSend=true; // send food immediately so rejoining player sees dots right away
       }
       addToast('🐍 '+(h.name||'Snake')+' joined!','#00FFFF');
     });
@@ -1095,12 +1113,13 @@ function sectionRadius(snake){
   return BASE_RADIUS+Math.pow(size,RADIUS_GROWTH)*RADIUS_SCALE;
 }
 
-function makeSnake(id,color,name){
-  const spawnAngle=Math.random()*Math.PI*2;
-  const r=(ARENA_R*0.22)+Math.random()*(ARENA_R*0.56);
-  const sx=Math.cos(spawnAngle)*r,sy=Math.sin(spawnAngle)*r;
+function makeSnake(id,color,name,sx,sy){
+  if(sx==null||sy==null){
+    const spawnAngle=Math.random()*Math.PI*2;
+    const r=(ARENA_R*0.22)+Math.random()*(ARENA_R*0.56);
+    sx=Math.cos(spawnAngle)*r; sy=Math.sin(spawnAngle)*r;
+  }
   const faceAngle=Math.atan2(-sy,-sx);
-  // Pre-fill path: each point SNAKE_SPD apart going backward from spawn
   const initR=BASE_RADIUS+Math.pow(INIT_SECTIONS*SIZE_PER_SEGMENT,RADIUS_GROWTH)*RADIUS_SCALE;
   const pathLen=Math.ceil(INIT_SECTIONS*initR*SEGMENT_SPACING*2/SNAKE_SPD)+10;
   const path=[];
@@ -1109,6 +1128,27 @@ function makeSnake(id,color,name){
   }
   return{id,color,name,angle:faceAngle,path,numSections:INIT_SECTIONS,growQueue:0,alive:true,score:0,boost:false};
 }
+
+function findSafeSpawn(){
+  const minDist=400;
+  for(let attempt=0;attempt<50;attempt++){
+    const a=Math.random()*Math.PI*2;
+    const r=(ARENA_R*0.22)+Math.random()*(ARENA_R*0.56);
+    const sx=Math.cos(a)*r,sy=Math.sin(a)*r;
+    let safe=true;
+    if(SG){
+      for(const [,s] of SG.snakes){
+        if(!s.alive||!s.path.length)continue;
+        const dx=s.path[0].x-sx,dy=s.path[0].y-sy;
+        if(dx*dx+dy*dy<minDist*minDist){safe=false;break;}
+      }
+    }
+    if(safe)return[sx,sy];
+  }
+  const a=Math.random()*Math.PI*2,r=(ARENA_R*0.22)+Math.random()*(ARENA_R*0.56);
+  return[Math.cos(a)*r,Math.sin(a)*r];
+}
+
 
 function makeFood(){
   const a=Math.random()*Math.PI*2;
@@ -1132,8 +1172,11 @@ function initSnakeGame(players){
 }
 
 function addSnakePlayer(id,color,name){
-  if(!SG||SG.snakes.has(id))return;
-  SG.snakes.set(id,makeSnake(id,color,name));
+  if(!SG)return;
+  const existing=SG.snakes.get(id);
+  if(existing&&existing.alive)return; // live snake — don't overwrite
+  const pos=isHost?findSafeSpawn():[null,null];
+  SG.snakes.set(id,makeSnake(id,color,name,pos[0],pos[1]));
 }
 
 // ── Angle helpers ────────────────────────────────────────────
@@ -1193,7 +1236,7 @@ function snakeTick(){
   if(!SG||SG.over)return;
   SG.tick++;
 
-  // Apply guest inputs — use guest's reported x,y as authoritative position
+  // Apply guest inputs
   const now=Date.now();
   _guestInputs.forEach((inp,pid)=>{
     if(now-inp.ts>1500)return;
@@ -1201,9 +1244,13 @@ function snakeTick(){
     if(!s||!s.alive)return;
     applyTurn(s,inp.angle);
     s.boost=inp.boost;
-    // Snap to guest's real position so all clients see the same location
-    if(inp.x!=null&&inp.y!=null){
-      s.path.unshift({x:inp.x,y:inp.y});
+    // Snap head to guest's reported position ONCE per new ssin (fresh flag).
+    // Using snap (not unshift) prevents stale data from pushing an out-of-order point
+    // onto the path ahead of the dead-reckoned head, which caused the snake to appear
+    // twice as long during boost.
+    if(inp.x!=null&&inp.y!=null&&inp.fresh){
+      if(s.path.length>0)s.path[0]={x:inp.x,y:inp.y};
+      inp.fresh=false;
     }
   });
 
@@ -1263,18 +1310,21 @@ function snakeTick(){
         const hit=dx*dx+dy*dy<(aR+bR)*(aR+bR)||(k===0&&b.id!==a.id&&segHitsCircle(aPrev,ah,bs,aR+bR));
         if(hit){
           if(k===0&&b.id!==a.id){
-            // Head-to-head: angle decides who dies, never both.
-            // The snake facing MORE toward the contact point is the "attacker" — they die.
-            // Cuts succeed when the enemy head is moving toward YOU (they ran into your head).
-            // True head-on (symmetric): size tiebreaker (smaller dies).
+            // Head-to-head: the snake facing MORE toward the other is the "attacker" and dies.
+            // Size never influences the outcome — only angle and position matter.
             const toBx=bs.x-ah.x,toBy=bs.y-ah.y;
             const d2=Math.hypot(toBx,toBy)||1;
             const aFwd=(Math.cos(a.angle)*toBx+Math.sin(a.angle)*toBy)/d2;
             const bFwd=(-Math.cos(b.angle)*toBx-Math.sin(b.angle)*toBy)/d2;
             if(Math.abs(aFwd-bFwd)<0.15){
-              // Near-symmetrical head-on: smaller snake loses
-              if(a.numSections<=b.numSections) eliminateSnake(a.id,b.id);
-              else eliminateSnake(b.id,a.id);
+              // Near-symmetric head-on: use which head was closer to the midpoint last tick.
+              // The snake already "there" (smaller prev distance) is in front and survives.
+              const mx=(ah.x+bs.x)/2,my=(ah.y+bs.y)/2;
+              const bp=b.path[1]||bs;
+              const ad=(aPrev.x-mx)*(aPrev.x-mx)+(aPrev.y-my)*(aPrev.y-my);
+              const bd=(bp.x-mx)*(bp.x-mx)+(bp.y-my)*(bp.y-my);
+              if(ad>=bd) eliminateSnake(a.id,b.id); // A was farther back → A arrived later → A dies
+              else       eliminateSnake(b.id,a.id);
             } else if(aFwd>bFwd){
               eliminateSnake(a.id,b.id); // A charging more directly → A dies
             } else {
@@ -1349,8 +1399,9 @@ function sendSnakeState(){
   _foodSendCounter++;
   const msg={t:'ss',snakes:snakeArr,tick:SG.tick};
   if(_pendingKills.length){msg.kills=[..._pendingKills];_pendingKills.length=0;}
-  if(_foodSendCounter%3===0){
+  if(_foodSendCounter%3===0||_forceFoodSend){
     msg.food=SG.food.map(f=>[Math.round(f.x),Math.round(f.y),f.ci,Math.round(f.size)]);
+    _forceFoodSend=false;
   }
   pkSend(msg);
 }
@@ -1609,6 +1660,8 @@ async function rejoinGame(){
 
 function goHome(){
   isSpectating=false; _localDead=false;
+  // Blur any focused input so the gamepad doesn't get trapped in a text field
+  if(document.activeElement&&document.activeElement!==document.body)document.activeElement.blur();
   if(rafHandle){cancelAnimationFrame(rafHandle);rafHandle=null;}
   document.removeEventListener('mousemove',onMouseMove);
   window.removeEventListener('resize',onResize);
@@ -1653,8 +1706,9 @@ function pollGamepad(){
   } else {
     // Menu: stick/d-pad to navigate, A to confirm, B to back
     const ae=document.activeElement;
-    // Auto-focus if nothing focused OR focused element is now off-screen (e.g. after going home)
-    if(!ae||ae===document.body){gpadFocus(0);}
+    // Auto-redirect to first button if nothing focused, off-screen, or stuck in a text input
+    const stuckInInput=ae&&ae.tagName==='INPUT';
+    if(!ae||ae===document.body||stuckInInput){gpadFocus(0);}
     else{const rb=ae.getBoundingClientRect();if(!(rb.width>0&&rb.height>0&&rb.bottom>0&&rb.right>0&&rb.top<window.innerHeight&&rb.left<window.innerWidth))gpadFocus(0);}
     const sy=axes[1]||0,sx=axes[0]||0;
     const dUp=cur(12)||sy<-0.5,dDown=cur(13)||sy>0.5;
@@ -1673,7 +1727,8 @@ function pollGamepad(){
 }
 function gpadFocus(dir){
   const vw=window.innerWidth,vh=window.innerHeight;
-  const all=[...document.querySelectorAll('button:not([disabled]),input:not([disabled])')].filter(e=>{
+  // Only navigate buttons — inputs require a keyboard to be useful and cause controller lockout
+  const all=[...document.querySelectorAll('button:not([disabled])')].filter(e=>{
     const r=e.getBoundingClientRect();
     return r.width>0&&r.height>0&&r.bottom>0&&r.right>0&&r.top<vh&&r.left<vw;
   });
