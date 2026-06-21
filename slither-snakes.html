@@ -1265,8 +1265,8 @@ function snakeTick(){
     // can't boost at or below starting length
     if(snake.boost&&snake.numSections<=INIT_SECTIONS)snake.boost=false;
 
-    // Grow: increment section count from queue, cap at MAX_SECTIONS
-    if(snake.growQueue>0){snake.growQueue--;snake.numSections=Math.min(MAX_SECTIONS,snake.numSections+1);}
+    // Grow: only consume queue when not boosting — boost should only drain, never grow
+    if(snake.growQueue>0&&!snake.boost){snake.growQueue--;snake.numSections=Math.min(MAX_SECTIONS,snake.numSections+1);}
 
     // Boost drains sections smoothly — 1 at a time via accumulator (same avg rate as before)
     if(snake.boost&&snake.numSections>INIT_SECTIONS){
