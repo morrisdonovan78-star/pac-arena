@@ -335,6 +335,10 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
     <div class="gi"><span class="gl">PING</span><span class="gv" id="hud-ping" style="color:var(--g)">--</span></div>
   </div>
   <div id="boost-hint">HOLD CLICK TO BOOST 🔥</div>
+  <div id="spectate-bar" style="display:none;position:absolute;top:10px;left:50%;transform:translateX(-50%);display:none;align-items:center;gap:12px;background:rgba(0,0,0,0.7);border:1px solid rgba(255,215,0,0.4);border-radius:8px;padding:6px 14px;z-index:100;">
+    <span style="color:#FFD700;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:2px;">👁 SPECTATING</span>
+    <button class="btn btn-c btn-sm" style="padding:4px 10px;font-size:10px;" onclick="goHome()">⌂ HOME</button>
+  </div>
   <canvas id="minimap" width="120" height="120"></canvas>
 </div>
 
@@ -352,7 +356,9 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
     </div>
     <div class="rbtns">
       <button class="btn btn-g" onclick="go('scr-lobby');populateLobby();">▶ PLAY AGAIN</button>
-      <button class="btn btn-c" onclick="go('scr-home')">⌂ HOME</button>
+      <button class="btn btn-y" id="btn-spectate" style="display:none" onclick="enterSpectate()">👁 SPECTATE</button>
+      <button class="btn btn-g" id="btn-rejoin" style="display:none" onclick="rejoinGame()">↩ REJOIN</button>
+      <button class="btn btn-c" onclick="goHome()">⌂ HOME</button>
     </div>
   </div>
 </div>
@@ -422,6 +428,7 @@ let _lastSentAngle=-999,_lastSentBoost=false;
 let _guestInputLoop=null;
 let _foodSendCounter=0;
 let _localDead=false;
+let _lastRoomId=null;
 
 function getRpc(){return RPC_REGIONS[REGION]||RPC_REGIONS['US'];}
 function getSioUrl(){return GAME_SERVERS[GAME_SERVER].url;}
@@ -876,6 +883,7 @@ let _hostPid=null,_pkTick=0,_pkSentTick=0,_myHelloTs=0,_pingInterval=null;
 async function pkConnect(roomId,gameToken){
   if(_sio){try{_sio.disconnect();}catch(_){}  _sio=null;}
   pkRoomId=roomId;
+  _lastRoomId=roomId;
   myPid=ST.address||('anon-'+Math.random().toString(36).slice(2,8));
   isHost=false;
   _playerMeta.clear();
@@ -1157,6 +1165,21 @@ function startHostLoop(){
 }
 function stopHostLoop(){if(_hostRaf){cancelAnimationFrame(_hostRaf);_hostRaf=null;}}
 
+// Swept segment→circle hit test: did segment p1→p2 pass through circle (c,r)?
+function segHitsCircle(p1,p2,c,r){
+  const ex=p2.x-p1.x,ey=p2.y-p1.y;
+  const fx=p1.x-c.x,fy=p1.y-c.y;
+  const a=ex*ex+ey*ey;
+  if(a<0.001)return fx*fx+fy*fy<r*r;
+  const b=2*(fx*ex+fy*ey);
+  const cc=fx*fx+fy*fy-r*r;
+  const disc=b*b-4*a*cc;
+  if(disc<0)return false;
+  const sq=Math.sqrt(disc);
+  const t1=(-b-sq)/(2*a),t2=(-b+sq)/(2*a);
+  return(t1>=0&&t1<=1)||(t2>=0&&t2<=1)||(t1<=0&&t2>=1);
+}
+
 function snakeTick(){
   if(!SG||SG.over)return;
   SG.tick++;
@@ -1184,12 +1207,18 @@ function snakeTick(){
     // Grow: increment section count from queue, cap at MAX_SECTIONS
     if(snake.growQueue>0){snake.growQueue--;snake.numSections=Math.min(MAX_SECTIONS,snake.numSections+1);}
 
-    // Boost drains sections — stops at INIT_SECTIONS (can't boost below starting length)
-    if(snake.boost&&SG.tick%BOOST_DRAIN===0&&snake.numSections>INIT_SECTIONS){
-      snake.numSections=Math.max(INIT_SECTIONS,snake.numSections-BOOST_DRAIN_AMT);
-      const bPts=getBodyPoints(snake);
-      const tail=bPts[bPts.length-1];
-      if(tail) SG.food.push({x:tail.x+(Math.random()-.5)*6,y:tail.y+(Math.random()-.5)*6,ci:Math.floor(Math.random()*FOOD_COLORS.length),size:4+Math.random()*3});
+    // Boost drains sections smoothly — 1 at a time via accumulator (same avg rate as before)
+    if(snake.boost&&snake.numSections>INIT_SECTIONS){
+      snake._drain=(snake._drain||0)+(BOOST_DRAIN_AMT/BOOST_DRAIN);
+      if(snake._drain>=1){
+        snake._drain-=1;
+        snake.numSections=Math.max(INIT_SECTIONS,snake.numSections-1);
+        const bPts=getBodyPoints(snake);
+        const tail=bPts[bPts.length-1];
+        if(tail) SG.food.push({x:tail.x+(Math.random()-.5)*6,y:tail.y+(Math.random()-.5)*6,ci:Math.floor(Math.random()*FOOD_COLORS.length),size:4+Math.random()*3});
+      }
+    } else if(!snake.boost){
+      snake._drain=0;
     }
 
     // Trim path to only what sections need (dynamic spacing = radius * 0.5)
@@ -1217,14 +1246,17 @@ function snakeTick(){
       const bR=sectionRadius(b);
       const bPts=getBodyPoints(b);
       const startK=(a.id===b.id)?SELF_SKIP:0;
+      const aPrev=a.path[1]||ah;
       for(let k=startK;k<bPts.length;k++){
         const bs=bPts[k]; if(!bs)continue;
         const dx=ah.x-bs.x,dy=ah.y-bs.y;
-        if(dx*dx+dy*dy<(aR+bR)*(aR+bR)){
+        // Static check + swept head-to-head check (catches boosting tunnels)
+        const hit=dx*dx+dy*dy<(aR+bR)*(aR+bR)||(k===0&&b.id!==a.id&&segHitsCircle(aPrev,ah,bs,aR+bR));
+        if(hit){
           if(k===0&&b.id!==a.id){
-            // head-to-head: damnbruh — smaller snake dies, equal size both die
+            // head-to-head: smaller dies; equal — attacker (a) loses; NEVER both die
             if(a.numSections<=b.numSections) eliminateSnake(a.id,b.id);
-            if(b.numSections<=a.numSections) eliminateSnake(b.id,a.id);
+            else eliminateSnake(b.id,a.id);
           } else {
             eliminateSnake(a.id,a.id===b.id?null:b.id);
           }
@@ -1391,6 +1423,7 @@ function startGuestLoop(){
 
 function launchSnakeGame(){
   go('scr-game');
+  const sbar=document.getElementById('spectate-bar');if(sbar)sbar.style.display='none';
   canvas=document.getElementById('gc');
   ctx=canvas.getContext('2d');
   canvas.width=window.innerWidth;
@@ -1455,25 +1488,32 @@ async function endSnakeGame(reason,killerId){
   const elim=reason==='eliminated';
   const cashed=reason==='cashout';
 
-  // HOST was eliminated: enter spectator mode, keep host loop running for other players
+  // HOST eliminated: enter spectator mode, keep host loop running for other players
   if(isHost&&elim){
     isSpectating=true;
     clearInterval(_guestInputLoop);_guestInputLoop=null;
     _gpadLastBtn=[];_gpadNavTs=0;_padBoost=false;
     addToast('💀 ELIMINATED — spectating…','#FF4444');
     if(ST.lobbyUsd>0)(async()=>{try{await settle('p2');await refreshBal();}catch(_){}})();
-    return; // host loop + rafDraw stay alive so other players keep playing
+    return; // host loop + rafDraw stay alive
   }
 
-  // Full shutdown for guests, host cashout, host gameover
-  SG.over=true;
-  stopHostLoop();
-  clearInterval(_guestInputLoop);_guestInputLoop=null;
-  if(rafHandle){cancelAnimationFrame(rafHandle);rafHandle=null;}
-  document.removeEventListener('mousemove',onMouseMove);
-  document.removeEventListener('mousedown',()=>{});
-  document.removeEventListener('mouseup',()=>{});
-  window.removeEventListener('resize',onResize);
+  // Guest eliminated or cashed out: keep connection + rafDraw alive for spectate/rejoin
+  const keepAlive = !isHost && (elim||cashed);
+  if(keepAlive){
+    isSpectating=true;
+    clearInterval(_guestInputLoop);_guestInputLoop=null;
+    _padBoost=false;
+    // rafDraw keeps running; SG stays alive for dead reckoning
+  } else {
+    // Full shutdown (host gameover / 'over' reason)
+    SG.over=true;
+    stopHostLoop();
+    clearInterval(_guestInputLoop);_guestInputLoop=null;
+    if(rafHandle){cancelAnimationFrame(rafHandle);rafHandle=null;}
+    document.removeEventListener('mousemove',onMouseMove);
+    window.removeEventListener('resize',onResize);
+  }
 
   const my=SG.snakes.get(myPid);
   const myScore=my?.score||0;
@@ -1485,6 +1525,8 @@ async function endSnakeGame(reason,killerId){
   document.getElementById('rs-result').textContent=cashed?'CASHED OUT':elim?'ELIMINATED':'GAME OVER';
 
   const rcard=document.getElementById('rcard');
+  const btnSpec=document.getElementById('btn-spectate');
+  const btnRej=document.getElementById('btn-rejoin');
   if(elim){
     rcard.className='rcard loss';
     document.getElementById('rico').textContent='💀';
@@ -1492,26 +1534,61 @@ async function endSnakeGame(reason,killerId){
     const kname=(_playerMeta.get(killerId)?.name||'the wall').toUpperCase();
     document.getElementById('rsub').textContent=ST.lobbyUsd===0?'Better luck next time!':'Eliminated by '+kname;
     document.getElementById('rs-result').style.color='var(--r)';
+    if(btnSpec)btnSpec.style.display=keepAlive?'':'none';
+    if(btnRej)btnRej.style.display=keepAlive?'':'none';
   }else if(cashed){
     rcard.className='rcard win';
     document.getElementById('rico').textContent='💰';
     document.getElementById('rhead').textContent='CASHED OUT!';
     document.getElementById('rsub').textContent=ST.lobbyUsd===0?'Nice run!':'Winnings secured!';
     document.getElementById('rs-result').style.color='var(--y)';
+    if(btnSpec)btnSpec.style.display=keepAlive?'':'none';
+    if(btnRej)btnRej.style.display='none';
   }else{
     rcard.className='rcard win';
     document.getElementById('rico').textContent='🏆';
     document.getElementById('rhead').textContent='GAME OVER';
     document.getElementById('rsub').textContent='Good game!';
     document.getElementById('rs-result').style.color='var(--g)';
+    if(btnSpec)btnSpec.style.display='none';
+    if(btnRej)btnRej.style.display='none';
   }
 
-  _gpadLastBtn=[]; _gpadNavTs=0; _padBoost=false;
+  _gpadLastBtn=[]; _gpadNavTs=0;
   go('scr-result');
   if(cashed&&ST.lobbyUsd>0)await settle('p1');
   else if(elim&&ST.lobbyUsd>0)await settle('p2');
   await refreshBal();
+  if(!keepAlive)pkDisconnect();
+}
+
+function enterSpectate(){
+  isSpectating=true;
+  const bar=document.getElementById('spectate-bar');
+  if(bar)bar.style.display='flex';
+  go('scr-game');
+  if(!rafHandle)rafHandle=requestAnimationFrame(rafDraw);
+}
+
+async function rejoinGame(){
+  const roomId=_lastRoomId;
+  goHome();
+  if(roomId){
+    await new Promise(r=>setTimeout(r,200));
+    await pkConnect(roomId,null);
+  } else {
+    go('scr-lobby');populateLobby();
+  }
+}
+
+function goHome(){
+  isSpectating=false; _localDead=false;
+  if(rafHandle){cancelAnimationFrame(rafHandle);rafHandle=null;}
+  document.removeEventListener('mousemove',onMouseMove);
+  window.removeEventListener('resize',onResize);
+  SG=null;
   pkDisconnect();
+  go('scr-home');
 }
 
 // ── Gamepad support ──────────────────────────────────────────
@@ -1527,7 +1604,7 @@ function pollGamepad(){
   function pressed(i){return cur(i)&&!(_gpadLastBtn[i]||false);}
   function released(i){return !cur(i)&&(_gpadLastBtn[i]||false);}
 
-  if(SG&&!SG.over&&canvas){
+  if(SG&&!SG.over&&canvas&&!_localDead){
     // In-game: left stick → aim direction, A → boost, Y → cashout (hold)
     const ax=axes[0]||0,ay=axes[1]||0;
     if(Math.sqrt(ax*ax+ay*ay)>GPAD_DEADZONE){
@@ -1550,7 +1627,9 @@ function pollGamepad(){
   } else {
     // Menu: stick/d-pad to navigate, A to confirm, B to back
     const ae=document.activeElement;
-    if(!ae||ae===document.body)gpadFocus(0);
+    // Auto-focus if nothing focused OR focused element is now off-screen (e.g. after going home)
+    if(!ae||ae===document.body){gpadFocus(0);}
+    else{const rb=ae.getBoundingClientRect();if(!(rb.width>0&&rb.height>0&&rb.bottom>0&&rb.right>0&&rb.top<window.innerHeight&&rb.left<window.innerWidth))gpadFocus(0);}
     const sy=axes[1]||0,sx=axes[0]||0;
     const dUp=cur(12)||sy<-0.5,dDown=cur(13)||sy>0.5;
     const dLeft=cur(14)||sx<-0.5,dRight=cur(15)||sx>0.5;
