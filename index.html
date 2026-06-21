@@ -1493,10 +1493,12 @@ async function pkConnect(roomId, gameToken){
   document.getElementById('mm-sub').textContent='Connecting to server…';
   lg('mm-log','Connecting…','lhi');
 
+  // Brave blocks cross-origin XHR (polling transport) via cookie/fingerprint protection.
+  // Detect it early so we can retry WebSocket instead of falling back to doomed polling.
+  const _isBrave=!!(navigator.brave);
+  if(_isBrave) lg('mm-log','Brave detected — if connection fails, tap the lion icon (Shields) and disable for this site','lwarn');
+
   try{
-    // WebSocket-first for all browsers (best latency, works with nginx).
-    // On first connect_error, auto-switch to polling for Brave/restrictive environments
-    // where Brave Shields block the cross-origin WebSocket upgrade.
     _sio=io(getSioUrl(),{
       auth:{
         pid:myPid, lobbyId:roomId, gameToken:gameToken||null,
@@ -1506,6 +1508,7 @@ async function pkConnect(roomId, gameToken){
       reconnectionAttempts:Infinity,
       reconnectionDelay:1000,
       reconnectionDelayMax:5000,
+      withCredentials:false,
     });
 
     // Track whether 'init' has been received, and a guard timer that force-switches
@@ -1556,11 +1559,11 @@ async function pkConnect(roomId, gameToken){
 
     await new Promise((res,rej)=>{
       const tOut=setTimeout(()=>rej(new Error('Connection timeout — check internet and try again')),15000);
-      let _wsRetried=false;
+      let _connErrCount=0;
       _sio.once('connect',()=>{
         clearTimeout(tOut);
-        // If init hasn't arrived 4s after connect, the WebSocket data channel is
-        // likely broken (common in Firefox). Switch to HTTP polling and reconnect.
+        // If init hasn't arrived 4s after connect, force-switch to polling and reconnect.
+        // Covers Firefox silently dropping WebSocket data frames after a successful handshake.
         _initGuard=setTimeout(()=>{
           if(!_initRecv&&_sio){
             lg('mm-log','No server response — switching to HTTP polling…','lwarn');
@@ -1572,15 +1575,24 @@ async function pkConnect(roomId, gameToken){
         res();
       });
       _sio.on('connect_error',(e)=>{
-        if(!_wsRetried){
-          // First failure: WebSocket blocked (Brave, Firefox ETP, corporate proxy).
-          // Switch to polling so the HTTP handshake succeeds, then WebSocket upgrades.
-          _wsRetried=true;
+        _connErrCount++;
+        if(_connErrCount<=2){
+          // Brave blocks cross-origin XHR (polling), so retry WebSocket first.
+          // Most transient WebSocket failures clear up on a retry without needing polling.
+          _sio.io.opts.transports=['websocket','polling'];
+          return;
+        }
+        if(_connErrCount===3){
+          // After 3 WebSocket failures, try polling as a last resort
+          // (works on corporate proxies that block WebSocket but allow HTTP).
           _sio.io.opts.transports=['polling','websocket'];
           return;
         }
         clearTimeout(tOut);
-        rej(new Error('Cannot reach game server: '+e.message));
+        const braveHint=_isBrave
+          ? ' — Brave Shields blocked the connection. Tap the lion icon in the address bar and disable Shields for this site, then refresh.'
+          : ' — if using Brave or Firefox, try disabling browser shields for this site.';
+        rej(new Error('Cannot reach game server'+braveHint));
       });
       _sio.once('err',(msg)=>{ clearTimeout(tOut); rej(new Error(msg||'Server rejected connection')); });
     });
