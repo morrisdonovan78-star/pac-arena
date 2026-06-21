@@ -337,6 +337,7 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
   <div id="boost-hint">HOLD CLICK TO BOOST 🔥</div>
   <div id="spectate-bar" style="display:none;position:absolute;top:10px;left:50%;transform:translateX(-50%);display:none;align-items:center;gap:12px;background:rgba(0,0,0,0.7);border:1px solid rgba(255,215,0,0.4);border-radius:8px;padding:6px 14px;z-index:100;">
     <span style="color:#FFD700;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:2px;">👁 SPECTATING</span>
+    <button id="spec-rejoin-btn" class="btn btn-g btn-sm" style="display:none;padding:4px 10px;font-size:10px;" onclick="rejoinGame()">↩ REJOIN</button>
     <button class="btn btn-c btn-sm" style="padding:4px 10px;font-size:10px;" onclick="goHome()">⌂ HOME</button>
   </div>
   <canvas id="minimap" width="120" height="120"></canvas>
@@ -428,6 +429,7 @@ let _lastSentAngle=-999,_lastSentBoost=false;
 let _guestInputLoop=null;
 let _foodSendCounter=0;
 let _forceFoodSend=false;
+let _firstRemoteSync=false;
 let _localDead=false;
 let _lastRoomId=null;
 
@@ -968,6 +970,8 @@ async function pkConnect(roomId,gameToken){
         if(!data.kills)data.kills=[];
         data.kills=[..._pendingState.kills,...data.kills];
       }
+      // Preserve food from previous packet when new packet doesn't include it
+      if(!data.food&&_pendingState&&_pendingState.food)data.food=_pendingState.food;
       _pendingState=data;
     });
     // Guest input from guests → host
@@ -1169,6 +1173,7 @@ function initSnakeGame(players){
       SG.snakes.set(p.id,makeSnake(p.id,p.color||colorFromId(p.id),p.name||'SNAKE'));
   });
   if(isHost){for(let i=0;i<FOOD_TARGET;i++)SG.food.push(makeFood());}
+  else{_firstRemoteSync=true;} // guest: snap own position to host-assigned spot on first ss
 }
 
 function addSnakePlayer(id,color,name){
@@ -1277,8 +1282,9 @@ function snakeTick(){
       snake._drain=0;
     }
 
-    // Trim path to only what sections need (dynamic spacing = radius * 0.5)
-    const pathNeeded=Math.ceil(snake.numSections*sectionRadius(snake)*SEGMENT_SPACING*2/SNAKE_SPD)+8;
+    // Trim path to only what sections need — use actual speed so boost doesn't leave stale far-back points
+    const _spd=snake.boost?BOOST_SPD:SNAKE_SPD;
+    const pathNeeded=Math.ceil(snake.numSections*sectionRadius(snake)*SEGMENT_SPACING*2/_spd)+8;
     if(snake.path.length>pathNeeded)snake.path.length=pathNeeded;
 
     if(snake.numSections<MIN_SECTIONS){eliminateSnake(snake.id,null);return;}
@@ -1317,14 +1323,10 @@ function snakeTick(){
             const aFwd=(Math.cos(a.angle)*toBx+Math.sin(a.angle)*toBy)/d2;
             const bFwd=(-Math.cos(b.angle)*toBx-Math.sin(b.angle)*toBy)/d2;
             if(Math.abs(aFwd-bFwd)<0.15){
-              // Near-symmetric head-on: use which head was closer to the midpoint last tick.
-              // The snake already "there" (smaller prev distance) is in front and survives.
-              const mx=(ah.x+bs.x)/2,my=(ah.y+bs.y)/2;
-              const bp=b.path[1]||bs;
-              const ad=(aPrev.x-mx)*(aPrev.x-mx)+(aPrev.y-my)*(aPrev.y-my);
-              const bd=(bp.x-mx)*(bp.x-mx)+(bp.y-my)*(bp.y-my);
-              if(ad>=bd) eliminateSnake(a.id,b.id); // A was farther back → A arrived later → A dies
-              else       eliminateSnake(b.id,a.id);
+              // Near-symmetric head-on: lower screen position (higher canvas Y) dies.
+              // Never kills both — Y ties are effectively impossible with float coords.
+              if(ah.y>=bs.y) eliminateSnake(a.id,b.id);
+              else            eliminateSnake(b.id,a.id);
             } else if(aFwd>bFwd){
               eliminateSnake(a.id,b.id); // A charging more directly → A dies
             } else {
@@ -1421,10 +1423,19 @@ function applyRemoteState(d){
   }
   if(d.snakes){
     d.snakes.forEach(sd=>{
-      // Own snake: sync size from host but never touch path (we predict locally)
+      // Own snake: sync size from host; on first sync snap to host-assigned spawn so camera lands near other players
       if(sd.id===myPid){
         const own=SG.snakes.get(myPid);
         if(own&&sd.ns)own.numSections=sd.ns;
+        if(own&&_firstRemoteSync&&sd.segs&&sd.segs.length>0){
+          const head={x:sd.segs[0][0],y:sd.segs[0][1]};
+          const ang=sd.angle!=null?sd.angle:own.angle;
+          const r=sectionRadius(own);
+          const pn=Math.ceil(own.numSections*r*SEGMENT_SPACING*2/SNAKE_SPD)+10;
+          own.path=Array.from({length:pn},(_,i)=>({x:head.x-Math.cos(ang)*i*SNAKE_SPD,y:head.y-Math.sin(ang)*i*SNAKE_SPD}));
+          own.angle=ang;
+          _firstRemoteSync=false;
+        }
         return;
       }
       let s=SG.snakes.get(sd.id);
@@ -1570,6 +1581,8 @@ async function endSnakeGame(reason,killerId){
     addToast('💀 ELIMINATED — spectating…','#FF4444');
     const _sb=document.getElementById('spectate-bar');
     if(_sb)_sb.style.display='flex';
+    const _srb=document.getElementById('spec-rejoin-btn');
+    if(_srb)_srb.style.display='';
     if(ST.lobbyUsd>0)(async()=>{try{await settle('p2');await refreshBal();}catch(_){}})();
     return; // host loop + rafDraw stay alive
   }
@@ -1643,6 +1656,8 @@ function enterSpectate(){
   isSpectating=true;
   const bar=document.getElementById('spectate-bar');
   if(bar)bar.style.display='flex';
+  const srb=document.getElementById('spec-rejoin-btn');
+  if(srb)srb.style.display='';
   go('scr-game');
   if(!rafHandle)rafHandle=requestAnimationFrame(rafDraw);
 }
@@ -1659,13 +1674,17 @@ async function rejoinGame(){
 }
 
 function goHome(){
-  isSpectating=false; _localDead=false;
+  isSpectating=false; _localDead=false; _firstRemoteSync=false;
   // Blur any focused input so the gamepad doesn't get trapped in a text field
   if(document.activeElement&&document.activeElement!==document.body)document.activeElement.blur();
   if(rafHandle){cancelAnimationFrame(rafHandle);rafHandle=null;}
   document.removeEventListener('mousemove',onMouseMove);
   window.removeEventListener('resize',onResize);
   SG=null;
+  const srb=document.getElementById('spec-rejoin-btn');
+  if(srb)srb.style.display='none';
+  const sb=document.getElementById('spectate-bar');
+  if(sb)sb.style.display='none';
   pkDisconnect();
   go('scr-home');
 }
@@ -1764,7 +1783,7 @@ function rafDraw(ts){
       const h=my.path[0];
       my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
       if(my.growQueue>0){my.growQueue--;my.numSections=Math.min(MAX_SECTIONS,my.numSections+1);}
-      const pathNeeded=Math.ceil(my.numSections*sectionRadius(my)*SEGMENT_SPACING*2/SNAKE_SPD)+10;
+      const pathNeeded=Math.ceil(my.numSections*sectionRadius(my)*SEGMENT_SPACING*2/(my.boost?BOOST_SPD:SNAKE_SPD))+10;
       if(my.path.length>pathNeeded)my.path.length=pathNeeded;
       const nh=my.path[0];
       if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead)endSnakeGame('eliminated',null);
@@ -1784,7 +1803,7 @@ function rafDraw(ts){
       const h=s.path[0];
       s.path.unshift({x:h.x+Math.cos(s.angle)*spd,y:h.y+Math.sin(s.angle)*spd});
       if(s.growQueue>0){s.growQueue--;s.numSections=Math.min(MAX_SECTIONS,s.numSections+1);}
-      const pn=Math.ceil(s.numSections*sectionRadius(s)*SEGMENT_SPACING*2/SNAKE_SPD)+10;
+      const pn=Math.ceil(s.numSections*sectionRadius(s)*SEGMENT_SPACING*2/(s.boost?BOOST_SPD:SNAKE_SPD))+10;
       if(s.path.length>pn)s.path.length=pn;
     });
   }
@@ -1802,7 +1821,7 @@ function rafDraw(ts){
       const spd=(my.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=my.path[0];
       my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
-      const pathNeeded=Math.ceil(my.numSections*sectionRadius(my)*SEGMENT_SPACING*2/SNAKE_SPD)+10;
+      const pathNeeded=Math.ceil(my.numSections*sectionRadius(my)*SEGMENT_SPACING*2/(my.boost?BOOST_SPD:SNAKE_SPD))+10;
       if(my.path.length>pathNeeded)my.path.length=pathNeeded;
       const nh=my.path[0];
       if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead)endSnakeGame('eliminated',null);
