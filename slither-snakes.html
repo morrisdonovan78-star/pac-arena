@@ -1092,9 +1092,11 @@ function pkDisconnect(){
 //
 // damnbruh.com exact updateSegments — nth segment placed at n*spacing from head via interpolation.
 // spacing = radius * SEGMENT_SPACING_FACTOR (0.5) — dynamic, not fixed.
-function getBodyPoints(snake){
+// sf: optional spacing factor override (default SEGMENT_SPACING=0.5). Pass smaller value
+// for rendering-only calls during boost to counteract visual body uncoiling.
+function getBodyPoints(snake,sf){
   const path=snake.path,target=snake.numSections;
-  const r=sectionRadius(snake),spacing=r*SEGMENT_SPACING;
+  const r=sectionRadius(snake),spacing=r*(sf!=null?sf:SEGMENT_SPACING);
   const pts=[];
   if(!path.length)return pts;
   pts.push(path[0]);
@@ -1948,7 +1950,9 @@ function drawFood(){
 
 function drawSnake(snake){
   if(!snake.path||snake.path.length<2)return;
-  const bPts=getBodyPoints(snake);
+  // During boost pack circles tighter (0.35 vs 0.5) so the body looks compact —
+  // prevents the perceptual elongation caused by the snake straightening out at speed.
+  const bPts=getBodyPoints(snake,snake.boost?0.35:undefined);
   if(bPts.length<2)return;
   const r=sectionRadius(snake);
   const col=snake.color;
