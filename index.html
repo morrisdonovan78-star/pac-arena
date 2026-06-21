@@ -1830,6 +1830,9 @@ function applyRemoteState(d){
     }
     // State arrived before elim event — remove dead remote players proactively
     if(!lives && id!==myPid){ G.players.delete(id); changed=true; return; }
+    // Host's own player is authoritative from tick() — skip stale 's' packet updates
+    // (the packet reflects state from 1-4 ticks ago due to Socket.io round-trip latency)
+    if(id===myPid && isHost) return;
     p.prevX=p.x; p.prevY=p.y;
     p.x=x; p.y=y;
     // Do NOT overwrite dx/dy for the local guest player — we set it immediately on keypress
@@ -3007,7 +3010,14 @@ function p1d(dx,dy){
   if(!G||G.over) return;
   const me=G.players.get(myPid);
   if(!me) return;
-  me.nx=dx; me.ny=dy;
+  // Host: don't let a wall-direction press cancel a valid queued corner turn.
+  // Fast mashing can overwrite a valid nx/ny that's waiting for the next tile boundary.
+  // Only protect when the NEW direction is blocked AND the existing queue is valid.
+  if(isHost && isWall(me.x,me.y,dx,dy) && (me.nx!==0||me.ny!==0) && !isWall(me.x,me.y,me.nx,me.ny)){
+    // keep the existing valid queue; don't overwrite
+  } else {
+    me.nx=dx; me.ny=dy;
+  }
   // Guest: immediately commit if the direction is open at our current tile.
   // If the cell in that direction is a wall, keep the old dx/dy so movement
   // continues — the queued nx/ny will be applied at the next valid corner.
@@ -3726,9 +3736,7 @@ function draw(){
       }
     } else {
       // ── Remote players + host's own player ───────────────────────
-      const _pdx=p.dx, _pdy=p.dy;
       const _cm=(p.dx!==0||p.dy!==0)&&!isWall(p.x,p.y,p.dx,p.dy);
-      const _turned=p.dx!==_pdx||p.dy!==_pdy;
       if(_cm){ p.renderX=((p.renderX+p.dx*pspd)+C)%C; p.renderY=((p.renderY+p.dy*pspd)+R)%R; }
       let ddx=p.x-p.renderX, ddy=p.y-p.renderY;
       if(ddx>C/2) ddx-=C; else if(ddx<-C/2) ddx+=C;
@@ -3739,13 +3747,11 @@ function draw(){
       else{
         if(ddx*p.dx>0.25) p.renderX=((p.renderX+ddx*0.12)+C)%C;
         if(ddy*p.dy>0.25) p.renderY=((p.renderY+ddy*0.12)+R)%R;
-        if(_turned){
-          if(p.dx===0) p.renderX=p.x;
-          if(p.dy===0) p.renderY=p.y;
-        } else {
-          if(p.dx===0&&Math.abs(ddx)>0.05) p.renderX=((p.renderX+ddx*0.22)+C)%C;
-          if(p.dy===0&&Math.abs(ddy)>0.05) p.renderY=((p.renderY+ddy*0.22)+R)%R;
-        }
+        // Snap the perpendicular axis aggressively — prevents sprite clipping into walls on turns.
+        // Direction changes happen in tick() before rafDraw runs, so a frame-to-frame _turned
+        // delta would always be false; instead, always realign the off-axis render to the grid.
+        if(p.dx===0){ if(Math.abs(ddx)>0.1) p.renderX=p.x; else if(Math.abs(ddx)>0.02) p.renderX=((p.renderX+ddx*0.5)+C)%C; }
+        if(p.dy===0){ if(Math.abs(ddy)>0.1) p.renderY=p.y; else if(Math.abs(ddy)>0.02) p.renderY=((p.renderY+ddy*0.5)+R)%R; }
       }
     }
   });
