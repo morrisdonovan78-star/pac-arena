@@ -382,7 +382,7 @@ const BASE_RADIUS        = 8;    // minimum snake radius
 const RADIUS_GROWTH      = 0.6;  // exponent for radius curve
 const RADIUS_SCALE       = 0.8;  // multiplier for radius curve
 // radius = BASE_RADIUS + size^RADIUS_GROWTH * RADIUS_SCALE
-const FOOD_TARGET  = 108;   // 108 pebbles on map (60% of original 180)
+const FOOD_TARGET  = 135;   // 135 pebbles on map
 const FOOD_GROW    = 2;     // sections added per food orb
 const MIN_SECTIONS = 8;     // die below this
 const INIT_SECTIONS= 24;    // starting section count
@@ -988,6 +988,7 @@ async function pkConnect(roomId,gameToken){
             const ns=SG.snakes.get(data.id);
             if(ns)ns.path[0]={x:data.x,y:data.y};
           }
+          _forceFoodSend=true; // ensure rejoining player gets food immediately
         }
       }
       _guestInputs.set(data.id,{angle:data.angle||0,boost:!!data.boost,x:data.x,y:data.y,ts:Date.now(),fresh:true});
@@ -1316,24 +1317,11 @@ function snakeTick(){
         const hit=dx*dx+dy*dy<(aR+bR)*(aR+bR)||(k===0&&b.id!==a.id&&segHitsCircle(aPrev,ah,bs,aR+bR));
         if(hit){
           if(k===0&&b.id!==a.id){
-            // Head-to-head: the snake facing MORE toward the other is the "attacker" and dies.
-            // Size never influences the outcome — only angle and position matter.
-            const toBx=bs.x-ah.x,toBy=bs.y-ah.y;
-            const d2=Math.hypot(toBx,toBy)||1;
-            const aFwd=(Math.cos(a.angle)*toBx+Math.sin(a.angle)*toBy)/d2;
-            const bFwd=(-Math.cos(b.angle)*toBx-Math.sin(b.angle)*toBy)/d2;
-            if(Math.abs(aFwd-bFwd)<0.15){
-              // Near-symmetric head-on: whichever head has advanced further along its
-              // own forward axis (past the other's head) is "in front" and survives.
-              // The one whose head contacted closer to the other's body (behind the tip) dies.
-              const aFwdProgress=(ah.x-bs.x)*Math.cos(a.angle)+(ah.y-bs.y)*Math.sin(a.angle);
-              if(aFwdProgress>=0) eliminateSnake(b.id,a.id); // A ahead → B dies
-              else                 eliminateSnake(a.id,b.id); // B ahead → A dies
-            } else if(aFwd>bFwd){
-              eliminateSnake(a.id,b.id); // A charging more directly → A dies
-            } else {
-              eliminateSnake(b.id,a.id); // B charging more directly → B dies
-            }
+            // Head-to-head: whoever is further ahead along their own forward axis wins.
+            // The snake in front always gets the kill — never angle/size based.
+            const aFwdProgress=(ah.x-bs.x)*Math.cos(a.angle)+(ah.y-bs.y)*Math.sin(a.angle);
+            if(aFwdProgress>=0) eliminateSnake(b.id,a.id); // A ahead → B dies
+            else                 eliminateSnake(a.id,b.id); // B ahead → A dies
           } else {
             eliminateSnake(a.id,a.id===b.id?null:b.id);
           }
@@ -1424,6 +1412,9 @@ function applyRemoteState(d){
     });
   }
   if(d.snakes){
+    // Track which IDs the host sent — any alive remote snake absent from packet has died (ghost fix)
+    const _seenIds=new Set(d.snakes.map(sd=>sd.id));
+    SG.snakes.forEach((s,id)=>{if(id!==myPid&&s.alive&&!_seenIds.has(id))s.alive=false;});
     d.snakes.forEach(sd=>{
       // Own snake: sync size from host; on first sync snap to host-assigned spawn so camera lands near other players
       if(sd.id===myPid){
