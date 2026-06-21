@@ -967,22 +967,31 @@ async function pkConnect(roomId,gameToken){
     // Guest input from guests → host
     _sio.on('ssin',(data)=>{
       if(!isHost||!data||!data.id||data.id===myPid)return;
+      // Auto-create snake if 'join' was missed or arrived late
+      if(SG&&!SG.over&&!SG.snakes.has(data.id)){
+        const m=_playerMeta.get(data.id)||{};
+        addSnakePlayer(data.id,m.color||colorFromId(data.id),m.name||'SNAKE');
+      }
       _guestInputs.set(data.id,{angle:data.angle||0,boost:!!data.boost,x:data.x,y:data.y,ts:Date.now()});
     });
 
     _sio.on('join',(h)=>{
-      if(!h||!h.id)return;
-      _playerMeta.set(h.id,{color:h.color||colorFromId(h.id),name:h.name||'SNAKE'});
-      if(SG&&!SG.over&&!SG.snakes.has(h.id)){
-        addSnakePlayer(h.id,h.color||colorFromId(h.id),h.name||'SNAKE');
+      if(!h)return;
+      const hid=h.id||h.pid; // server may send pid instead of id
+      if(!hid)return;
+      _playerMeta.set(hid,{color:h.color||colorFromId(hid),name:h.name||'SNAKE'});
+      if(SG&&!SG.over&&!SG.snakes.has(hid)){
+        addSnakePlayer(hid,h.color||colorFromId(hid),h.name||'SNAKE');
       }
       addToast('🐍 '+(h.name||'Snake')+' joined!','#00FFFF');
     });
 
     _sio.on('leave',(data)=>{
-      if(!data||!data.id)return;
-      _playerMeta.delete(data.id);
-      if(SG&&SG.snakes.has(data.id))SG.snakes.delete(data.id);
+      if(!data)return;
+      const did=data.id||data.pid;
+      if(!did)return;
+      _playerMeta.delete(did);
+      if(SG&&SG.snakes.has(did))SG.snakes.delete(did);
     });
 
     _sio.on('elim',(data)=>{
@@ -1933,15 +1942,16 @@ function _drawHeadCircle(snake,r){
   ctx.beginPath();ctx.arc(eFwd+eR*0.05,-eSide-eR*0.18,eR*0.22,0,Math.PI*2);ctx.fill();
   ctx.beginPath();ctx.arc(eFwd+eR*0.05, eSide-eR*0.18,eR*0.22,0,Math.PI*2);ctx.fill();
 
-  // Boost flame behind head
+  // Boost flame — only behind head (backward-facing half-disk so it never extends past the head tip)
   if(snake.boost){
-    ctx.rotate(Math.PI);
+    ctx.rotate(Math.PI); // +x now points backward in world space
     const g=ctx.createRadialGradient(0,0,0,0,0,r*2.2);
     g.addColorStop(0,'rgba(255,220,0,0.9)');
     g.addColorStop(0.45,'rgba(255,80,0,0.55)');
     g.addColorStop(1,'transparent');
     ctx.fillStyle=g;
-    ctx.beginPath();ctx.arc(0,0,r*2.2,0,Math.PI*2);ctx.fill();
+    // Pie-slice only in +x direction (= backward in world), so flame never adds visual length at the front
+    ctx.beginPath();ctx.moveTo(0,0);ctx.arc(0,0,r*2.2,-Math.PI/2,Math.PI/2);ctx.closePath();ctx.fill();
   }
 
   ctx.restore();
