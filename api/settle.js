@@ -3,7 +3,7 @@
 const nacl    = require('tweetnacl');
 const crypto  = require('crypto');
 const GAME_SECRET = (process.env.GAME_SECRET || '').trim();
-const { kvGet, kvSet, kvSetNX, kvDel, kvSetPerm, kvZadd, kvHincrby } = require('../lib/kv');
+const { kvGet, kvGetDel, kvSet, kvSetNX, kvDel, kvSetPerm, kvZadd, kvHincrby } = require('../lib/kv');
 
 // ── Ed25519 wallet signature verification ─────────────────────────────────────
 // The client signs: "pac-arena:{action}:{playerAddress}:{wagerLamports}:{unixTs}"
@@ -276,6 +276,28 @@ module.exports = async function handler(req, res) {
     const { action, playerAddress } = body;
     const wagerLamportsRaw = Number(body.wagerLamports) || 0;
 
+    // ── elim-lock: game server calls this immediately on kill to block victim cashout ──
+    if (action === 'elim-lock') {
+      const adminSec  = (req.headers['x-admin-secret'] || '').trim();
+      const serverSec = (process.env.ADMIN_SECRET || '').trim();
+      if (!adminSec || !serverSec || adminSec !== serverSec) {
+        clearTimeout(guard); done = true;
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+      const { victimAddress } = body;
+      if (!victimAddress || typeof victimAddress !== 'string' || victimAddress.length < 20) {
+        clearTimeout(guard); done = true;
+        return res.status(400).json({ error: 'victimAddress required' });
+      }
+      // Set dead flag (blocks cashout) and atomically delete their wager record simultaneously
+      await Promise.all([
+        kvSet('dead:' + victimAddress, '1', 600),
+        kvGetDel('pw:' + victimAddress),
+      ]).catch(() => {});
+      clearTimeout(guard); done = true;
+      return res.status(200).json({ ok: true });
+    }
+
     // ── Wallet signature auth — required for all fund-moving actions ─────────
     // The player signs the request with their Solana private key.
     // Only the real wallet owner can produce a valid signature.
@@ -313,10 +335,19 @@ module.exports = async function handler(req, res) {
       }
 
       try {
-        const kvWager = Number(await kvGet('pw:' + playerAddress)) || 0;
+        // Dead check: if the kill handler (or elim-lock) already marked this player dead,
+        // refuse cashout even if their wager record briefly still exists.
+        const isDead = await kvGet('dead:' + playerAddress);
+        if (isDead) {
+          clearTimeout(guard); done = true;
+          return res.status(403).json({ error: 'Cannot cashout — you were eliminated' });
+        }
+        // GETDEL atomically reads and deletes the wager in one step.
+        // This eliminates the race where a kill could delete it after we read it but before we finish.
+        const kvWager = Number(await kvGetDel('pw:' + playerAddress)) || 0;
         if (kvWager <= 0) {
           clearTimeout(guard); done = true;
-          return res.status(403).json({ error: 'No wager on record — deposit via the game client before cashing out' });
+          return res.status(403).json({ error: 'No wager on record — you may have been eliminated or already cashed out' });
         }
         const wagerLamports = kvWager;
         console.log('[settle] cashout kv=' + kvWager + ' using=' + wagerLamports);
@@ -341,7 +372,6 @@ module.exports = async function handler(req, res) {
             const tx = buildTx(esc, blockhash, transfers);
             const result = await sendAndConfirm(tx);
             sig = result.sig; txConfirmed = result.confirmed;
-            await kvDel('pw:' + playerAddress);
             (async()=>{ try{ await kvDel('krl:'+playerAddress); }catch(_){} })();
             (async()=>{
               try{
@@ -412,6 +442,16 @@ module.exports = async function handler(req, res) {
         return res.status(403).json({ error: 'Kill proof already redeemed' });
       }
 
+      // Immediately block victim cashout: set dead flag + atomically remove their wager.
+      // This runs BEFORE the TX so even if the cashout request is in-flight right now,
+      // it will hit the dead check or find no wager record and be refused.
+      if (vaBody && vaBody !== playerAddress && vaBody.length > 20) {
+        await Promise.all([
+          kvSet('dead:' + vaBody, '1', 600),
+          kvGetDel('pw:' + vaBody),
+        ]).catch(() => {});
+      }
+
       // Retry once on on-chain fail — concurrent kills can race on the shared escrow balance
       let sig, killerCut, creatorCut, txConfirmed2 = false;
       for (let attempt = 1; attempt <= 2; attempt++) {
@@ -439,10 +479,6 @@ module.exports = async function handler(req, res) {
           const tx = buildTx(esc, killHash, transfers);
           const result2 = await sendAndConfirm(tx);
           sig = result2.sig; txConfirmed2 = result2.confirmed;
-          // Delete victim's wager so they can't cashout after being killed
-          if (vaBody && vaBody !== playerAddress && vaBody.length > 20) {
-            try { await kvDel('pw:' + vaBody); } catch (_) {}
-          }
           (async()=>{
             try{
               const pk='ph:'+playerAddress;

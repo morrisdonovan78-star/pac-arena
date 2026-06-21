@@ -195,10 +195,10 @@ module.exports = async function handler(req, res) {
     await kvSet(txKey, '1', 86400);
     // Store for 4 hours — more than enough for any game session
     await kvSet('pw:' + walletAddress, lamps, 14400);
-    // Clear any stale cashout lock from a previous session (e.g. Vercel function was killed
-    // before finally{kvDel} could run). Safe to delete here because the player just proved
-    // they paid a new wager — no concurrent cashout can be legitimately in-flight.
+    // Clear any stale cashout lock and dead flag from a previous session.
+    // Safe because the player just proved they paid a new wager.
     kvDel('lock:co:' + walletAddress).catch(() => {});
+    kvDel('dead:' + walletAddress).catch(() => {});
 
     // Fire-and-forget leaderboard join stat — atomic HINCRBY, no read-modify-write race
     (async()=>{
