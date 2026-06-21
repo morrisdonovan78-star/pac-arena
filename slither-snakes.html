@@ -1792,7 +1792,6 @@ function rafDraw(ts){
       const spd=(my.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=my.path[0];
       my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
-      if(my.growQueue>0){my.growQueue--;my.numSections=Math.min(MAX_SECTIONS,my.numSections+1);}
       const pathNeeded=Math.ceil(my.numSections*sectionRadius(my)*SEGMENT_SPACING*2/(my.boost?BOOST_SPD:SNAKE_SPD))+10;
       if(my.path.length>pathNeeded)my.path.length=pathNeeded;
       const nh=my.path[0];
@@ -1812,7 +1811,6 @@ function rafDraw(ts){
       const spd=(s.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=s.path[0];
       s.path.unshift({x:h.x+Math.cos(s.angle)*spd,y:h.y+Math.sin(s.angle)*spd});
-      if(s.growQueue>0){s.growQueue--;s.numSections=Math.min(MAX_SECTIONS,s.numSections+1);}
       const pn=Math.ceil(s.numSections*sectionRadius(s)*SEGMENT_SPACING*2/(s.boost?BOOST_SPD:SNAKE_SPD))+10;
       if(s.path.length>pn)s.path.length=pn;
     });
