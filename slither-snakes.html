@@ -1508,12 +1508,15 @@ async function endSnakeGame(reason,killerId){
     clearInterval(_guestInputLoop);_guestInputLoop=null;
     _gpadLastBtn=[];_gpadNavTs=0;_padBoost=false;
     addToast('💀 ELIMINATED — spectating…','#FF4444');
+    const _sb=document.getElementById('spectate-bar');
+    if(_sb)_sb.style.display='flex';
     if(ST.lobbyUsd>0)(async()=>{try{await settle('p2');await refreshBal();}catch(_){}})();
     return; // host loop + rafDraw stay alive
   }
 
-  // Guest eliminated or cashed out: keep connection + rafDraw alive for spectate/rejoin
-  const keepAlive = !isHost && (elim||cashed);
+  // Keep connection + rafDraw alive when eliminated (guest) or when cashed out (any role).
+  // HOST cashout: host loop must keep running for remaining players — only set SG.over on 'over'.
+  const keepAlive = cashed || (elim && !isHost);
   if(keepAlive){
     isSpectating=true;
     clearInterval(_guestInputLoop);_guestInputLoop=null;
