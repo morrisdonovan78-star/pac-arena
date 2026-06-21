@@ -371,8 +371,8 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
 
 // ══ CONSTANTS ════════════════════════════════════════════════
 const ARENA_R      = 3000;  // world radius
-const SNAKE_SPD    = 19.0;  // px/tick normal  (+20% from 15.8)
-const BOOST_SPD    = 38.0;  // px/tick boost   (2× normal — damnbruh exact ratio)
+const SNAKE_SPD    = 22.8;  // px/tick normal  (+20%)
+const BOOST_SPD    = 45.6;  // px/tick boost   (2× normal)
 const TICK_MS      = 33;    // 30 TPS
 // damnbruh.com exact physics constants (extracted from page-d38402305f41a2e6.js)
 const SIZE_PER_SEGMENT   = 5;    // segments = floor(size / 5)
@@ -386,7 +386,7 @@ const FOOD_GROW    = 2;     // sections added per food orb
 const MIN_SECTIONS = 8;     // die below this
 const INIT_SECTIONS= 24;    // starting section count
 const MAX_SECTIONS = 90;    // hard cap on snake length
-const MAX_TURN     = 0.253; // rad/tick (+20% from 0.211)
+const MAX_TURN     = 0.304; // rad/tick (+20%)
 const BOOST_DRAIN  = 8;     // ticks between boost drain events
 const BOOST_DRAIN_AMT = 3;  // sections lost per drain event (3× faster drain)
 const SELF_SKIP    = 9999;  // disable self-collision — damnbruh.com: own tail never kills you
