@@ -3715,11 +3715,20 @@ function draw(){
       if((p.nx!==0||p.ny!==0)&&!isWall(p.x,p.y,p.nx,p.ny)){ p.dx=p.nx; p.dy=p.ny; }
       const _cm=(p.dx!==0||p.dy!==0)&&!isWall(p.x,p.y,p.dx,p.dy);
       const _turned=p.dx!==_pdx||p.dy!==_pdy;
-      if(_cm){ p.renderX=((p.renderX+p.dx*pspd)+C)%C; p.renderY=((p.renderY+p.dy*pspd)+R)%R; }
+      if(_cm){
+        const nrX=((p.renderX+p.dx*pspd)+C)%C, nrY=((p.renderY+p.dy*pspd)+R)%R;
+        // Cap: don't let client prediction drift >2.5 tiles from the server's position.
+        // Rapid U-turns move renderX away from p.x while the server hasn't turned yet;
+        // without this cap the gap exceeds 5 and the teleport snap fires (the visible "jump").
+        let nddx=p.x-nrX; if(nddx>C/2) nddx-=C; else if(nddx<-C/2) nddx+=C;
+        let nddy=p.y-nrY; if(nddy>R/2) nddy-=R; else if(nddy<-R/2) nddy+=R;
+        if(Math.abs(nddx)<=2.5) p.renderX=nrX;
+        if(Math.abs(nddy)<=2.5) p.renderY=nrY;
+      }
       let ddx=p.x-p.renderX, ddy=p.y-p.renderY;
       if(ddx>C/2) ddx-=C; else if(ddx<-C/2) ddx+=C;
       if(ddy>R/2) ddy-=R; else if(ddy<-R/2) ddy+=R;
-      if(Math.abs(ddx)>5||Math.abs(ddy)>5){ p.renderX=p.x; p.renderY=p.y; } // teleport snap
+      if(Math.abs(ddx)>5||Math.abs(ddy)>5){ p.renderX=p.x; p.renderY=p.y; } // teleport snap (real disconnects/respawns only)
       else if(!_cm){ p.renderX=((p.renderX+ddx*0.22)+C)%C; p.renderY=((p.renderY+ddy*0.22)+R)%R; } // stopped: ease to grid
       else{
         // Running: only catch up if BEHIND in movement dir — never pull back when ahead
