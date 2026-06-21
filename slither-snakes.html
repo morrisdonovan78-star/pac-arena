@@ -1080,7 +1080,7 @@ function makeSnake(id,color,name){
   const faceAngle=Math.atan2(-sy,-sx);
   // Pre-fill path: each point SNAKE_SPD apart going backward from spawn
   const initR=BASE_RADIUS+Math.pow(INIT_SECTIONS*SIZE_PER_SEGMENT,RADIUS_GROWTH)*RADIUS_SCALE;
-  const pathLen=Math.ceil(INIT_SECTIONS*initR*SEGMENT_SPACING/SNAKE_SPD)+10;
+  const pathLen=Math.ceil(INIT_SECTIONS*initR*SEGMENT_SPACING*2/SNAKE_SPD)+10;
   const path=[];
   for(let i=0;i<pathLen;i++){
     path.push({x:sx-Math.cos(faceAngle)*i*SNAKE_SPD,y:sy-Math.sin(faceAngle)*i*SNAKE_SPD});
@@ -1188,7 +1188,7 @@ function snakeTick(){
     }
 
     // Trim path to only what sections need (dynamic spacing = radius * 0.5)
-    const pathNeeded=Math.ceil(snake.numSections*sectionRadius(snake)*SEGMENT_SPACING/SNAKE_SPD)+8;
+    const pathNeeded=Math.ceil(snake.numSections*sectionRadius(snake)*SEGMENT_SPACING*2/SNAKE_SPD)+8;
     if(snake.path.length>pathNeeded)snake.path.length=pathNeeded;
 
     if(snake.numSections<MIN_SECTIONS){eliminateSnake(snake.id,null);return;}
@@ -1330,7 +1330,7 @@ function applyRemoteState(d){
         if(!s.path.length){
           // First packet or teleport — full path reconstruction
           const _segR=BASE_RADIUS+Math.pow(s.numSections*SIZE_PER_SEGMENT,RADIUS_GROWTH)*RADIUS_SCALE;
-          const steps=Math.max(1,Math.round(_segR*SEGMENT_SPACING/SNAKE_SPD));
+          const steps=Math.max(1,Math.round(_segR*SEGMENT_SPACING*2/SNAKE_SPD));
           const path=[];
           for(let i=0;i<sd.segs.length-1;i++){
             const a=sd.segs[i],b=sd.segs[i+1];
@@ -1346,7 +1346,7 @@ function applyRemoteState(d){
           if(dist>SNAKE_SPD*15){
             // Large teleport-level drift — full rebuild
             const _segR=BASE_RADIUS+Math.pow(s.numSections*SIZE_PER_SEGMENT,RADIUS_GROWTH)*RADIUS_SCALE;
-            const steps=Math.max(1,Math.round(_segR*SEGMENT_SPACING/SNAKE_SPD));
+            const steps=Math.max(1,Math.round(_segR*SEGMENT_SPACING*2/SNAKE_SPD));
             const path=[];
             for(let i=0;i<sd.segs.length-1;i++){
               const a=sd.segs[i],b=sd.segs[i+1];
@@ -1582,7 +1582,7 @@ function rafDraw(ts){
       const h=my.path[0];
       my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
       if(my.growQueue>0){my.growQueue--;my.numSections=Math.min(MAX_SECTIONS,my.numSections+1);}
-      const pathNeeded=Math.ceil(my.numSections*sectionRadius(my)*SEGMENT_SPACING/SNAKE_SPD)+10;
+      const pathNeeded=Math.ceil(my.numSections*sectionRadius(my)*SEGMENT_SPACING*2/SNAKE_SPD)+10;
       if(my.path.length>pathNeeded)my.path.length=pathNeeded;
       const nh=my.path[0];
       if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead)endSnakeGame('eliminated',null);
@@ -1602,7 +1602,7 @@ function rafDraw(ts){
       const h=s.path[0];
       s.path.unshift({x:h.x+Math.cos(s.angle)*spd,y:h.y+Math.sin(s.angle)*spd});
       if(s.growQueue>0){s.growQueue--;s.numSections=Math.min(MAX_SECTIONS,s.numSections+1);}
-      const pn=Math.ceil(s.numSections*sectionRadius(s)*SEGMENT_SPACING/SNAKE_SPD)+10;
+      const pn=Math.ceil(s.numSections*sectionRadius(s)*SEGMENT_SPACING*2/SNAKE_SPD)+10;
       if(s.path.length>pn)s.path.length=pn;
     });
   }
@@ -1620,7 +1620,7 @@ function rafDraw(ts){
       const spd=(my.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=my.path[0];
       my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
-      const pathNeeded=Math.ceil(my.numSections*sectionRadius(my)*SEGMENT_SPACING/SNAKE_SPD)+10;
+      const pathNeeded=Math.ceil(my.numSections*sectionRadius(my)*SEGMENT_SPACING*2/SNAKE_SPD)+10;
       if(my.path.length>pathNeeded)my.path.length=pathNeeded;
       const nh=my.path[0];
       if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead)endSnakeGame('eliminated',null);
