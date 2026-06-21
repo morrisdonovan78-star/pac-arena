@@ -408,7 +408,7 @@ let SG=null;
 let canvas=null,ctx=null,mmCanvas=null,mmCtx=null;
 let rafHandle=null,_hostRaf=null,_lastTickTs=0;
 let _camX=0,_camY=0,_camZoom=0.6,_zoomOffset=0;
-let _mouseX=0,_mouseY=0,_mouseBoost=false,_padBoost=false,_cashoutTimer=null;
+let _mouseX=0,_mouseY=0,_mouseBoost=false,_padBoost=false,_cashoutTimer=null,_showHitboxes=false;
 let _pendingState=null;
 let _gpadLastBtn=[],_gpadNavTs=0;
 const GPAD_DEADZONE=0.2,GPAD_NAV_MS=180;
@@ -899,6 +899,11 @@ async function pkConnect(roomId,gameToken){
       _initRecv=true;
       if(_initGuard){clearTimeout(_initGuard);_initGuard=null;}
       if(!data)return;
+      // Socket reconnected mid-game: just sync metadata, don't reset game state
+      if(SG&&!SG.over){
+        (data.players||[]).forEach(h=>_playerMeta.set(h.id,{color:h.color||colorFromId(h.id),name:h.name||'SNAKE'}));
+        return;
+      }
       try{
         (data.players||[]).forEach(h=>_playerMeta.set(h.id,{color:h.color||colorFromId(h.id),name:h.name||'SNAKE'}));
         const allPlayers=(data.players||[]).filter(h=>h.alive!==false).map((h,i)=>({
@@ -1423,6 +1428,7 @@ function onTouchMove(e){e.preventDefault();if(e.touches.length){_mouseX=e.touche
 function onGameKey(e){
   if(e.repeat)return;
   if(e.key===' '||e.key==='Shift')_mouseBoost=true;
+  if(e.key==='h'||e.key==='H'){_showHitboxes=!_showHitboxes;addToast(_showHitboxes?'Hitboxes ON':'Hitboxes OFF','#FFD700');}
   if(e.key==='q'||e.key==='Q'){
     if(SG&&!SG.over&&!_localDead&&!_cashoutTimer){
       addToast('HOLD Q to cash out… release to cancel','#FFD700');
@@ -1438,24 +1444,40 @@ function onGameKeyUp(e){
 }
 
 async function endSnakeGame(reason,killerId){
-  if(!SG||SG.over||_localDead)return;
-  _localDead=true; SG.over=true;
+  if(!SG||SG.over)return;
+  // Spectating host can still receive 'over'/'gameover' to fully shut down
+  if(_localDead&&reason!=='over')return;
+  _localDead=true;
+  if(_cashoutTimer){clearTimeout(_cashoutTimer);_cashoutTimer=null;}
+  document.removeEventListener('keydown',onGameKey);
+  document.removeEventListener('keyup',onGameKeyUp);
+
+  const elim=reason==='eliminated';
+  const cashed=reason==='cashout';
+
+  // HOST was eliminated: enter spectator mode, keep host loop running for other players
+  if(isHost&&elim){
+    isSpectating=true;
+    clearInterval(_guestInputLoop);_guestInputLoop=null;
+    _gpadLastBtn=[];_gpadNavTs=0;_padBoost=false;
+    addToast('💀 ELIMINATED — spectating…','#FF4444');
+    if(ST.lobbyUsd>0)(async()=>{try{await settle('p2');await refreshBal();}catch(_){}})();
+    return; // host loop + rafDraw stay alive so other players keep playing
+  }
+
+  // Full shutdown for guests, host cashout, host gameover
+  SG.over=true;
   stopHostLoop();
   clearInterval(_guestInputLoop);_guestInputLoop=null;
   if(rafHandle){cancelAnimationFrame(rafHandle);rafHandle=null;}
-  if(_cashoutTimer){clearTimeout(_cashoutTimer);_cashoutTimer=null;}
   document.removeEventListener('mousemove',onMouseMove);
   document.removeEventListener('mousedown',()=>{});
   document.removeEventListener('mouseup',()=>{});
-  document.removeEventListener('keydown',onGameKey);
-  document.removeEventListener('keyup',onGameKeyUp);
   window.removeEventListener('resize',onResize);
 
   const my=SG.snakes.get(myPid);
   const myScore=my?.score||0;
   const myLen=my?.numSections||0;
-  const elim=reason==='eliminated';
-  const cashed=reason==='cashout';
 
   document.getElementById('rs-score').textContent=myScore;
   document.getElementById('rs-len').textContent=myLen;
@@ -1632,9 +1654,11 @@ function rafDraw(ts){
   const mySnake=SG&&SG.snakes.get(myPid);
   if(mySnake&&mySnake.path.length&&mySnake.alive){
     const h=mySnake.path[0];
-    // Instant camera snap (damnbruh: no lerp on camera position)
     _camX=h.x;
     _camY=h.y;
+  }else if(isSpectating&&SG){
+    // Follow first alive snake while spectating
+    for(const s of SG.snakes.values()){if(s.alive&&s.path.length){_camX=s.path[0].x;_camY=s.path[0].y;break;}}
   }
   // Fixed zoom based on screen size — identical to damnbruh's zoom formula
   _camZoom=Math.max(0.3,Math.min(2.0,Math.min(canvas.width/1920,canvas.height/1080)+_zoomOffset));
@@ -1650,6 +1674,20 @@ function rafDraw(ts){
   drawArena();
   if(SG&&SG.food)drawFood();
   if(SG)SG.snakes.forEach(s=>{if(s.alive&&s.path.length>1)drawSnake(s);});
+
+  // H key: debug hitbox overlay — yellow circles = body collision, orange = head
+  if(_showHitboxes&&SG){
+    SG.snakes.forEach(s=>{
+      if(!s.alive||!s.path.length)return;
+      const bPts=getBodyPoints(s);
+      const r=sectionRadius(s);
+      ctx.lineWidth=2/_camZoom;
+      bPts.forEach((p,i)=>{
+        ctx.strokeStyle=i===0?'rgba(255,140,0,0.95)':'rgba(255,255,0,0.7)';
+        ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.stroke();
+      });
+    });
+  }
 
   ctx.restore();
 
