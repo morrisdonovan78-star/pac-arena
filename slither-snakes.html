@@ -1254,9 +1254,23 @@ function snakeTick(){
         const hit=dx*dx+dy*dy<(aR+bR)*(aR+bR)||(k===0&&b.id!==a.id&&segHitsCircle(aPrev,ah,bs,aR+bR));
         if(hit){
           if(k===0&&b.id!==a.id){
-            // head-to-head: smaller dies; equal — attacker (a) loses; NEVER both die
-            if(a.numSections<=b.numSections) eliminateSnake(a.id,b.id);
-            else eliminateSnake(b.id,a.id);
+            // Head-to-head: angle decides who dies, never both.
+            // The snake facing MORE toward the contact point is the "attacker" — they die.
+            // Cuts succeed when the enemy head is moving toward YOU (they ran into your head).
+            // True head-on (symmetric): size tiebreaker (smaller dies).
+            const toBx=bs.x-ah.x,toBy=bs.y-ah.y;
+            const d2=Math.hypot(toBx,toBy)||1;
+            const aFwd=(Math.cos(a.angle)*toBx+Math.sin(a.angle)*toBy)/d2;
+            const bFwd=(-Math.cos(b.angle)*toBx-Math.sin(b.angle)*toBy)/d2;
+            if(Math.abs(aFwd-bFwd)<0.15){
+              // Near-symmetrical head-on: smaller snake loses
+              if(a.numSections<=b.numSections) eliminateSnake(a.id,b.id);
+              else eliminateSnake(b.id,a.id);
+            } else if(aFwd>bFwd){
+              eliminateSnake(a.id,b.id); // A charging more directly → A dies
+            } else {
+              eliminateSnake(b.id,a.id); // B charging more directly → B dies
+            }
           } else {
             eliminateSnake(a.id,a.id===b.id?null:b.id);
           }
