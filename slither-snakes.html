@@ -1265,8 +1265,8 @@ function snakeTick(){
     // can't boost at or below starting length
     if(snake.boost&&snake.numSections<=INIT_SECTIONS)snake.boost=false;
 
-    // Grow: only consume queue when not boosting — boost should only drain, never grow
-    if(snake.growQueue>0&&!snake.boost){snake.growQueue--;snake.numSections=Math.min(MAX_SECTIONS,snake.numSections+1);}
+    // Grow: increment section count from queue, cap at MAX_SECTIONS
+    if(snake.growQueue>0){snake.growQueue--;snake.numSections=Math.min(MAX_SECTIONS,snake.numSections+1);}
 
     // Boost drains sections smoothly — 1 at a time via accumulator (same avg rate as before)
     if(snake.boost&&snake.numSections>INIT_SECTIONS){
@@ -1282,9 +1282,9 @@ function snakeTick(){
       snake._drain=0;
     }
 
-    // Trim path to only what sections need — use actual speed so boost doesn't leave stale far-back points
-    const _spd=snake.boost?BOOST_SPD:SNAKE_SPD;
-    const pathNeeded=Math.ceil(snake.numSections*sectionRadius(snake)*SEGMENT_SPACING*2/_spd)+8;
+    // Trim path — always use SNAKE_SPD so switching to boost never aggressively cuts the tail,
+    // which caused body circles to vanish and then reappear (appearing to "grow") during boost.
+    const pathNeeded=Math.ceil(snake.numSections*sectionRadius(snake)*SEGMENT_SPACING*2/SNAKE_SPD)+8;
     if(snake.path.length>pathNeeded)snake.path.length=pathNeeded;
 
     if(snake.numSections<MIN_SECTIONS){eliminateSnake(snake.id,null);return;}
@@ -1792,7 +1792,7 @@ function rafDraw(ts){
       const spd=(my.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=my.path[0];
       my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
-      const pathNeeded=Math.ceil(my.numSections*sectionRadius(my)*SEGMENT_SPACING*2/(my.boost?BOOST_SPD:SNAKE_SPD))+10;
+      const pathNeeded=Math.ceil(my.numSections*sectionRadius(my)*SEGMENT_SPACING*2/SNAKE_SPD)+10;
       if(my.path.length>pathNeeded)my.path.length=pathNeeded;
       const nh=my.path[0];
       if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead)endSnakeGame('eliminated',null);
@@ -1811,7 +1811,7 @@ function rafDraw(ts){
       const spd=(s.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=s.path[0];
       s.path.unshift({x:h.x+Math.cos(s.angle)*spd,y:h.y+Math.sin(s.angle)*spd});
-      const pn=Math.ceil(s.numSections*sectionRadius(s)*SEGMENT_SPACING*2/(s.boost?BOOST_SPD:SNAKE_SPD))+10;
+      const pn=Math.ceil(s.numSections*sectionRadius(s)*SEGMENT_SPACING*2/SNAKE_SPD)+10;
       if(s.path.length>pn)s.path.length=pn;
     });
   }
@@ -1829,7 +1829,7 @@ function rafDraw(ts){
       const spd=(my.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=my.path[0];
       my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
-      const pathNeeded=Math.ceil(my.numSections*sectionRadius(my)*SEGMENT_SPACING*2/(my.boost?BOOST_SPD:SNAKE_SPD))+10;
+      const pathNeeded=Math.ceil(my.numSections*sectionRadius(my)*SEGMENT_SPACING*2/SNAKE_SPD)+10;
       if(my.path.length>pathNeeded)my.path.length=pathNeeded;
       const nh=my.path[0];
       if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead)endSnakeGame('eliminated',null);
