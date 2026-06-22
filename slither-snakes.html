@@ -389,7 +389,8 @@ const INIT_SECTIONS= 24;    // starting section count
 const MAX_SECTIONS = 90;    // hard cap on snake length
 const MAX_TURN     = 0.274; // rad/tick
 const BOOST_DRAIN  = 8;     // ticks between boost drain events
-const BOOST_DRAIN_AMT = 5;  // drain accumulator per tick = AMT/DRAIN = 0.625 sections/tick (lose size a little faster while boosting)
+const BOOST_DRAIN_AMT = 3.75; // drain accumulator per tick = AMT/DRAIN = 0.469 sections/tick (25% less size loss while boosting)
+const SHED_NOEAT_MS = 4000;  // a snake can't re-eat its own boost-shed trail pebbles for this long (anti circle-farm)
 const HOST_TIMEOUT = 2500;  // ms of host silence before a guest promotes itself (host migration)
 const SELF_SKIP    = 9999;  // disable self-collision — damnbruh.com: own tail never kills you
 const ESCROW_PUBKEY = '2SYFfCsSmKr8qwK1AfWd36JtAc1BCaRaSSxyECKUJjBb';
@@ -1438,13 +1439,13 @@ function snakeTick(){
         snake._shed=(snake._shed||0)+1/FOOD_GROW;
         if(snake._shed>=1){
           snake._shed-=1;
-          // Conserve shed mass as a pebble, but only HALF drops in the trail — the other half
-          // respawns elsewhere on the map, so a snake can't circle while boosting and re-eat
-          // its own trail to keep growing.
+          // Conserve shed mass as a pebble. Half drops in the trail TAGGED with the shedder's
+          // id (o) + a no-eat window (ne) so they can't circle back and re-eat their own boost
+          // trail to keep growing; others can still eat it. The other half respawns on the map.
           if(Math.random()<0.5){
             const bPts=getBodyPoints(snake);
             const tail=bPts[bPts.length-1];
-            if(tail) SG.food.push({x:tail.x+(Math.random()-.5)*6,y:tail.y+(Math.random()-.5)*6,ci:Math.floor(Math.random()*FOOD_COLORS.length),size:4+Math.random()*3});
+            if(tail) SG.food.push({x:tail.x+(Math.random()-.5)*6,y:tail.y+(Math.random()-.5)*6,ci:Math.floor(Math.random()*FOOD_COLORS.length),size:4+Math.random()*3,o:snake.id,ne:Date.now()+SHED_NOEAT_MS});
           }else{
             SG.food.push(makeFood());
           }
@@ -1502,12 +1503,14 @@ function snakeTick(){
   }
 
   // Food collection — head radius pickup (damnbruh.com style)
+  const _nowEat=Date.now();
   SG.snakes.forEach(snake=>{
     if(!snake.alive)return;
     const h=snake.path[0];
     const r=sectionRadius(snake);
     for(let i=SG.food.length-1;i>=0;i--){
       const f=SG.food[i];
+      if(f.o===snake.id&&f.ne&&_nowEat<f.ne)continue; // can't re-eat your own fresh boost-shed (anti circle-farm)
       const dx=h.x-f.x,dy=h.y-f.y;
       if(dx*dx+dy*dy<(r+f.size)*(r+f.size)){
         snake.growQueue+=FOOD_GROW;
@@ -1549,13 +1552,14 @@ function spawnFoodFromSnake(snake){
 
 // ── Food upkeep ──────────────────────────────────────────────────────────────
 // Keep a CONSISTENT carpet of regular pebbles: always refill the map back up to FOOD_TARGET
-// (eaten pebbles respawn fast, so the amount stays steady), and cap at 2x so boost-shed and
-// death piles don't balloon. Boost/death ADD food on top of the carpet; eating + this refill
-// keep the baseline steady. Boosting raises the count (it adds shed pebbles), so it never
-// triggers the refill — no random top-ups mid-boost.
+// (eaten pebbles respawn fast, so the amount stays steady), and cap at 1.5x so that when lots
+// of fed snakes die at once the map can't get carpeted in pellets ("food everywhere"). Trim
+// oldest first so fresh death/boost piles survive. Boosting raises the count (adds shed
+// pebbles), so it never triggers the refill — no random top-ups mid-boost.
 function reconcileFood(){
+  const cap=Math.round(FOOD_TARGET*1.5);
   if(SG.food.length<FOOD_TARGET){const n=Math.min(FOOD_TARGET-SG.food.length,8);for(let i=0;i<n;i++)SG.food.push(makeFood());}
-  else if(SG.food.length>FOOD_TARGET*2){const n=Math.min(SG.food.length-FOOD_TARGET*2,12);for(let i=0;i<n;i++)SG.food.shift();}
+  else if(SG.food.length>cap){const n=Math.min(SG.food.length-cap,15);for(let i=0;i<n;i++)SG.food.shift();}
 }
 
 function sendSnakeState(){
