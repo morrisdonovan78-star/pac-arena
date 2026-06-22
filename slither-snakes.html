@@ -2153,8 +2153,10 @@ function drawArena(){
   ctx.fillStyle='#07071a';ctx.fill();
   // Dot grid
   ctx.save();ctx.clip();
-  // Hexagonal honeycomb grid (flat-top), only over the visible viewport for performance.
-  const R=46, hx=1.5*R, hy=Math.sqrt(3)*R;
+  // Hexagonal honeycomb grid (flat-top), viewport-culled. R scales with 1/zoom so the hex
+  // count drawn on screen stays CONSTANT at every zoom level — keeps FPS flat when zooming
+  // (otherwise zooming out drew thousands more hexes and tanked the framerate).
+  const R=46/_camZoom, hx=1.5*R, hy=Math.sqrt(3)*R;
   const halfW=canvas.width/(2*_camZoom)+R, halfH=canvas.height/(2*_camZoom)+R;
   const cMin=Math.floor((_camX-halfW)/hx)-1, cMax=Math.ceil((_camX+halfW)/hx)+1;
   const rMin=Math.floor((_camY-halfH)/hy)-1, rMax=Math.ceil((_camY+halfH)/hy)+1;
