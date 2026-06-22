@@ -336,6 +336,8 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
     <div class="gi"><span class="gl">FPS</span><span class="gv" id="hud-fps" style="color:var(--g)">--</span></div>
   </div>
   <div id="leaderboard" style="position:fixed;top:8px;right:10px;min-width:190px;background:rgba(7,7,15,0.88);border:1px solid rgba(255,215,0,0.35);border-radius:10px;padding:8px 12px;z-index:100;font-family:'Exo 2',sans-serif;pointer-events:none;display:none;"></div>
+  <button id="voice-btn" onclick="voiceToggle()" title="Voice chat — Y (controller) / M (keyboard) to mute" style="position:fixed;bottom:16px;right:16px;z-index:200;display:none;width:46px;height:46px;border-radius:50%;background:rgba(7,7,15,0.85);border:1px solid rgba(255,215,0,0.3);color:#fff;font-size:20px;cursor:pointer;">🎙️</button>
+  <div id="voice-speakers" style="position:fixed;bottom:16px;left:12px;z-index:200;display:none;flex-direction:column;gap:4px;pointer-events:none;"></div>
   <div id="boost-hint">HOLD CLICK TO BOOST 🔥</div>
   <div id="spectate-bar" style="display:none;position:absolute;top:10px;left:50%;transform:translateX(-50%);display:none;align-items:center;gap:12px;background:rgba(0,0,0,0.7);border:1px solid rgba(255,215,0,0.4);border-radius:8px;padding:6px 14px;z-index:100;">
     <span style="color:#FFD700;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:2px;">👁 SPECTATING</span>
@@ -410,6 +412,8 @@ const RPC_REGIONS={'US':'https://api.mainnet-beta.solana.com','EU':'https://sola
 const ST={email:'',address:'',balance:0,solPrice:0,wagerSol:0,lobbyUsd:0,conn:null,hasEscrow:false,cashoutLamports:0,entryToken:null};
 let _keypair=null,_jwt='',_pendingBackupKp=null;
 let _sio=null,ablyChannel=null,pkRoomId=null;
+let _voiceStream=null,_voiceEnabled=false,_voiceCapCtx=null,_voiceProc=null,_voicePlayCtx=null;
+let _peerAudioCtxs=new Map(),_voiceAnalysers=new Map(),_voiceSpeaking=new Set(),_voiceLocalAnalyser=null,_voiceReadyPids=new Set(),_voiceHearFirst=new Set();
 let myPid=null,isHost=false,isSpectating=false;
 let _joiningLobby=false,_lobbyIsPaid=false;
 let GAME_SERVER=localStorage.getItem('ss_server')||'NA';
@@ -971,6 +975,19 @@ async function pkConnect(roomId,gameToken){
       setTimeout(()=>{try{go('scr-lobby');}catch(_){}},3000);
     });
 
+    // Voice chat — relay-based PCM (server forwards voice-audio to the room)
+    _sio.on('voice-audio',(d)=>{
+      const from=d&&d.from, buf=d&&d.buf;
+      if(!from||from===myPid||!buf)return;
+      try{
+        const bin=atob(buf);const bytes=new Uint8Array(bin.length);
+        for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+        if(!_voiceHearFirst.has(from)){_voiceHearFirst.add(from);const nm=(_playerMeta.get(from)||{}).name||from.slice(0,4);addToast('🔊 Hearing '+nm,'#FFD700');}
+        _playVoiceChunk(from,bytes.buffer);
+      }catch(e){}
+    });
+    _sio.on('voice-ready',(d)=>{const from=d&&d.from;if(from&&from!==myPid)_voiceReadyPids.add(from);});
+
     // Snake state from host → guests
     _sio.on('ss',(data)=>{
       if(!SG||(SG.over&&!isSpectating))return;
@@ -1104,6 +1121,7 @@ function pkDisconnect(){
   clearInterval(_pingInterval);_pingInterval=null;_ping=0;
   if(_bgPump){clearInterval(_bgPump);_bgPump=null;}_bgSuppressSend=false;
   if(_hostWatch){clearInterval(_hostWatch);_hostWatch=null;}
+  voiceCleanup();
   _killFeed=[];
   ablyChannel=null;
   if(_sio){try{_sio.disconnect();}catch(_){}} _sio=null;
@@ -1739,6 +1757,7 @@ function launchSnakeGame(){
   rafHandle=requestAnimationFrame(rafDraw);
   if(_hostWatch)clearInterval(_hostWatch);
   _hostWatch=setInterval(_checkHost,700); // watch for host departure → migrate
+  const _vb=document.getElementById('voice-btn');if(_vb)_vb.style.display='flex';
 }
 
 function onResize(){if(canvas){canvas.width=window.innerWidth;canvas.height=window.innerHeight;}}
@@ -1764,6 +1783,7 @@ function onGameKey(e){
   // +/= zoom in, -/_ zoom out (keyboard). rafDraw re-clamps to the visible range.
   if(e.key==='='||e.key==='+')_zoomOffset=Math.min(2.0,_zoomOffset+0.12);
   if(e.key==='-'||e.key==='_')_zoomOffset=Math.max(-2.0,_zoomOffset-0.12);
+  if(e.key==='m'||e.key==='M')voiceToggle(); // keyboard/mouse: toggle voice chat
 }
 function onGameKeyUp(e){
   if(e.key===' '||e.key==='Shift')_mouseBoost=false;
@@ -1927,12 +1947,14 @@ function pollGamepad(){
     // Right stick X (axes[2]) — zoom in/out
     const rsx=axes[2]||0;
     if(Math.abs(rsx)>GPAD_DEADZONE) _zoomOffset=Math.max(-2.0,Math.min(2.0,_zoomOffset-rsx*0.004));
-    // Y button (index 3) — hold 1s to cashout
-    if(pressed(3)&&!_cashoutTimer&&!_localDead){
-      addToast('HOLD Y to cash out…','#FFD700');
+    // Y button (index 3) — toggle voice chat (controller)
+    if(pressed(3)) voiceToggle();
+    // B button (index 1) — hold 1s to cashout
+    if(pressed(1)&&!_cashoutTimer&&!_localDead){
+      addToast('HOLD B to cash out…','#FFD700');
       _cashoutTimer=setTimeout(()=>{_cashoutTimer=null;endSnakeGame('cashout',null);},1000);
     }
-    if(released(3)&&_cashoutTimer){
+    if(released(1)&&_cashoutTimer){
       clearTimeout(_cashoutTimer);_cashoutTimer=null;addToast('Cashout cancelled','#888');
     }
   } else {
@@ -2084,6 +2106,7 @@ function rafDraw(ts){
   if(SG)drawMoneyFx();
   ctx.restore();
 
+  if(SG)_voiceUpdateSpeaking();
   drawHUD(mySnake);
   drawKillFeedHUD();
   drawMinimap(mySnake);
@@ -2388,6 +2411,95 @@ function drawMinimap(mySnake){
   mm.restore();
   mm.beginPath();mm.arc(mw/2,mh/2,mw/2-1,0,Math.PI*2);
   mm.strokeStyle='rgba(0,255,255,0.45)';mm.lineWidth=2;mm.stroke();
+}
+
+// ── Voice chat (relay-based PCM over socket — ported from the other game) ──────
+function _closeVoicePeer(pid){_peerAudioCtxs.delete(pid);_voiceAnalysers.delete(pid);_voiceReadyPids.delete(pid);}
+function _getOrMakePeerAudio(pid){
+  if(!_voicePlayCtx)return null;
+  let s=_peerAudioCtxs.get(pid);
+  if(!s){const an=_voicePlayCtx.createAnalyser();an.fftSize=256;an.connect(_voicePlayCtx.destination);s={analyser:an,nextTime:0};_peerAudioCtxs.set(pid,s);_voiceAnalysers.set(pid,an);}
+  return s;
+}
+function _playVoiceChunk(from,ab){
+  if(!_voicePlayCtx)return;
+  try{
+    if(_voicePlayCtx.state==='suspended')_voicePlayCtx.resume().catch(()=>{});
+    const s=_getOrMakePeerAudio(from);if(!s)return;
+    const i16=new Int16Array(ab);if(!i16.length)return;
+    const audioBuf=_voicePlayCtx.createBuffer(1,i16.length,16000);
+    const ch=audioBuf.getChannelData(0);
+    for(let i=0;i<i16.length;i++)ch[i]=i16[i]/32767;
+    const src=_voicePlayCtx.createBufferSource();src.buffer=audioBuf;src.connect(s.analyser);
+    const now=_voicePlayCtx.currentTime;
+    const t=Math.max(now+0.05,Math.min(s.nextTime,now+1.0));
+    src.start(t);s.nextTime=t+audioBuf.duration;
+  }catch(e){console.warn('[voice-play]',e);}
+}
+function _voiceUpdateSpeaking(){
+  _voiceSpeaking.clear();
+  const buf=new Uint8Array(128);
+  const rms=an=>{an.getByteFrequencyData(buf);return buf.reduce((s,v)=>s+v,0)/buf.length;};
+  _voiceAnalysers.forEach((an,pid)=>{if(rms(an)>18)_voiceSpeaking.add(pid);});
+  if(_voiceLocalAnalyser&&myPid&&rms(_voiceLocalAnalyser)>18)_voiceSpeaking.add(myPid);
+  const vs=document.getElementById('voice-speakers');if(!vs)return;
+  if(_voiceSpeaking.size>0){
+    vs.style.display='flex';
+    vs.innerHTML=[..._voiceSpeaking].map(pid=>{
+      const p=_playerMeta.get(pid);
+      const label=(pid===myPid?(getMyName()||'YOU'):((p&&p.name)||pid.slice(0,4))).slice(0,10).toUpperCase();
+      const color=(p&&p.color)||'#FFD700';
+      return '<div style="font-family:\'Exo 2\',sans-serif;font-size:11px;font-weight:bold;color:'+color+';background:rgba(0,0,0,0.75);border:1px solid '+color+'88;border-radius:5px;padding:3px 8px;">🎤 '+label+'</div>';
+    }).join('');
+  }else{vs.style.display='none';}
+}
+async function voiceToggle(){
+  const btn=document.getElementById('voice-btn');
+  if(!_voiceEnabled){
+    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){addToast('Voice chat not supported in this browser','#FF4444');return;}
+    if(!_voicePlayCtx||_voicePlayCtx.state==='closed'){_voicePlayCtx=new(window.AudioContext||window.webkitAudioContext)();_voicePlayCtx.resume().catch(()=>{});}
+    try{
+      _voiceStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1},video:false});
+      _voiceEnabled=true;
+      try{
+        _voiceCapCtx=new(window.AudioContext||window.webkitAudioContext)();await _voiceCapCtx.resume();
+        const src=_voiceCapCtx.createMediaStreamSource(_voiceStream);
+        _voiceLocalAnalyser=_voiceCapCtx.createAnalyser();_voiceLocalAnalyser.fftSize=256;src.connect(_voiceLocalAnalyser);
+        _voiceProc=_voiceCapCtx.createScriptProcessor(2048,1,1);src.connect(_voiceProc);
+        const silence=_voiceCapCtx.createGain();silence.gain.value=0;_voiceProc.connect(silence);silence.connect(_voiceCapCtx.destination);
+        _voiceProc.onaudioprocess=(e)=>{
+          if(!_voiceEnabled||!_sio)return;
+          const pcm=e.inputBuffer.getChannelData(0);
+          let sum=0;for(let i=0;i<pcm.length;i++)sum+=pcm[i]*pcm[i];
+          if(Math.sqrt(sum/pcm.length)<0.005)return;
+          const ratio=_voiceCapCtx.sampleRate/16000,outLen=Math.floor(pcm.length/ratio);
+          const i16=new Int16Array(outLen);
+          for(let i=0;i<outLen;i++){const v=pcm[Math.floor(i*ratio)];i16[i]=Math.max(-32768,Math.min(32767,v*32767));}
+          const raw=new Uint8Array(i16.buffer);let s='';for(let j=0;j<raw.length;j++)s+=String.fromCharCode(raw[j]);
+          _sio.emit('voice-audio',btoa(s));
+        };
+      }catch(e){console.warn('[voice-cap]',e);}
+      if(btn){btn.textContent='🎤';btn.style.borderColor='rgba(57,255,20,0.6)';}
+      addToast('🎤 Voice ON — Y (controller) / M (keyboard) to mute','#39FF14');
+      if(_sio)_sio.emit('voice-ready',{});
+    }catch(e){addToast('Microphone access denied — check browser settings','#FF4444');}
+  }else{
+    const muted=_voiceStream&&_voiceStream.getAudioTracks().some(t=>!t.enabled);
+    if(_voiceStream)_voiceStream.getAudioTracks().forEach(t=>t.enabled=muted);
+    if(btn){btn.textContent=muted?'🎤':'🔇';btn.style.borderColor=muted?'rgba(57,255,20,0.6)':'rgba(255,68,68,0.5)';}
+    addToast(muted?'🎤 Mic unmuted':'🔇 Mic muted','#FFD700');
+  }
+}
+function voiceCleanup(){
+  if(_voiceProc){try{_voiceProc.disconnect();}catch(_){}_voiceProc=null;}
+  if(_voiceCapCtx){try{_voiceCapCtx.close();}catch(_){}_voiceCapCtx=null;}
+  if(_voicePlayCtx){try{_voicePlayCtx.close();}catch(_){}_voicePlayCtx=null;}
+  _peerAudioCtxs.clear();_voiceAnalysers.clear();_voiceSpeaking.clear();_voiceLocalAnalyser=null;_voiceReadyPids.clear();_voiceHearFirst.clear();
+  if(_voiceStream){_voiceStream.getTracks().forEach(t=>t.stop());_voiceStream=null;}
+  _voiceEnabled=false;
+  const btn=document.getElementById('voice-btn');
+  if(btn){btn.textContent='🎙️';btn.style.borderColor='rgba(255,215,0,0.2)';}
+  const vs=document.getElementById('voice-speakers');if(vs)vs.style.display='none';
 }
 
 // ══ INIT ════════════════════════════════════════════════════
