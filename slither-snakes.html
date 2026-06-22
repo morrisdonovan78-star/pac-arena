@@ -390,6 +390,7 @@ const MAX_SECTIONS = 90;    // hard cap on snake length
 const MAX_TURN     = 0.274; // rad/tick
 const BOOST_DRAIN  = 8;     // ticks between boost drain events
 const BOOST_DRAIN_AMT = 4;  // drain accumulator per tick = AMT/DRAIN = 0.5 sections/tick (a bit faster shrink while boosting)
+const HOST_TIMEOUT = 2500;  // ms of host silence before a guest promotes itself (host migration)
 const SELF_SKIP    = 9999;  // disable self-collision — damnbruh.com: own tail never kills you
 const ESCROW_PUBKEY = '2SYFfCsSmKr8qwK1AfWd36JtAc1BCaRaSSxyECKUJjBb';
 const APP_ID = 'cmq1eo6uz004b0cl8pvk7aakk';
@@ -882,7 +883,7 @@ function cancelJoin(){
 }
 
 // ══ NETWORK / SOCKET ════════════════════════════════════════
-let _hostPid=null,_pkTick=0,_pkSentTick=0,_myHelloTs=0,_pingInterval=null;
+let _hostPid=null,_pkTick=0,_pkSentTick=0,_myHelloTs=0,_pingInterval=null,_lastSsTs=0,_hostWatch=null;
 
 async function pkConnect(roomId,gameToken){
   if(_sio){try{_sio.disconnect();}catch(_){}  _sio=null;}
@@ -966,6 +967,16 @@ async function pkConnect(roomId,gameToken){
     // Snake state from host → guests
     _sio.on('ss',(data)=>{
       if(!SG||(SG.over&&!isSpectating))return;
+      if(!data)return;
+      // Host-migration: track who's hosting + liveness. If two nodes host at once, lowest pid wins.
+      if(data.host){
+        if(isHost){
+          if(data.host!==myPid&&data.host<myPid)_demoteFromHost(); // yield to lower-pid host
+          else return;                                             // I'm the rightful host — ignore their state
+        }else{_hostPid=data.host;}
+      }
+      _lastSsTs=Date.now();
+      if(isHost)return; // host is authoritative — never apply inbound state over our own
       // Merge kills from any previous pending state that is being overwritten
       if(_pendingState&&_pendingState.kills&&_pendingState.kills.length){
         if(!data.kills)data.kills=[];
@@ -1016,6 +1027,13 @@ async function pkConnect(roomId,gameToken){
       if(!did)return;
       _playerMeta.delete(did);
       if(SG&&SG.snakes.has(did))SG.snakes.delete(did);
+      // Host left → elect the lowest-pid remaining player (maybe me) immediately.
+      if(SG&&!SG.over&&did===_hostPid&&!isHost){
+        _hostPid=null;
+        const cands=[...(_playerMeta.keys())].filter(id=>id).sort();
+        if(!cands.length||cands[0]===myPid)_electHost();
+        _lastSsTs=Date.now();
+      }
     });
 
     _sio.on('elim',(data)=>{
@@ -1077,6 +1095,7 @@ function pkDisconnect(){
   clearInterval(_guestInputLoop);_guestInputLoop=null;
   clearInterval(_pingInterval);_pingInterval=null;_ping=0;
   if(_bgPump){clearInterval(_bgPump);_bgPump=null;}_bgSuppressSend=false;
+  if(_hostWatch){clearInterval(_hostWatch);_hostWatch=null;}
   _killFeed=[];
   ablyChannel=null;
   if(_sio){try{_sio.disconnect();}catch(_){}} _sio=null;
@@ -1222,6 +1241,7 @@ function initSnakeGame(players){
   });
   if(isHost){SG.food=seedFoodLayout();} // deterministic per-room layout → same dots for everyone
   else{_firstRemoteSync=true;} // guest: snap own position to host-assigned spot on first ss
+  _hostPid=isHost?myPid:null; _lastSsTs=Date.now(); // host-migration tracking
 }
 
 function addSnakePlayer(id,color,name){
@@ -1269,6 +1289,38 @@ function startHostLoop(){
   _hostRaf=requestAnimationFrame(_loop);
 }
 function stopHostLoop(){if(_hostRaf){cancelAnimationFrame(_hostRaf);_hostRaf=null;}}
+
+// ── Host migration: keep the game running when the host leaves ────────────────
+// The host is authoritative (runs snakeTick, broadcasts 'ss' tagged host:myPid). Guests
+// track that id + last-seen time; if it goes silent (left/crashed) the lowest-pid remaining
+// player promotes itself, adopting the already-synced snakes + food. This is what stops the
+// "frozen snakes gliding into walls" and "no dots" — there's always someone simulating.
+function _electHost(){
+  if(isHost||!SG||SG.over)return;
+  isHost=true; _hostPid=myPid;
+  if(!SG.food||!SG.food.length)SG.food=seedFoodLayout(); // ensure dots exist if we never synced
+  if(_guestInputLoop){clearInterval(_guestInputLoop);_guestInputLoop=null;}
+  _forceFoodSend=true;
+  _lastTickTs=performance.now();
+  startHostLoop();
+  addToast('👑 You are the host now','#FFD700');
+}
+function _demoteFromHost(){
+  if(!isHost)return;
+  isHost=false;
+  stopHostLoop();
+  if(!_guestInputLoop)startGuestLoop();
+  _lastSsTs=Date.now();
+}
+function _checkHost(){
+  if(!SG||SG.over||isHost)return;
+  if(!_lastSsTs){_lastSsTs=Date.now();return;}
+  if(Date.now()-_lastSsTs<HOST_TIMEOUT)return;
+  // Host went silent — elect the lowest-pid remaining player (excluding the silent host).
+  const cands=[...(_playerMeta.keys())].filter(id=>id&&id!==_hostPid).sort();
+  if(!cands.length||cands[0]===myPid)_electHost();
+  _lastSsTs=Date.now(); // back off; the elected host's 'ss' will reset this for everyone else
+}
 
 // ── Background-tab simulation pump ───────────────────────────────────────────
 // Browsers PAUSE requestAnimationFrame (both rafDraw AND the host loop) when a tab is
@@ -1376,19 +1428,19 @@ function snakeTick(){
     // Grow: increment section count from queue, cap at MAX_SECTIONS
     if(snake.growQueue>0){snake.growQueue--;snake.numSections=Math.min(MAX_SECTIONS,snake.numSections+1);}
 
-    // Boost drains sections smoothly — 1 at a time via accumulator (same avg rate as before)
+    // Boost drains sections; shed mass returns to the map as pebbles in your TRAIL only
+    // (1 pebble per FOOD_GROW sections, so map+carried food stays conserved — no scatter).
     if(snake.boost&&snake.numSections>INIT_SECTIONS){
       snake._drain=(snake._drain||0)+(BOOST_DRAIN_AMT/BOOST_DRAIN);
       if(snake._drain>=1){
         snake._drain-=1;
         snake.numSections=Math.max(INIT_SECTIONS,snake.numSections-1);
-        const bPts=getBodyPoints(snake);
-        const tail=bPts[bPts.length-1];
-        // Half the boost-shed pebbles drop in your trail (at the tail); the other half
-        // respawn randomly across the map instead of all piling up behind you.
-        if(tail){
-          if(Math.random()<0.5) SG.food.push({x:tail.x+(Math.random()-.5)*6,y:tail.y+(Math.random()-.5)*6,ci:Math.floor(Math.random()*FOOD_COLORS.length),size:4+Math.random()*3});
-          else SG.food.push(makeFood());
+        snake._shed=(snake._shed||0)+1/FOOD_GROW;
+        if(snake._shed>=1){
+          snake._shed-=1;
+          const bPts=getBodyPoints(snake);
+          const tail=bPts[bPts.length-1];
+          if(tail) SG.food.push({x:tail.x+(Math.random()-.5)*6,y:tail.y+(Math.random()-.5)*6,ci:Math.floor(Math.random()*FOOD_COLORS.length),size:4+Math.random()*3});
         }
       }
     } else if(!snake.boost){
@@ -1453,13 +1505,12 @@ function snakeTick(){
       if(dx*dx+dy*dy<(r+f.size)*(r+f.size)){
         snake.growQueue+=FOOD_GROW;
         snake.score+=10;
-        SG.food.splice(i,1);
-        SG.food.push(makeFoodNear(f.x,f.y)); // respawn near where it was eaten → fast local respawn
+        SG.food.splice(i,1); // eaten pebble becomes body mass — no respawn; reconcileFood conserves the total
       }
     }
   });
 
-  while(SG.food.length<FOOD_TARGET)SG.food.push(makeFood());
+  reconcileFood(); // keep map + carried food == FOOD_TARGET (consistent world total)
 
   _pkTick++;
   sendSnakeState();
@@ -1481,11 +1532,30 @@ function eliminateSnake(id,killerId){
 
 function spawnFoodFromSnake(snake){
   if(!snake||!snake.path)return;
-  const step=Math.max(2,Math.floor(snake.path.length/60));
-  for(let i=0;i<snake.path.length;i+=step){
-    SG.food.push({x:snake.path[i].x+(Math.random()-.5)*20,y:snake.path[i].y+(Math.random()-.5)*20,ci:Math.floor(Math.random()*FOOD_COLORS.length),size:5+Math.random()*6});
+  // Return exactly the food this snake was carrying (so map+carried stays conserved),
+  // scattered along its body so others can pick it up where it died.
+  const drop=Math.max(0,Math.round((snake.numSections-INIT_SECTIONS+(snake.growQueue||0))/FOOD_GROW));
+  const plen=snake.path.length;
+  for(let n=0;n<drop;n++){
+    const p=snake.path[Math.floor(Math.random()*plen)]||snake.path[0];
+    SG.food.push({x:p.x+(Math.random()-.5)*22,y:p.y+(Math.random()-.5)*22,ci:Math.floor(Math.random()*FOOD_COLORS.length),size:5+Math.random()*6});
   }
-  while(SG.food.length>FOOD_TARGET*2)SG.food.shift();
+}
+
+// ── Food conservation ────────────────────────────────────────────────────────
+// World food is constant: pebbles on the map + food carried as body mass = FOOD_TARGET.
+// carried (in pebble-units) = sections grown beyond the start (+ pending growth) / FOOD_GROW.
+function carriedFoodUnits(){
+  let c=0;
+  SG.snakes.forEach(s=>{ if(s.alive) c+=Math.max(0,(s.numSections-INIT_SECTIONS+(s.growQueue||0))/FOOD_GROW); });
+  return c;
+}
+function reconcileFood(){
+  let desired=Math.round(FOOD_TARGET-carriedFoodUnits());
+  if(desired<0)desired=0;
+  const diff=desired-SG.food.length;
+  if(diff>0){const n=Math.min(diff,6);for(let i=0;i<n;i++)SG.food.push(makeFood());}      // top up gently
+  else if(diff<0){const n=Math.min(-diff,6);for(let i=0;i<n;i++)SG.food.pop();}            // trim excess gently
 }
 
 function sendSnakeState(){
@@ -1500,7 +1570,7 @@ function sendSnakeState(){
     snakeArr.push({id:s.id,segs,angle:s.angle,score:s.score,boost:s.boost,ns:s.numSections,color:s.color,name:s.name});
   });
   _foodSendCounter++;
-  const msg={t:'ss',snakes:snakeArr,tick:SG.tick};
+  const msg={t:'ss',snakes:snakeArr,tick:SG.tick,host:myPid}; // host tag drives host-migration
   if(_pendingKills.length){msg.kills=[..._pendingKills];_pendingKills.length=0;}
   if(_foodSendCounter%3===0||_forceFoodSend){
     msg.food=SG.food.map(f=>[Math.round(f.x),Math.round(f.y),f.ci,Math.round(f.size)]);
@@ -1651,6 +1721,8 @@ function launchSnakeGame(){
   if(isHost)startHostLoop();
   else startGuestLoop();
   rafHandle=requestAnimationFrame(rafDraw);
+  if(_hostWatch)clearInterval(_hostWatch);
+  _hostWatch=setInterval(_checkHost,700); // watch for host departure → migrate
 }
 
 function onResize(){if(canvas){canvas.width=window.innerWidth;canvas.height=window.innerHeight;}}
