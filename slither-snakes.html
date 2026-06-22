@@ -1369,7 +1369,12 @@ function snakeTick(){
         snake.numSections=Math.max(INIT_SECTIONS,snake.numSections-1);
         const bPts=getBodyPoints(snake);
         const tail=bPts[bPts.length-1];
-        if(tail) SG.food.push({x:tail.x+(Math.random()-.5)*6,y:tail.y+(Math.random()-.5)*6,ci:Math.floor(Math.random()*FOOD_COLORS.length),size:4+Math.random()*3});
+        // Half the boost-shed pebbles drop in your trail (at the tail); the other half
+        // respawn randomly across the map instead of all piling up behind you.
+        if(tail){
+          if(Math.random()<0.5) SG.food.push({x:tail.x+(Math.random()-.5)*6,y:tail.y+(Math.random()-.5)*6,ci:Math.floor(Math.random()*FOOD_COLORS.length),size:4+Math.random()*3});
+          else SG.food.push(makeFood());
+        }
       }
     } else if(!snake.boost){
       snake._drain=0;
