@@ -414,6 +414,7 @@ let REGION=localStorage.getItem('ss_region')||'US';
 let SG=null;
 let canvas=null,ctx=null,mmCanvas=null,mmCtx=null;
 let rafHandle=null,_hostRaf=null,_lastTickTs=0;
+let _bgPump=null,_bgLastTs=0,_bgSuppressSend=false;
 let _camX=0,_camY=0,_camZoom=0.6,_zoomOffset=0;
 let _mouseX=0,_mouseY=0,_mouseBoost=false,_padBoost=false,_cashoutTimer=null,_showHitboxes=false;
 let _pendingState=null;
@@ -1075,6 +1076,7 @@ function pkSend(data){if(ablyChannel)ablyChannel.publish(data.t,data,()=>{});}
 function pkDisconnect(){
   clearInterval(_guestInputLoop);_guestInputLoop=null;
   clearInterval(_pingInterval);_pingInterval=null;_ping=0;
+  if(_bgPump){clearInterval(_bgPump);_bgPump=null;}_bgSuppressSend=false;
   _killFeed=[];
   ablyChannel=null;
   if(_sio){try{_sio.disconnect();}catch(_){}} _sio=null;
@@ -1241,6 +1243,66 @@ function startHostLoop(){
 }
 function stopHostLoop(){if(_hostRaf){cancelAnimationFrame(_hostRaf);_hostRaf=null;}}
 
+// ── Background-tab simulation pump ───────────────────────────────────────────
+// Browsers PAUSE requestAnimationFrame (both rafDraw AND the host loop) when a tab is
+// hidden, which froze the whole game — a player could tab out mid-fight to freeze in
+// place, never die, then tab back and resume untouched (a real cheat/abuse vector).
+// While hidden we instead drive the sim from a timer so snakes keep moving in their last
+// direction and can still hit walls/players and die. Background setInterval is clamped to
+// ~1Hz, so each fire catches up the real elapsed time in fixed TICK_MS steps (fine-grained
+// so fast/boosting snakes don't tunnel through collisions). On return we hand back to RAF.
+function _bgSimStep(){
+  if(!SG||SG.over)return;
+  // Own snake (host or guest) — identical motion to rafDraw's prediction, one full tick.
+  if(!_localDead){
+    const my=SG.snakes.get(myPid);
+    if(my&&my.alive&&my.path.length){
+      const da=angleDiff(targetAngleToMouse(my),my.angle);
+      my.angle+=Math.max(-MAX_TURN,Math.min(MAX_TURN,da));
+      my.boost=(_mouseBoost||_padBoost)&&my.numSections>INIT_SECTIONS;
+      const spd=my.boost?BOOST_SPD:SNAKE_SPD;
+      const h=my.path[0];
+      my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
+      trimPath(my);
+      const nh=my.path[0];
+      if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead)endSnakeGame('eliminated',null);
+    }
+  }
+  // Remote snakes — dead reckon at full tick speed.
+  SG.snakes.forEach(s=>{
+    if(s.id===myPid||!s.alive||!s.path.length)return;
+    const spd=s.boost?BOOST_SPD:SNAKE_SPD;
+    const h=s.path[0];
+    s.path.unshift({x:h.x+Math.cos(s.angle)*spd,y:h.y+Math.sin(s.angle)*spd});
+    trimPath(s);
+  });
+}
+function _bgStep(){
+  if(!SG||SG.over){if(_bgPump){clearInterval(_bgPump);_bgPump=null;}return;}
+  const now=performance.now();
+  let dt=now-_bgLastTs; _bgLastTs=now;
+  if(dt>3000)dt=3000;                                  // cap catch-up per fire after long sleeps
+  const steps=Math.max(1,Math.min(90,Math.round(dt/TICK_MS)));
+  for(let k=0;k<steps;k++){
+    _bgSimStep();
+    if(isHost){_bgSuppressSend=(k<steps-1);snakeTick();} // suppress all but last send → ~1 packet/fire
+    if(!SG||SG.over)break;
+  }
+  _bgSuppressSend=false;
+}
+function _onVisibility(){
+  if(document.hidden){
+    if(!_bgPump&&SG&&!SG.over){_bgLastTs=performance.now();_bgPump=setInterval(_bgStep,100);}
+  }else{
+    if(_bgPump){clearInterval(_bgPump);_bgPump=null;}
+    // Hand back to RAF: reset predictor clocks so the first frame doesn't see a huge dt and lurch.
+    const t=performance.now();
+    _hostPredTs=0;_guestPredTs=0;_lastTickTs=t;
+    if(SG)SG.snakes.forEach(s=>{s._predTs=0;});
+  }
+}
+document.addEventListener('visibilitychange',_onVisibility);
+
 // Swept segment→circle hit test: did segment p1→p2 pass through circle (c,r)?
 function segHitsCircle(p1,p2,c,r){
   const ex=p2.x-p1.x,ey=p2.y-p1.y;
@@ -1396,6 +1458,7 @@ function spawnFoodFromSnake(snake){
 
 function sendSnakeState(){
   if(!ablyChannel||!SG)return;
+  if(_bgSuppressSend)return; // background pump: only the final catch-up tick broadcasts (kills batch into it)
   const snakeArr=[];
   SG.snakes.forEach(s=>{
     if(!s.alive)return;
