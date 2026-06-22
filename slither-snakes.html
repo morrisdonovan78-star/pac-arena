@@ -1092,11 +1092,9 @@ function pkDisconnect(){
 //
 // damnbruh.com exact updateSegments — nth segment placed at n*spacing from head via interpolation.
 // spacing = radius * SEGMENT_SPACING_FACTOR (0.5) — dynamic, not fixed.
-// sf: optional spacing factor override (default SEGMENT_SPACING=0.5). Pass smaller value
-// for rendering-only calls during boost to counteract visual body uncoiling.
-function getBodyPoints(snake,sf){
+function getBodyPoints(snake){
   const path=snake.path,target=snake.numSections;
-  const r=sectionRadius(snake),spacing=r*(sf!=null?sf:SEGMENT_SPACING);
+  const r=sectionRadius(snake),spacing=r*SEGMENT_SPACING;
   const pts=[];
   if(!path.length)return pts;
   pts.push(path[0]);
@@ -1118,6 +1116,24 @@ function getBodyPoints(snake,sf){
 function sectionRadius(snake){
   const size=snake.numSections*SIZE_PER_SEGMENT;
   return BASE_RADIUS+Math.pow(size,RADIUS_GROWTH)*RADIUS_SCALE;
+}
+
+// Trim the dense head-path by DISTANCE (not point count). THE root cause of "snake grows
+// while boosting then snaps back": pathNeeded was a point count tuned for 60fps. At higher
+// refresh rates path points pack closer together, so that same count covered far less px of
+// path — starving getBodyPoints and truncating the tail (snake looked short). Boost spaces
+// points 2× farther apart, so the identical count suddenly covered 2× the distance → body
+// rendered fuller/longer; releasing boost truncated it again. Trimming by accumulated
+// distance keeps the rendered body length identical at any framerate and any boost state.
+function trimPath(snake){
+  const p=snake.path; if(!p||p.length<3)return;
+  const r=sectionRadius(snake);
+  const keep=snake.numSections*r*SEGMENT_SPACING + 4*r + 80; // full body length + margin
+  let cum=0;
+  for(let i=0;i+1<p.length;i++){
+    cum+=Math.hypot(p[i+1].x-p[i].x,p[i+1].y-p[i].y);
+    if(cum>=keep){p.length=i+2;return;}
+  }
 }
 
 function makeSnake(id,color,name,sx,sy){
@@ -1285,10 +1301,8 @@ function snakeTick(){
       snake._drain=0;
     }
 
-    // Trim path — always use SNAKE_SPD so switching to boost never aggressively cuts the tail,
-    // which caused body circles to vanish and then reappear (appearing to "grow") during boost.
-    const pathNeeded=Math.ceil(snake.numSections*sectionRadius(snake)*SEGMENT_SPACING*2/SNAKE_SPD)+8;
-    if(snake.path.length>pathNeeded)snake.path.length=pathNeeded;
+    // Trim path by distance (framerate-independent) — see trimPath().
+    trimPath(snake);
 
     if(snake.numSections<MIN_SECTIONS){eliminateSnake(snake.id,null);return;}
   });
@@ -1785,8 +1799,7 @@ function rafDraw(ts){
       const spd=(my.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=my.path[0];
       my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
-      const pathNeeded=Math.ceil(my.numSections*sectionRadius(my)*SEGMENT_SPACING*2/SNAKE_SPD)+10;
-      if(my.path.length>pathNeeded)my.path.length=pathNeeded;
+      trimPath(my);
       const nh=my.path[0];
       if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead)endSnakeGame('eliminated',null);
     }
@@ -1804,8 +1817,7 @@ function rafDraw(ts){
       const spd=(s.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=s.path[0];
       s.path.unshift({x:h.x+Math.cos(s.angle)*spd,y:h.y+Math.sin(s.angle)*spd});
-      const pn=Math.ceil(s.numSections*sectionRadius(s)*SEGMENT_SPACING*2/SNAKE_SPD)+10;
-      if(s.path.length>pn)s.path.length=pn;
+      trimPath(s);
     });
   }
 
@@ -1822,8 +1834,7 @@ function rafDraw(ts){
       const spd=(my.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=my.path[0];
       my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
-      const pathNeeded=Math.ceil(my.numSections*sectionRadius(my)*SEGMENT_SPACING*2/SNAKE_SPD)+10;
-      if(my.path.length>pathNeeded)my.path.length=pathNeeded;
+      trimPath(my);
       const nh=my.path[0];
       if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead)endSnakeGame('eliminated',null);
     }
@@ -1875,8 +1886,10 @@ function rafDraw(ts){
   drawKillFeedHUD();
   drawMinimap(mySnake);
 
-  // Custom crosshair cursor (replaces system cursor hidden by cursor:none)
-  if(SG&&!SG.over&&!_localDead){
+  // Custom crosshair cursor (replaces system cursor hidden by cursor:none).
+  // Draw it whenever the game canvas is live — including while dead/spectating, so a dead
+  // player can still see their mouse on screen (canvas keeps cursor:none after death).
+  if(SG&&!SG.over){
     const cx=_mouseX,cy=_mouseY;
     ctx.save();
     ctx.strokeStyle='rgba(255,255,255,0.9)';
@@ -1950,9 +1963,7 @@ function drawFood(){
 
 function drawSnake(snake){
   if(!snake.path||snake.path.length<2)return;
-  // During boost pack circles tighter (0.35 vs 0.5) so the body looks compact —
-  // prevents the perceptual elongation caused by the snake straightening out at speed.
-  const bPts=getBodyPoints(snake,snake.boost?0.35:undefined);
+  const bPts=getBodyPoints(snake);
   if(bPts.length<2)return;
   const r=sectionRadius(snake);
   const col=snake.color;
