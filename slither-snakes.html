@@ -432,6 +432,7 @@ let _playerMeta=new Map();
 let _ping=0,_pingIv=null;
 let _fps=0,_fpsFrames=0,_fpsLast=0;
 let _myUsd=0; // my current in-round value (USD) — entry wager now; grows with wager-food winnings later
+let _moneyFx=[]; // floating $ pickup effects when collecting wager food
 let _lastDrawTs=0,_guestPredTs=0,_hostPredTs=0;
 let _lastSentAngle=-999,_lastSentBoost=false;
 let _guestInputLoop=null;
@@ -1009,7 +1010,7 @@ async function pkConnect(roomId,gameToken){
           _forceFoodSend=true; // ensure rejoining player gets food immediately
         }
       }
-      const _su=SG.snakes.get(data.id); if(_su)_su.usd=data.usd||0; // display-only value reported by the player
+      const _su=SG.snakes.get(data.id); if(_su&&_su.usd==null)_su.usd=data.usd||0; // seed entry value once; winnings are host-owned after
       _guestInputs.set(data.id,{angle:data.angle||0,boost:!!data.boost,x:data.x,y:data.y,ts:Date.now(),fresh:true});
     });
 
@@ -1522,6 +1523,7 @@ function snakeTick(){
       if(dx*dx+dy*dy<(r+f.size)*(r+f.size)){
         snake.growQueue+=FOOD_GROW;
         snake.score+=10;
+        if(f.w){ if(snake.id===myPid){_myUsd+=f.w;_spawnMoneyFx(h.x,h.y);} else snake.usd=(snake.usd||0)+f.w; } // collect wager share from kill food
         SG.food.splice(i,1); // eaten pebble becomes body mass — no respawn; reconcileFood conserves the total
       }
     }
@@ -1552,9 +1554,11 @@ function spawnFoodFromSnake(snake){
   // Normal, body-sized food pile where the snake died (the amount it always used to drop) —
   // one orb roughly every other body point, scattered along the corpse for others to eat.
   const step=Math.max(2,Math.floor(snake.path.length/60));
-  for(let i=0;i<snake.path.length;i+=step){
-    SG.food.push({x:snake.path[i].x+(Math.random()-.5)*20,y:snake.path[i].y+(Math.random()-.5)*20,ci:3,size:5+Math.random()*6,k:1}); // k=1 → dark-blue kill food (carries wager)
-  }
+  const idxs=[];for(let i=0;i<snake.path.length;i+=step)idxs.push(i);
+  const w=idxs.length?((snake.usd||0)/idxs.length):0; // split the dead player's wager evenly across their death pebbles
+  idxs.forEach(i=>{
+    SG.food.push({x:snake.path[i].x+(Math.random()-.5)*20,y:snake.path[i].y+(Math.random()-.5)*20,ci:3,size:5+Math.random()*6,k:1,w:w}); // dark-blue kill food carrying a wager share
+  });
 }
 
 // ── Food upkeep ──────────────────────────────────────────────────────────────
@@ -1612,6 +1616,7 @@ function applyRemoteState(d){
       if(sd.id===myPid){
         const own=SG.snakes.get(myPid);
         if(own&&sd.ns)own.numSections=sd.ns;
+        if(sd.usd!=null){ if(sd.usd>_myUsd+0.0001){const _oh=own&&own.path&&own.path[0]; if(_oh)_spawnMoneyFx(_oh.x,_oh.y);} _myUsd=sd.usd; } // host is authoritative for my value
         if(own&&_firstRemoteSync&&sd.segs&&sd.segs.length>0){
           const head={x:sd.segs[0][0],y:sd.segs[0][1]};
           const ang=sd.angle!=null?sd.angle:own.angle;
@@ -2076,6 +2081,7 @@ function rafDraw(ts){
     });
   }
 
+  if(SG)drawMoneyFx();
   ctx.restore();
 
   drawHUD(mySnake);
@@ -2102,6 +2108,21 @@ function rafDraw(ts){
   }
 }
 
+function _spawnMoneyFx(x,y){_moneyFx.push({x:x+(Math.random()-.5)*22,y:y-8,t0:performance.now()});if(_moneyFx.length>50)_moneyFx.shift();}
+function drawMoneyFx(){
+  if(!_moneyFx.length)return;
+  const now=performance.now();
+  ctx.save();ctx.textAlign='center';ctx.textBaseline='middle';ctx.font='bold 22px "Exo 2",sans-serif';
+  for(let i=_moneyFx.length-1;i>=0;i--){
+    const p=_moneyFx[i],age=now-p.t0;
+    if(age>900){_moneyFx.splice(i,1);continue;}
+    ctx.globalAlpha=Math.max(0,1-age/900);
+    ctx.lineWidth=3;ctx.strokeStyle='rgba(0,0,0,0.6)';ctx.fillStyle='#39FF14';
+    const yy=p.y-age*0.06;
+    ctx.strokeText('$',p.x,yy);ctx.fillText('$',p.x,yy);
+  }
+  ctx.globalAlpha=1;ctx.restore();
+}
 function drawArena(){
   ctx.save();
   // Dark background inside arena
