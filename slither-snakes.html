@@ -1553,9 +1553,11 @@ function carriedFoodUnits(){
 function reconcileFood(){
   let desired=Math.round(FOOD_TARGET-carriedFoodUnits());
   if(desired<0)desired=0;
-  const diff=desired-SG.food.length;
-  if(diff>0){const n=Math.min(diff,6);for(let i=0;i<n;i++)SG.food.push(makeFood());}      // top up gently
-  else if(diff<0){const n=Math.min(-diff,6);for(let i=0;i<n;i++)SG.food.pop();}            // trim excess gently
+  const over=SG.food.length-desired;
+  // TRIM-ONLY (oldest first, so fresh boost-trail pebbles survive). We never spawn random
+  // "top-up" pebbles — that was scattering food across the map during boost. Food is only
+  // ADDED by the boost trail + death drops, so every new pebble lands where it should.
+  if(over>3){const n=Math.min(over,8);for(let i=0;i<n;i++)SG.food.shift();}
 }
 
 function sendSnakeState(){
