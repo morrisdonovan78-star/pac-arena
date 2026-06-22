@@ -389,7 +389,7 @@ const INIT_SECTIONS= 24;    // starting section count
 const MAX_SECTIONS = 90;    // hard cap on snake length
 const MAX_TURN     = 0.274; // rad/tick
 const BOOST_DRAIN  = 8;     // ticks between boost drain events
-const BOOST_DRAIN_AMT = 3;  // sections lost per drain event (3× faster drain)
+const BOOST_DRAIN_AMT = 4;  // drain accumulator per tick = AMT/DRAIN = 0.5 sections/tick (a bit faster shrink while boosting)
 const SELF_SKIP    = 9999;  // disable self-collision — damnbruh.com: own tail never kills you
 const ESCROW_PUBKEY = '2SYFfCsSmKr8qwK1AfWd36JtAc1BCaRaSSxyECKUJjBb';
 const APP_ID = 'cmq1eo6uz004b0cl8pvk7aakk';
@@ -1181,6 +1181,18 @@ function makeFood(){
   const ci=Math.floor(Math.random()*FOOD_COLORS.length);
   return{x:Math.cos(a)*r,y:Math.sin(a)*r,ci,size:4+Math.random()*5};
 }
+// Respawn an eaten pebble NEAR where it was taken (300–800px away) instead of randomly
+// across the whole arena, so the area you're playing stays populated — pebbles feel like
+// they come back fast. Far enough it isn't instantly re-eaten; clamped inside the arena.
+function makeFoodNear(cx,cy){
+  const a=Math.random()*Math.PI*2;
+  const dist=300+Math.random()*500;
+  let x=cx+Math.cos(a)*dist, y=cy+Math.sin(a)*dist;
+  const d=Math.hypot(x,y), max=ARENA_R*0.96;
+  if(d>max){const k=max/d;x*=k;y*=k;}
+  const ci=Math.floor(Math.random()*FOOD_COLORS.length);
+  return{x,y,ci,size:4+Math.random()*5};
+}
 function foodColor(f){return FOOD_COLORS[f.ci]||FOOD_COLORS[0];}
 
 function initSnakeGame(players){
@@ -1422,7 +1434,7 @@ function snakeTick(){
         snake.growQueue+=FOOD_GROW;
         snake.score+=10;
         SG.food.splice(i,1);
-        SG.food.push(makeFood());
+        SG.food.push(makeFoodNear(f.x,f.y)); // respawn near where it was eaten → fast local respawn
       }
     }
   });
