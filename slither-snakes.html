@@ -335,6 +335,7 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
     <div class="gi"><span class="gl">PING</span><span class="gv" id="hud-ping" style="color:var(--g)">--</span></div>
     <div class="gi"><span class="gl">FPS</span><span class="gv" id="hud-fps" style="color:var(--g)">--</span></div>
   </div>
+  <div id="leaderboard" style="position:fixed;top:8px;right:10px;min-width:190px;background:rgba(7,7,15,0.88);border:1px solid rgba(255,215,0,0.35);border-radius:10px;padding:8px 12px;z-index:100;font-family:'Exo 2',sans-serif;pointer-events:none;display:none;"></div>
   <div id="boost-hint">HOLD CLICK TO BOOST 🔥</div>
   <div id="spectate-bar" style="display:none;position:absolute;top:10px;left:50%;transform:translateX(-50%);display:none;align-items:center;gap:12px;background:rgba(0,0,0,0.7);border:1px solid rgba(255,215,0,0.4);border-radius:8px;padding:6px 14px;z-index:100;">
     <span style="color:#FFD700;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:2px;">👁 SPECTATING</span>
@@ -430,6 +431,7 @@ let _pendingKills=[];
 let _playerMeta=new Map();
 let _ping=0,_pingIv=null;
 let _fps=0,_fpsFrames=0,_fpsLast=0;
+let _myUsd=0; // my current in-round value (USD) — entry wager now; grows with wager-food winnings later
 let _lastDrawTs=0,_guestPredTs=0,_hostPredTs=0;
 let _lastSentAngle=-999,_lastSentBoost=false;
 let _guestInputLoop=null;
@@ -1007,6 +1009,7 @@ async function pkConnect(roomId,gameToken){
           _forceFoodSend=true; // ensure rejoining player gets food immediately
         }
       }
+      const _su=SG.snakes.get(data.id); if(_su)_su.usd=data.usd||0; // display-only value reported by the player
       _guestInputs.set(data.id,{angle:data.angle||0,boost:!!data.boost,x:data.x,y:data.y,ts:Date.now(),fresh:true});
     });
 
@@ -1246,6 +1249,7 @@ function initSnakeGame(players){
   if(isHost){SG.food=seedFoodLayout();} // deterministic per-room layout → same dots for everyone
   else{_firstRemoteSync=true;} // guest: snap own position to host-assigned spot on first ss
   _hostPid=isHost?myPid:null; _lastSsTs=Date.now(); // host-migration tracking
+  _myUsd=ST.lobbyUsd||0; // start at entry wager value
 }
 
 function addSnakePlayer(id,color,name){
@@ -1574,7 +1578,7 @@ function sendSnakeState(){
     // Send actual body section positions (radius*0.5 apart per damnbruh updateSegments)
     const bPts=getBodyPoints(s);
     const segs=bPts.map(p=>[Math.round(p.x),Math.round(p.y)]);
-    snakeArr.push({id:s.id,segs,angle:s.angle,score:s.score,boost:s.boost,ns:s.numSections,color:s.color,name:s.name});
+    snakeArr.push({id:s.id,segs,angle:s.angle,score:s.score,boost:s.boost,ns:s.numSections,color:s.color,name:s.name,usd:(s.id===myPid?_myUsd:(s.usd||0))});
   });
   _foodSendCounter++;
   const msg={t:'ss',snakes:snakeArr,tick:SG.tick,host:myPid}; // host tag drives host-migration
@@ -1625,7 +1629,7 @@ function applyRemoteState(d){
         s=makeSnake(sd.id,sd.color||meta.color||colorFromId(sd.id),sd.name||meta.name||'SNAKE');
         SG.snakes.set(sd.id,s);
       }
-      s.alive=true; s.angle=sd.angle; s.score=sd.score||0; s.boost=sd.boost||false;
+      s.alive=true; s.angle=sd.angle; s.score=sd.score||0; s.boost=sd.boost||false; s.usd=sd.usd||0;
       s.numSections=sd.ns||(sd.segs&&sd.segs.length)||s.numSections;
       s.color=sd.color||s.color; s.name=sd.name||s.name;
       if(sd.segs&&sd.segs.length>1){
@@ -1689,7 +1693,7 @@ function startGuestLoop(){
     const canBoost=(_mouseBoost||_padBoost)&&my.numSections>INIT_SECTIONS;
     my.boost=canBoost;
     const h=my.path[0];
-    _sio.emit('ssin',{id:myPid,angle:targetAngle,boost:canBoost,x:Math.round(h.x),y:Math.round(h.y)});
+    _sio.emit('ssin',{id:myPid,angle:targetAngle,boost:canBoost,x:Math.round(h.x),y:Math.round(h.y),usd:_myUsd});
   },40);
 }
 
@@ -2265,6 +2269,19 @@ function _drawNameTag(snake,head,w){
   ctx.strokeText(snake.name,head.x,ny);
   ctx.fillStyle='#fff';
   ctx.fillText(snake.name,head.x,ny);
+  // Gold $ amount badge above the name (current SOL value) — like the reference layout
+  const usd=snake.usd||0;
+  if(usd>0){
+    const amt='$'+usd.toFixed(2);
+    const af=Math.max(10,Math.min(Math.round(w*0.6+5),16));
+    ctx.font=`bold ${af}px 'Exo 2',sans-serif`;
+    const aw=ctx.measureText(amt).width;
+    const ay=ny-fs-5;
+    ctx.fillStyle='rgba(15,15,5,0.82)';
+    ctx.fillRect(head.x-aw/2-5,ay-af-1,aw+10,af+5);
+    ctx.fillStyle='#FFD700';
+    ctx.fillText(amt,head.x,ay);
+  }
   ctx.restore();
 }
 
@@ -2294,6 +2311,7 @@ function drawKillFeedHUD(){
 
 function drawHUD(mySnake){
   const el=id=>document.getElementById(id);
+  if(mySnake)mySnake.usd=_myUsd; // keep my own overhead/leaderboard value current
   // FPS counter (sampled every 0.5s)
   const _tn=performance.now();
   _fpsFrames++;
@@ -2305,6 +2323,22 @@ function drawHUD(mySnake){
   }
   const hint=el('boost-hint');
   if(hint&&mySnake)hint.style.display=mySnake.numSections>MIN_SECTIONS+4?'block':'none';
+  // Leaderboard (top-right): names + SOL/USD amounts, sorted high→low
+  const lb=el('leaderboard');
+  if(lb&&SG){
+    const alive=[...SG.snakes.values()].filter(s=>s.alive);
+    const top=alive.slice().sort((a,b)=>(b.usd||0)-(a.usd||0)).slice(0,5);
+    let html='<div style="text-align:center;color:#FFD700;font-family:Orbitron,sans-serif;font-size:12px;letter-spacing:2px;margin-bottom:6px;">LEADERBOARD</div>';
+    top.forEach((s,i)=>{
+      const me=s.id===myPid;
+      const nm=(s.name||'SNAKE').slice(0,12).replace(/[<>&]/g,'');
+      const amt=(s.usd||0)>0?'$'+(s.usd||0).toFixed(2):'';
+      html+='<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:1px 0;color:'+(me?'#39FF14':'#fff')+';"><span>'+(i===0?'👑 ':'')+nm+'</span><span style="color:#FFD700;">'+amt+'</span></div>';
+    });
+    html+='<div style="text-align:center;color:#888;font-size:10px;margin-top:6px;">'+alive.length+' player'+(alive.length===1?'':'s')+' online</div>';
+    lb.innerHTML=html;
+    lb.style.display=SG.over?'none':'block';
+  }
 }
 
 function drawMinimap(mySnake){
