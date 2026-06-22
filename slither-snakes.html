@@ -1539,6 +1539,7 @@ function launchSnakeGame(){
   document.getElementById('hud-pot').textContent=ST.lobbyUsd===0?'FREE':'$'+(ST.lobbyUsd*2);
 
   document.addEventListener('mousemove',onMouseMove);
+  window.addEventListener('wheel',onWheel,{passive:false});
   document.addEventListener('mousedown',e=>{if(e.button===0)_mouseBoost=true;});
   document.addEventListener('mouseup',e=>{if(e.button===0)_mouseBoost=false;});
   canvas.addEventListener('contextmenu',e=>e.preventDefault());
@@ -1559,6 +1560,13 @@ function launchSnakeGame(){
 
 function onResize(){if(canvas){canvas.width=window.innerWidth;canvas.height=window.innerHeight;}}
 function onMouseMove(e){_mouseX=e.clientX;_mouseY=e.clientY;}
+// Scroll wheel / trackpad zoom — up = zoom in, down = zoom out. Per-event step is capped so
+// high-resolution trackpads don't jump. rafDraw re-clamps _zoomOffset to the visible range.
+function onWheel(e){
+  e.preventDefault();
+  const step=Math.max(-0.2,Math.min(0.2,e.deltaY*0.0015));
+  _zoomOffset=Math.max(-2.0,Math.min(2.0,_zoomOffset-step));
+}
 function onTouchMove(e){e.preventDefault();if(e.touches.length){_mouseX=e.touches[0].clientX;_mouseY=e.touches[0].clientY;}}
 function onGameKey(e){
   if(e.repeat)return;
@@ -1570,6 +1578,9 @@ function onGameKey(e){
       _cashoutTimer=setTimeout(()=>{_cashoutTimer=null;endSnakeGame('cashout',null);},1000);
     }
   }
+  // +/= zoom in, -/_ zoom out (keyboard). rafDraw re-clamps to the visible range.
+  if(e.key==='='||e.key==='+')_zoomOffset=Math.min(2.0,_zoomOffset+0.12);
+  if(e.key==='-'||e.key==='_')_zoomOffset=Math.max(-2.0,_zoomOffset-0.12);
 }
 function onGameKeyUp(e){
   if(e.key===' '||e.key==='Shift')_mouseBoost=false;
@@ -1619,6 +1630,7 @@ async function endSnakeGame(reason,killerId){
     clearInterval(_guestInputLoop);_guestInputLoop=null;
     if(rafHandle){cancelAnimationFrame(rafHandle);rafHandle=null;}
     document.removeEventListener('mousemove',onMouseMove);
+    window.removeEventListener('wheel',onWheel);
     window.removeEventListener('resize',onResize);
   }
 
@@ -1696,6 +1708,7 @@ function goHome(){
   if(document.activeElement&&document.activeElement!==document.body)document.activeElement.blur();
   if(rafHandle){cancelAnimationFrame(rafHandle);rafHandle=null;}
   document.removeEventListener('mousemove',onMouseMove);
+  window.removeEventListener('wheel',onWheel);
   window.removeEventListener('resize',onResize);
   SG=null;
   const srb=document.getElementById('spec-rejoin-btn');
@@ -1730,7 +1743,7 @@ function pollGamepad(){
     _padBoost=cur(0); // A button — stored separately so keyboard boost isn't overridden
     // Right stick X (axes[2]) — zoom in/out
     const rsx=axes[2]||0;
-    if(Math.abs(rsx)>GPAD_DEADZONE) _zoomOffset=Math.max(-0.5,Math.min(0.8,_zoomOffset-rsx*0.004));
+    if(Math.abs(rsx)>GPAD_DEADZONE) _zoomOffset=Math.max(-2.0,Math.min(2.0,_zoomOffset-rsx*0.004));
     // Y button (index 3) — hold 1s to cashout
     if(pressed(3)&&!_cashoutTimer&&!_localDead){
       addToast('HOLD Y to cash out…','#FFD700');
@@ -1852,7 +1865,12 @@ function rafDraw(ts){
     for(const s of SG.snakes.values()){if(s.alive&&s.path.length){_camX=s.path[0].x;_camY=s.path[0].y;break;}}
   }
   // Fixed zoom based on screen size — identical to damnbruh's zoom formula
-  _camZoom=Math.max(0.3,Math.min(2.0,Math.min(canvas.width/1920,canvas.height/1080)+_zoomOffset));
+  // Zoom = screen-fit base + user offset (scroll wheel, +/- keys, gamepad right stick).
+  // Floor 0.18 lets you zoom out far enough to see (almost) the whole arena. Re-clamp the
+  // offset to the range that maps onto [0.18 .. 2.0] for THIS screen so there's no dead scroll.
+  const _zbase=Math.min(canvas.width/1920,canvas.height/1080);
+  _zoomOffset=Math.max(0.18-_zbase,Math.min(2.0-_zbase,_zoomOffset));
+  _camZoom=Math.max(0.18,Math.min(2.0,_zbase+_zoomOffset));
 
   const W=canvas.width,H=canvas.height;
   ctx.fillStyle='#060612';ctx.fillRect(0,0,W,H);
