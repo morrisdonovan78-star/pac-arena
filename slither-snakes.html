@@ -389,7 +389,7 @@ const INIT_SECTIONS= 24;    // starting section count
 const MAX_SECTIONS = 90;    // hard cap on snake length
 const MAX_TURN     = 0.274; // rad/tick
 const BOOST_DRAIN  = 8;     // ticks between boost drain events
-const BOOST_DRAIN_AMT = 4;  // drain accumulator per tick = AMT/DRAIN = 0.5 sections/tick (a bit faster shrink while boosting)
+const BOOST_DRAIN_AMT = 5;  // drain accumulator per tick = AMT/DRAIN = 0.625 sections/tick (lose size a little faster while boosting)
 const HOST_TIMEOUT = 2500;  // ms of host silence before a guest promotes itself (host migration)
 const SELF_SKIP    = 9999;  // disable self-collision — damnbruh.com: own tail never kills you
 const ESCROW_PUBKEY = '2SYFfCsSmKr8qwK1AfWd36JtAc1BCaRaSSxyECKUJjBb';
@@ -1438,9 +1438,16 @@ function snakeTick(){
         snake._shed=(snake._shed||0)+1/FOOD_GROW;
         if(snake._shed>=1){
           snake._shed-=1;
-          const bPts=getBodyPoints(snake);
-          const tail=bPts[bPts.length-1];
-          if(tail) SG.food.push({x:tail.x+(Math.random()-.5)*6,y:tail.y+(Math.random()-.5)*6,ci:Math.floor(Math.random()*FOOD_COLORS.length),size:4+Math.random()*3});
+          // Conserve shed mass as a pebble, but only HALF drops in the trail — the other half
+          // respawns elsewhere on the map, so a snake can't circle while boosting and re-eat
+          // its own trail to keep growing.
+          if(Math.random()<0.5){
+            const bPts=getBodyPoints(snake);
+            const tail=bPts[bPts.length-1];
+            if(tail) SG.food.push({x:tail.x+(Math.random()-.5)*6,y:tail.y+(Math.random()-.5)*6,ci:Math.floor(Math.random()*FOOD_COLORS.length),size:4+Math.random()*3});
+          }else{
+            SG.food.push(makeFood());
+          }
         }
       }
     } else if(!snake.boost){
@@ -1540,25 +1547,15 @@ function spawnFoodFromSnake(snake){
   }
 }
 
-// ── Food conservation ────────────────────────────────────────────────────────
-// World food is constant: pebbles on the map + food carried as body mass = FOOD_TARGET.
-// carried (in pebble-units) = sections grown beyond the start (+ pending growth) / FOOD_GROW.
-function carriedFoodUnits(){
-  let c=0;
-  SG.snakes.forEach(s=>{ if(s.alive) c+=Math.max(0,(s.numSections-INIT_SECTIONS+(s.growQueue||0))/FOOD_GROW); });
-  return c;
-}
+// ── Food upkeep ──────────────────────────────────────────────────────────────
+// Keep a CONSISTENT carpet of regular pebbles: always refill the map back up to FOOD_TARGET
+// (eaten pebbles respawn fast, so the amount stays steady), and cap at 2x so boost-shed and
+// death piles don't balloon. Boost/death ADD food on top of the carpet; eating + this refill
+// keep the baseline steady. Boosting raises the count (it adds shed pebbles), so it never
+// triggers the refill — no random top-ups mid-boost.
 function reconcileFood(){
-  // Steady-state target keeps map + carried ~ FOOD_TARGET (consistent total), with a floor
-  // so the map never looks empty. A death drops a full body-sized pile ON TOP of the target;
-  // we let that sit (cap = target + FOOD_TARGET) so death food persists and gets EATEN rather
-  // than trimmed. We only ever ADD when below target (gentle, and boost can't trigger it since
-  // boosting adds trail pebbles) — so no random scatter during boost.
-  let target=Math.round(FOOD_TARGET-carriedFoodUnits());
-  if(target<40)target=40;
-  const cap=target+FOOD_TARGET;
-  if(SG.food.length>cap){const n=Math.min(SG.food.length-cap,12);for(let i=0;i<n;i++)SG.food.shift();}        // trim oldest (keep fresh death/trail)
-  else if(SG.food.length<target){const n=Math.min(target-SG.food.length,4);for(let i=0;i<n;i++)SG.food.push(makeFood());} // gentle floor
+  if(SG.food.length<FOOD_TARGET){const n=Math.min(FOOD_TARGET-SG.food.length,8);for(let i=0;i<n;i++)SG.food.push(makeFood());}
+  else if(SG.food.length>FOOD_TARGET*2){const n=Math.min(SG.food.length-FOOD_TARGET*2,12);for(let i=0;i<n;i++)SG.food.shift();}
 }
 
 function sendSnakeState(){
