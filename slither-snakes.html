@@ -333,6 +333,7 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
     <div class="gi"><span class="gl">SCORE</span><span class="gv hy" id="hud-score">0</span></div>
     <div class="gi"><span class="gl">POT</span><span class="gv hc" id="hud-pot">FREE</span></div>
     <div class="gi"><span class="gl">PING</span><span class="gv" id="hud-ping" style="color:var(--g)">--</span></div>
+    <div class="gi"><span class="gl">FPS</span><span class="gv" id="hud-fps" style="color:var(--g)">--</span></div>
   </div>
   <div id="boost-hint">HOLD CLICK TO BOOST 🔥</div>
   <div id="spectate-bar" style="display:none;position:absolute;top:10px;left:50%;transform:translateX(-50%);display:none;align-items:center;gap:12px;background:rgba(0,0,0,0.7);border:1px solid rgba(255,215,0,0.4);border-radius:8px;padding:6px 14px;z-index:100;">
@@ -400,6 +401,7 @@ const GAME_SERVERS = {
   EU:{url:'https://pac-arena-eu.duckdns.org', label:'🇩🇪 Frankfurt, EU'},
 };
 const FOOD_COLORS=['#FF6B6B','#FFD700','#39FF14','#00FFFF','#FF69B4','#FF8C00','#CC44FF','#00FF80','#FF4500','#80FFFF'];
+const KILL_FOOD_COLOR='#1D4ED8'; // dark blue — food dropped from a killed player (carries their wager)
 const SNAKE_COLORS=['#FFD700','#FF69B4','#00BFFF','#FF4500','#39FF14','#FF1493','#00FFFF','#DA70D6'];
 const RPC_REGIONS={'US':'https://api.mainnet-beta.solana.com','EU':'https://solana.public-rpc.com'};
 
@@ -427,6 +429,7 @@ let _killFeed=[];
 let _pendingKills=[];
 let _playerMeta=new Map();
 let _ping=0,_pingIv=null;
+let _fps=0,_fpsFrames=0,_fpsLast=0;
 let _lastDrawTs=0,_guestPredTs=0,_hostPredTs=0;
 let _lastSentAngle=-999,_lastSentBoost=false;
 let _guestInputLoop=null;
@@ -1228,7 +1231,7 @@ function makeFoodNear(cx,cy){
   const ci=Math.floor(Math.random()*FOOD_COLORS.length);
   return{x,y,ci,size:4+Math.random()*5};
 }
-function foodColor(f){return FOOD_COLORS[f.ci]||FOOD_COLORS[0];}
+function foodColor(f){return f.k?KILL_FOOD_COLOR:(FOOD_COLORS[f.ci]||FOOD_COLORS[0]);}
 
 function initSnakeGame(players){
   _localDead=false;
@@ -1546,7 +1549,7 @@ function spawnFoodFromSnake(snake){
   // one orb roughly every other body point, scattered along the corpse for others to eat.
   const step=Math.max(2,Math.floor(snake.path.length/60));
   for(let i=0;i<snake.path.length;i+=step){
-    SG.food.push({x:snake.path[i].x+(Math.random()-.5)*20,y:snake.path[i].y+(Math.random()-.5)*20,ci:Math.floor(Math.random()*FOOD_COLORS.length),size:5+Math.random()*6});
+    SG.food.push({x:snake.path[i].x+(Math.random()-.5)*20,y:snake.path[i].y+(Math.random()-.5)*20,ci:3,size:5+Math.random()*6,k:1}); // k=1 → dark-blue kill food (carries wager)
   }
 }
 
@@ -1577,7 +1580,7 @@ function sendSnakeState(){
   const msg={t:'ss',snakes:snakeArr,tick:SG.tick,host:myPid}; // host tag drives host-migration
   if(_pendingKills.length){msg.kills=[..._pendingKills];_pendingKills.length=0;}
   if(_foodSendCounter%3===0||_forceFoodSend){
-    msg.food=SG.food.map(f=>[Math.round(f.x),Math.round(f.y),f.ci,Math.round(f.size)]);
+    msg.food=SG.food.map(f=>[Math.round(f.x),Math.round(f.y),f.ci,Math.round(f.size),f.k?1:0]);
     _forceFoodSend=false;
   }
   pkSend(msg);
@@ -1672,7 +1675,7 @@ function applyRemoteState(d){
     });
   }
   if(d.food){
-    SG.food=d.food.map(f=>({x:f[0],y:f[1],ci:f[2]||0,size:f[3]||6}));
+    SG.food=d.food.map(f=>({x:f[0],y:f[1],ci:f[2]||0,size:f[3]||6,k:f[4]||0}));
   }
 }
 
@@ -2102,13 +2105,27 @@ function drawArena(){
   ctx.fillStyle='#07071a';ctx.fill();
   // Dot grid
   ctx.save();ctx.clip();
-  ctx.fillStyle='rgba(0,255,255,0.06)';
-  const gs=120;
-  for(let x=-ARENA_R;x<=ARENA_R;x+=gs){
-    for(let y=-ARENA_R;y<=ARENA_R;y+=gs){
-      if(x*x+y*y<ARENA_R*ARENA_R){ctx.beginPath();ctx.arc(x,y,1.5,0,Math.PI*2);ctx.fill();}
+  // Hexagonal honeycomb grid (flat-top), only over the visible viewport for performance.
+  const R=46, hx=1.5*R, hy=Math.sqrt(3)*R;
+  const halfW=canvas.width/(2*_camZoom)+R, halfH=canvas.height/(2*_camZoom)+R;
+  const cMin=Math.floor((_camX-halfW)/hx)-1, cMax=Math.ceil((_camX+halfW)/hx)+1;
+  const rMin=Math.floor((_camY-halfH)/hy)-1, rMax=Math.ceil((_camY+halfH)/hy)+1;
+  ctx.strokeStyle='rgba(0,255,255,0.05)';
+  ctx.lineWidth=1.2/_camZoom;
+  ctx.beginPath();
+  for(let c=cMin;c<=cMax;c++){
+    const cx=c*hx, yoff=(c&1)?hy/2:0;
+    for(let rr=rMin;rr<=rMax;rr++){
+      const cy=rr*hy+yoff;
+      if(cx*cx+cy*cy>ARENA_R*ARENA_R)continue;
+      for(let k=0;k<6;k++){
+        const a=Math.PI/3*k, vx=cx+R*Math.cos(a), vy=cy+R*Math.sin(a);
+        if(k===0)ctx.moveTo(vx,vy);else ctx.lineTo(vx,vy);
+      }
+      ctx.closePath();
     }
   }
+  ctx.stroke();
   ctx.restore();
   // Danger zone — red ring near edge
   const dangerR=ARENA_R*0.92;
@@ -2277,6 +2294,11 @@ function drawKillFeedHUD(){
 
 function drawHUD(mySnake){
   const el=id=>document.getElementById(id);
+  // FPS counter (sampled every 0.5s)
+  const _tn=performance.now();
+  _fpsFrames++;
+  if(_tn-_fpsLast>=500){_fps=Math.round(_fpsFrames*1000/(_tn-_fpsLast));_fpsFrames=0;_fpsLast=_tn;
+    const fe=el('hud-fps');if(fe){fe.textContent=_fps;fe.style.color=_fps>=50?'#39FF14':_fps>=30?'#FFD700':'#FF4444';}}
   if(mySnake){
     if(el('hud-len'))el('hud-len').textContent=mySnake.numSections||0;
     if(el('hud-score'))el('hud-score').textContent=mySnake.score||0;
