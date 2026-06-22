@@ -1532,13 +1532,11 @@ function eliminateSnake(id,killerId){
 
 function spawnFoodFromSnake(snake){
   if(!snake||!snake.path)return;
-  // Return exactly the food this snake was carrying (so map+carried stays conserved),
-  // scattered along its body so others can pick it up where it died.
-  const drop=Math.max(0,Math.round((snake.numSections-INIT_SECTIONS+(snake.growQueue||0))/FOOD_GROW));
-  const plen=snake.path.length;
-  for(let n=0;n<drop;n++){
-    const p=snake.path[Math.floor(Math.random()*plen)]||snake.path[0];
-    SG.food.push({x:p.x+(Math.random()-.5)*22,y:p.y+(Math.random()-.5)*22,ci:Math.floor(Math.random()*FOOD_COLORS.length),size:5+Math.random()*6});
+  // Normal, body-sized food pile where the snake died (the amount it always used to drop) —
+  // one orb roughly every other body point, scattered along the corpse for others to eat.
+  const step=Math.max(2,Math.floor(snake.path.length/60));
+  for(let i=0;i<snake.path.length;i+=step){
+    SG.food.push({x:snake.path[i].x+(Math.random()-.5)*20,y:snake.path[i].y+(Math.random()-.5)*20,ci:Math.floor(Math.random()*FOOD_COLORS.length),size:5+Math.random()*6});
   }
 }
 
@@ -1551,13 +1549,16 @@ function carriedFoodUnits(){
   return c;
 }
 function reconcileFood(){
-  let desired=Math.round(FOOD_TARGET-carriedFoodUnits());
-  if(desired<0)desired=0;
-  const over=SG.food.length-desired;
-  // TRIM-ONLY (oldest first, so fresh boost-trail pebbles survive). We never spawn random
-  // "top-up" pebbles — that was scattering food across the map during boost. Food is only
-  // ADDED by the boost trail + death drops, so every new pebble lands where it should.
-  if(over>3){const n=Math.min(over,8);for(let i=0;i<n;i++)SG.food.shift();}
+  // Steady-state target keeps map + carried ~ FOOD_TARGET (consistent total), with a floor
+  // so the map never looks empty. A death drops a full body-sized pile ON TOP of the target;
+  // we let that sit (cap = target + FOOD_TARGET) so death food persists and gets EATEN rather
+  // than trimmed. We only ever ADD when below target (gentle, and boost can't trigger it since
+  // boosting adds trail pebbles) — so no random scatter during boost.
+  let target=Math.round(FOOD_TARGET-carriedFoodUnits());
+  if(target<40)target=40;
+  const cap=target+FOOD_TARGET;
+  if(SG.food.length>cap){const n=Math.min(SG.food.length-cap,12);for(let i=0;i<n;i++)SG.food.shift();}        // trim oldest (keep fresh death/trail)
+  else if(SG.food.length<target){const n=Math.min(target-SG.food.length,4);for(let i=0;i<n;i++)SG.food.push(makeFood());} // gentle floor
 }
 
 function sendSnakeState(){
