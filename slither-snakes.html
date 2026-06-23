@@ -223,7 +223,10 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
     <div class="w-strip">
       <div>
         <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);margin-bottom:4px;">WALLET</div>
-        <div class="w-addr" id="h-addr">--</div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <div class="w-addr" id="h-addr">--</div>
+          <button class="copy-btn" onclick="copyWalletAddr()" style="font-size:9px;padding:3px 8px;" title="Copy full address">📋</button>
+        </div>
       </div>
       <div style="text-align:right;">
         <div class="w-bal" id="h-bal">-- SOL</div>
@@ -256,8 +259,11 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
   <div class="card" style="max-width:420px;width:90%;padding:1.5rem;">
     <div style="font-family:'Press Start 2P',monospace;font-size:12px;color:var(--acc);margin-bottom:1.2rem;text-align:center;">WITHDRAW SOL</div>
     <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">DESTINATION WALLET</div>
-    <input id="wd-addr" placeholder="Solana wallet address…" autocomplete="off"
-      style="width:100%;box-sizing:border-box;background:rgba(0,0,0,.4);border:1px solid rgba(57,255,20,.3);border-radius:6px;color:#fff;font-size:11px;padding:9px 10px;outline:none;margin-bottom:10px;"/>
+    <div style="display:flex;gap:6px;margin-bottom:10px;">
+      <input id="wd-addr" placeholder="Solana wallet address…" autocomplete="off"
+        style="flex:1;background:rgba(0,0,0,.4);border:1px solid rgba(57,255,20,.3);border-radius:6px;color:#fff;font-size:11px;padding:9px 10px;outline:none;"/>
+      <button class="copy-btn" onclick="pasteWdAddr()" title="Paste from clipboard" style="white-space:nowrap;">📋 PASTE</button>
+    </div>
     <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">AMOUNT (SOL)</div>
     <input id="wd-amt" type="number" min="0.001" step="0.001" placeholder="0.00"
       style="width:100%;box-sizing:border-box;background:rgba(0,0,0,.4);border:1px solid rgba(57,255,20,.3);border-radius:6px;color:#fff;font-size:11px;padding:9px 10px;outline:none;margin-bottom:1rem;"/>
@@ -457,7 +463,8 @@ function go(id){
   const el=document.getElementById(id);
   if(el) el.classList.add('on');
   if(document.activeElement&&document.activeElement!==document.body)document.activeElement.blur();
-  setTimeout(()=>gpadFocus(0),80); // re-anchor controller to first visible button on new screen
+  _gpadLastBtn=[];_gpadNavTs=0; // clear stale button state so first controller press always registers
+  setTimeout(()=>gpadFocus(0),100); // re-anchor controller to first visible button on new screen
 }
 function showStep(name){
   ['email','otp','wallet'].forEach(s=>{
@@ -539,6 +546,15 @@ async function refreshBal(){
   if(el('lob-bal')) el('lob-bal').textContent=solStr;
 }
 async function doRefreshBal(){await fetchPrice();await refreshBal();}
+function copyWalletAddr(){
+  const addr=ST.address||'';
+  if(!addr)return;
+  navigator.clipboard.writeText(addr).then(()=>addToast('Address copied!','#39FF14')).catch(()=>{try{const t=document.createElement('textarea');t.value=addr;document.body.appendChild(t);t.select();document.execCommand('copy');document.body.removeChild(t);addToast('Address copied!','#39FF14');}catch(e){}});
+}
+async function pasteWdAddr(){
+  try{const t=await navigator.clipboard.readText();const inp=document.getElementById('wd-addr');if(inp)inp.value=t.trim();}
+  catch(e){addToast('Paste blocked — paste manually','#FFD700');}
+}
 
 async function signLocalTx(tx){
   if(!_keypair)throw new Error('No wallet loaded');
@@ -1287,6 +1303,29 @@ function makeFoodNear(cx,cy){
 }
 function foodColor(f){return f.k?KILL_FOOD_COLOR:(FOOD_COLORS[f.ci]||FOOD_COLORS[0]);}
 
+// ── Kill-food lobby persistence (localStorage) ────────────────
+// When the host is the last player and leaves, save gold SOL pellets so a later
+// rejoiner can pick up the money even from an empty lobby.
+const _KF_TTL=3600000; // 1 hour expiry
+function saveKillFood(){
+  if(!pkRoomId||!SG)return;
+  const kf=SG.food.filter(f=>f.k&&f.w>0);
+  if(!kf.length){localStorage.removeItem('kf:'+pkRoomId);return;}
+  try{localStorage.setItem('kf:'+pkRoomId,JSON.stringify({ts:Date.now(),food:kf.map(f=>({x:Math.round(f.x),y:Math.round(f.y),w:f.w,s:Math.round(f.size)}))}))}catch(e){}
+}
+function loadKillFood(){
+  if(!pkRoomId||!SG)return;
+  try{
+    const raw=localStorage.getItem('kf:'+pkRoomId);
+    if(!raw)return;
+    const {ts,food}=JSON.parse(raw);
+    if(Date.now()-ts>_KF_TTL){localStorage.removeItem('kf:'+pkRoomId);return;}
+    food.forEach(f=>{SG.food.push({x:f.x,y:f.y,ci:3,size:f.s||10,k:1,w:f.w});});
+    if(food.length){addToast('⚠ Unclaimed SOL pellets from last session!','#FFD700');_forceFoodSend=true;}
+    localStorage.removeItem('kf:'+pkRoomId); // clear — re-saved on next leave if still uneaten
+  }catch(e){}
+}
+
 function initSnakeGame(players){
   _localDead=false;
   _foodSendCounter=2; // init so first sendSnakeState (→3) immediately includes food
@@ -1297,7 +1336,7 @@ function initSnakeGame(players){
     if(p.id!==myPid)
       SG.snakes.set(p.id,makeSnake(p.id,p.color||colorFromId(p.id),p.name||'SNAKE'));
   });
-  if(isHost){SG.food=seedFoodLayout();} // deterministic per-room layout → same dots for everyone
+  if(isHost){SG.food=seedFoodLayout();if(players.length===0)loadKillFood();} // restore uneaten SOL pellets when rejoining an empty lobby
   else{_firstRemoteSync=true;} // guest: snap own position to host-assigned spot on first ss
   _hostPid=isHost?myPid:null; _lastSsTs=Date.now(); // host-migration tracking
   _myUsd=ST.lobbyUsd||0; // start at entry wager value
@@ -1544,17 +1583,26 @@ function snakeTick(){
       for(let k=startK;k<bPts.length;k++){
         const bs=bPts[k]; if(!bs)continue;
         const dx=ah.x-bs.x,dy=ah.y-bs.y;
-        // Static check + swept head-to-head check (catches boosting tunnels)
         const hit=dx*dx+dy*dy<(aR+bR)*(aR+bR)||(k===0&&b.id!==a.id&&segHitsCircle(aPrev,ah,bs,aR+bR));
         if(hit){
           if(k===0&&b.id!==a.id){
-            // Head-to-head: process each pair only when a.id < b.id to guarantee at most one kill.
-            // The snake further in front (ahead along the collision axis) wins; the one who hit
-            // further back on the other snake's body dies — never both.
-            if(a.id>b.id)continue; // skip head-to-head — still check a's head vs b's body segments (k≥1)
-            const aFwdProgress=(ah.x-bs.x)*Math.cos(a.angle)+(ah.y-bs.y)*Math.sin(a.angle);
-            if(aFwdProgress>=0) eliminateSnake(b.id,a.id); // A is in front → B dies
-            else                 eliminateSnake(a.id,b.id); // B is in front → A dies
+            // Check if this is a true head-to-head (A's head overlaps B's actual head b.path[0])
+            // vs A's head clipping B's first body segment near the head.
+            const bh=b.path[0];
+            const bhdx=ah.x-bh.x,bhdy=ah.y-bh.y;
+            const trueH2H=bhdx*bhdx+bhdy*bhdy<(aR+bR)*(aR+bR);
+            if(trueH2H){
+              // Process each head-to-head pair exactly once (a.id < b.id) — NEVER both die.
+              // The attacker (moving into the other's face) dies; the defender survives.
+              if(a.id>b.id){break;} // pair handled from the reverse direction
+              // aFwdProgress > 0 → collision vector points in A's direction → B approached A → B dies
+              const aFwdProgress=(ah.x-bh.x)*Math.cos(a.angle)+(ah.y-bh.y)*Math.sin(a.angle);
+              if(aFwdProgress>=0) eliminateSnake(b.id,a.id);
+              else                 eliminateSnake(a.id,b.id);
+            } else {
+              // A's head hit B's first body segment (not a true head-to-head) → A dies
+              eliminateSnake(a.id,b.id);
+            }
           } else {
             eliminateSnake(a.id,a.id===b.id?null:b.id);
           }
@@ -1606,13 +1654,13 @@ function eliminateSnake(id,killerId){
 
 function spawnFoodFromSnake(snake){
   if(!snake||!snake.path)return;
-  // Normal, body-sized food pile where the snake died (the amount it always used to drop) —
-  // one orb roughly every other body point, scattered along the corpse for others to eat.
-  const step=Math.max(2,Math.floor(snake.path.length/60));
-  const idxs=[];for(let i=0;i<snake.path.length;i+=step)idxs.push(i);
-  const w=idxs.length?((snake.usd||0)/idxs.length):0; // split the dead player's wager evenly across their death pebbles
-  idxs.forEach(i=>{
-    SG.food.push({x:snake.path[i].x+(Math.random()-.5)*20,y:snake.path[i].y+(Math.random()-.5)*20,ci:3,size:9+Math.random()*5,k:1,w:w}); // gold kill food (bigger than regular); carries a wager share
+  // Place kill food at EXACT body circle positions — matches the visible snake trail 1:1.
+  // SOL wager split evenly across all circles so the total is preserved.
+  const bPts=getBodyPoints(snake);
+  if(!bPts.length)return;
+  const w=(snake.usd||0)/bPts.length;
+  bPts.forEach(p=>{
+    SG.food.push({x:p.x,y:p.y,ci:3,size:9+Math.random()*5,k:1,w:w});
   });
 }
 
@@ -1643,7 +1691,7 @@ function sendSnakeState(){
   const msg={t:'ss',snakes:snakeArr,tick:SG.tick,host:myPid}; // host tag drives host-migration
   if(_pendingKills.length){msg.kills=[..._pendingKills];_pendingKills.length=0;}
   if(_foodSendCounter%3===0||_forceFoodSend){
-    msg.food=SG.food.map(f=>[Math.round(f.x),Math.round(f.y),f.ci,Math.round(f.size),f.k?1:0]);
+    msg.food=SG.food.map(f=>[Math.round(f.x),Math.round(f.y),f.ci,Math.round(f.size),f.k?1:0,f.w?Math.round(f.w*1e6):0]);
     _forceFoodSend=false;
   }
   pkSend(msg);
@@ -1671,6 +1719,7 @@ function applyRemoteState(d){
       if(sd.id===myPid){
         const own=SG.snakes.get(myPid);
         if(own&&sd.ns)own.numSections=sd.ns;
+        if(own&&sd.score!=null)own.score=sd.score; // keep hud-score in sync for guests
         if(sd.usd!=null){ if(sd.usd>_myUsd+0.0001){const _oh=own&&own.path&&own.path[0]; if(_oh)_spawnMoneyFx(_oh.x,_oh.y);} _myUsd=sd.usd; } // host is authoritative for my value
         if(own&&_firstRemoteSync&&sd.segs&&sd.segs.length>0){
           const head={x:sd.segs[0][0],y:sd.segs[0][1]};
@@ -1739,7 +1788,7 @@ function applyRemoteState(d){
     });
   }
   if(d.food){
-    SG.food=d.food.map(f=>({x:f[0],y:f[1],ci:f[2]||0,size:f[3]||6,k:f[4]||0}));
+    SG.food=d.food.map(f=>({x:f[0],y:f[1],ci:f[2]||0,size:f[3]||6,k:f[4]||0,w:f[5]?f[5]/1e6:0}));
   }
 }
 
@@ -1785,6 +1834,7 @@ function launchSnakeGame(){
   document.addEventListener('keydown',onGameKey);
   document.addEventListener('keyup',onGameKeyUp);
   window.addEventListener('resize',onResize);
+  window.addEventListener('beforeunload',()=>{if(isHost&&SG&&pkRoomId)saveKillFood();});
 
   // Init mouse to center so snake doesn't immediately spin
   _mouseX=canvas.width/2; _mouseY=canvas.height/2-10;
@@ -1926,7 +1976,7 @@ async function endSnakeGame(reason,killerId){
   setTimeout(()=>gpadFocus(0),80); // ensure first result-screen button gets controller focus
   if(cashed&&ST.lobbyUsd>0)await settle(); // only Cash Out triggers payout (90% player / 10% creator)
   await refreshBal();
-  if(!keepAlive)pkDisconnect();
+  if(!keepAlive){if(isHost&&SG&&pkRoomId)saveKillFood();pkDisconnect();}
 }
 
 function enterSpectate(){
@@ -1958,6 +2008,7 @@ function goHome(){
   document.removeEventListener('mousemove',onMouseMove);
   window.removeEventListener('wheel',onWheel);
   window.removeEventListener('resize',onResize);
+  if(isHost)saveKillFood(); // preserve uncollected SOL pellets for the next person to join
   SG=null;
   const srb=document.getElementById('spec-rejoin-btn');
   if(srb)srb.style.display='none';
@@ -2014,11 +2065,12 @@ function pollGamepad(){
     const sy=axes[1]||0,sx=axes[0]||0;
     const dUp=cur(12)||sy<-0.5,dDown=cur(13)||sy>0.5;
     const dLeft=cur(14)||sx<-0.5,dRight=cur(15)||sx>0.5;
-    if((dUp||dDown||dLeft||dRight)&&now-_gpadNavTs>GPAD_NAV_MS){
-      _gpadNavTs=now;
-      gpadFocus((dDown||dRight)?1:-1);
+    if(dUp||dDown||dLeft||dRight){
+      // If nothing is focused yet, anchor first (handles switching from mouse→controller mid-session)
+      if(!document.activeElement||document.activeElement===document.body){gpadFocus(0);_gpadNavTs=now;}
+      else if(now-_gpadNavTs>GPAD_NAV_MS){_gpadNavTs=now;gpadFocus((dDown||dRight)?1:-1);}
     }
-    if(pressed(0)){const f=document.activeElement;if(f)f.click();}
+    if(pressed(0)){const f=document.activeElement;if(f&&f.id!=='voice-btn')f.click();}
     if(pressed(1)){
       const back=document.querySelector('.scr[style*="flex"] .copy-btn,[id="wd-modal"] .btn-r');
       if(back)back.click();
