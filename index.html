@@ -144,7 +144,7 @@ window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(tr
 <style>
 :root{--y:#FFD700;--c:#00FFFF;--pk:#FF69B4;--g:#39FF14;--r:#FF3333;--dark:#07070f;--panel:#0e0e1c;--border:#1c1c38;--txt:#e0e0ff;--muted:#555588;}
 *{box-sizing:border-box;margin:0;padding:0;}
-html,body{background-image:linear-gradient(rgba(4,4,12,0.18),rgba(4,4,12,0.18)),url('/arena-bg.png');background-size:cover;background-position:center;background-attachment:fixed;background-color:var(--dark);color:var(--txt);font-family:'Exo 2',sans-serif;min-height:100vh;overflow-x:hidden;}
+html,body{background-image:linear-gradient(rgba(4,4,12,0.18),rgba(4,4,12,0.18)),url('/arena-bg.webp');background-size:cover;background-position:center;background-attachment:fixed;background-color:var(--dark);color:var(--txt);font-family:'Exo 2',sans-serif;min-height:100vh;overflow-x:hidden;}
 .scr{display:none;min-height:100vh;flex-direction:column;align-items:center;justify-content:center;padding:1.5rem 1rem;}
 .scr.on{display:flex;}
 /* Home + Lobby: show promo art more prominently with neon overlays */
@@ -153,7 +153,7 @@ html,body{background-image:linear-gradient(rgba(4,4,12,0.18),rgba(4,4,12,0.18)),
     radial-gradient(ellipse 120% 60% at 50% 110%,rgba(120,0,255,0.22) 0%,transparent 70%),
     radial-gradient(ellipse 80% 40% at 50% -10%,rgba(0,80,220,0.18) 0%,transparent 70%),
     linear-gradient(rgba(2,2,10,0.07),rgba(2,2,10,0.07)),
-    url('/arena-bg.png');
+    url('/arena-bg.webp');
   background-size:cover;background-position:center top;background-attachment:fixed;
 }
 .card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:2rem 1.75rem;width:100%;max-width:440px;}
@@ -657,8 +657,8 @@ body{touch-action:manipulation;}
   <input type="range" id="zoom-slider" min="0.25" max="4" step="0.05" value="1">
   <!-- Powerup use buttons — bottom-right corner -->
   <div id="pow-btns" style="position:fixed;bottom:8px;right:8px;z-index:100;display:none;flex-direction:column;align-items:center;gap:6px;">
-    <button id="cherry-use-btn" class="pow-use-btn cherry-btn" style="opacity:0.35;"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="-13 -15 26 28" style="display:block;margin:0 auto 1px;overflow:visible"><g fill="#23232e"><polygon points="-2.4,-7 2.4,-7 0,-11"/><polygon points="5,-5 8.5,-1.5 9.5,-6"/><polygon points="7,2 11,2.5 8.5,6"/><polygon points="-5,-5 -8.5,-1.5 -9.5,-6"/><polygon points="-7,2 -11,2.5 -8.5,6"/></g><circle r="7" fill="#262630"/><circle cx="-2.2" cy="-2.4" r="2.2" fill="rgba(255,255,255,0.22)"/><path d="M0,-7 Q3.4,-9 2,-11.5" stroke="#b9a07a" stroke-width="1" fill="none"/><circle cx="2" cy="-11.8" r="1.8" fill="#FFD200"/></svg>KILL</button>
-    <button id="pepper-use-btn" class="pow-use-btn pepper-btn" style="opacity:0.35;"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="-13 -13 26 26" style="display:block;margin:0 auto 1px;overflow:visible"><circle r="9.5" fill="#FF9500"/><circle r="7.2" fill="#FFC400"/><circle r="4.7" fill="#FFE680"/><polygon points="1.4,-6.4 -3,0.6 -0.2,0.6 -1.6,6.6 3.2,-0.4 0.4,-0.4" fill="#fff"/></svg>SPEED</button>
+    <button id="cherry-use-btn" class="pow-use-btn cherry-btn" style="opacity:0.35;"><img src="/sprites/bomb.png" width="26" height="26" alt="" style="display:block;margin:0 auto 1px;object-fit:contain;"/>KILL</button>
+    <button id="pepper-use-btn" class="pow-use-btn pepper-btn" style="opacity:0.35;"><img src="/sprites/orb.png" width="26" height="26" alt="" style="display:block;margin:0 auto 1px;object-fit:contain;"/>SPEED</button>
   </div>
 </div>
 
@@ -2485,8 +2485,13 @@ function usePow(type){
   me.held=(me.held||[]).filter(h=>h!==type);
   if(type==='cherry'){ me.pow=true; me.pt=300; playCherry(); }
   else if(type==='pepper'){ me.pep=true; me.pet=390; playPepper(); }
-  _localPowUntil=Date.now()+500; // ignore server's stale pow=false for the next 500ms
-  if(ablyChannel) ablyChannel.publish('pow',{id:myPid,type},()=>{});
+  // Hold the local activation through the full round-trip + retries so a dropped
+  // 'pow' packet can't make the powerup "turn itself off and go back to inventory".
+  _localPowUntil=Date.now()+1300;
+  if(ablyChannel){
+    const send=()=>ablyChannel.publish('pow',{id:myPid,type},()=>{});
+    send(); setTimeout(send,90); setTimeout(send,220); // retries survive packet loss (server ignores dupes)
+  }
   _updatePowBtns(me);
 }
 
@@ -3054,6 +3059,9 @@ function p1d(dx,dy){
     if(dx!==_lastSentDx||dy!==_lastSentDy){
       _lastSentDx=dx; _lastSentDy=dy;
       pkSend({t:'in',id:myPid,dx,dy});
+      // one quick retry — a dropped turn packet otherwise strands the player in a
+      // tiny radius until the 100ms heartbeat catches up; this closes that gap.
+      setTimeout(()=>{ const m=G&&G.players&&G.players.get(myPid); if(m&&m.nx===dx&&m.ny===dy) pkSend({t:'in',id:myPid,dx,dy}); },55);
     }
   }
 }
@@ -3628,10 +3636,12 @@ function drawSkinPreview(){
     c.fillStyle=`rgba(${tc[0]},${tc[1]},${tc[2]},${f})`;
     c.beginPath(); c.arc(pcx-r*(1.1+i*0.65),pcy+r*0.52,r*(0.46-i*0.10),0,Math.PI*2); c.fill();
   });
-  // draw with upward offset to show legs
-  c.save(); c.translate(pcx, pcy-r*0.22);
-  _legs(c,r,0.8,champ.col,champ.leg);
-  champ.body(c,r,performance.now(),0.8);
+  // draw the real champion artwork
+  c.save(); c.translate(pcx, pcy);
+  if(!_blitSprite(c,champ.key,0,0,r*3.1,true)){
+    c.fillStyle=champ.col; c.beginPath(); c.arc(0,0,r,0,Math.PI*2); c.fill();
+    const s=_SPR[champ.key]; if(s&&!s.ready) s.img.addEventListener('load',()=>drawSkinPreview(),{once:true});
+  }
   c.restore();
   // label below preview canvas (not drawn inside canvas anymore)
   const lbl=document.getElementById('champ-name-label');
@@ -4179,12 +4189,35 @@ function _bodyRoxi(g,r,t,sw){
 
 const CHAMPIONS=[
   { key:'zippy', name:'ZIPPY', col:'#FFD700', trail:[255,200,0],  leg:'run',   body:_bodyZippy },
-  { key:'gloom', name:'GLOOM', col:'#4A0090', trail:[120,40,200], leg:'float', body:_bodyGloom },
+  { key:'gloom', name:'GLOOM', col:'#9B30FF', trail:[155,60,255], leg:'float', body:_bodyGloom },
   { key:'byte',  name:'BYTE',  col:'#14C8DC', trail:[50,215,255], leg:'run',   body:_bodyByte  },
   { key:'nova',  name:'NOVA',  col:'#1840D0', trail:[80,160,255], leg:'float', body:_bodyNova  },
   { key:'spike', name:'SPIKE', col:'#28D038', trail:[60,210,60],  leg:'run',   body:_bodySpike },
   { key:'roxi',  name:'ROXI',  col:'#FF4D95', trail:[255,100,170],leg:'skate', body:_bodyRoxi  },
 ];
+
+// ── Sprite cache: champion + powerup art cropped from the promo banner ──
+// Real artwork blitted each frame (1 drawImage call) instead of dozens of
+// shadowBlur vector ops — looks identical to the reference AND is far faster,
+// which is what keeps movement smooth with many players on screen.
+const _SPR={};
+function _loadSpr(name){
+  const im=new Image(); const rec={img:im,ready:false};
+  im.onload=()=>{ rec.ready=true; }; im.src='/sprites/'+name+'.png';
+  _SPR[name]=rec;
+}
+['zippy','gloom','byte','nova','spike','roxi','orb','bomb','mystery'].forEach(_loadSpr);
+// Blit a sprite fit into a box (by height for tall champs, by max dim for items),
+// centered at (cx,cy). Returns false if not loaded yet so caller can fall back.
+function _blitSprite(c,name,cx,cy,boxH,byHeight){
+  const s=_SPR[name]; if(!s||!s.ready||!s.img.width) return false;
+  const iw=s.img.width, ih=s.img.height;
+  let dh,dw;
+  if(byHeight){ dh=boxH; dw=boxH*(iw/ih); }
+  else { const asp=iw/ih; if(asp>=1){ dw=boxH; dh=boxH/asp; } else { dh=boxH; dw=boxH*asp; } }
+  c.drawImage(s.img, cx-dw/2, cy-dh/2, dw, dh);
+  return true;
+}
 
 // Main champion render — called from the player draw loop. (px,py)=top-left of tile.
 function drawChampion(g,p,px,py,r){
@@ -4205,30 +4238,38 @@ function drawChampion(g,p,px,py,r){
   const moving=moved>0.0015;
   const t=performance.now();
   const cx=px+T/2, cy=py+T/2;
-  const bob=(champ.leg==='float')? Math.sin(t/240)*r*0.12 : (moving?Math.abs(Math.sin(p._walk))*r*0.06:0);
-  // Shift character up by r*0.22 so legs hang below the tile center visibly
-  g.save(); g.translate(cx,cy-bob-r*0.22);
-  // ── active-powerup aura (kill=danger red, speed=cyan) drawn behind body ──
+  // Run cycle from the walk accumulator: bouncy hop + slight lean.
+  // Float champs (gloom, nova) hover gently instead of hopping.
+  const isFloat=(champ.leg==='float');
+  const ph=p._walk;
+  const hop = isFloat ? Math.sin(t/300)*r*0.12
+                      : (moving ? Math.abs(Math.sin(ph))*r*0.20 : 0);
+  const lean= isFloat ? 0 : (moving ? Math.sin(ph)*0.09 : 0);
+  const sq  = (moving && !isFloat) ? (1-Math.abs(Math.sin(ph)))*0.06 : 0; // squash at landing
+  g.save(); g.translate(cx, cy-hop);
+  // ── active-powerup aura (kill=red ring, speed=cyan ring) behind sprite ──
   if(p.pow){
     const pl=0.6+0.4*Math.sin(t/90);
-    g.save(); g.shadowColor='#FF2A00'; g.shadowBlur=18*pl;
-    g.strokeStyle=`rgba(255,60,0,${0.5+0.4*pl})`; g.lineWidth=Math.max(2,r*0.18);
-    g.beginPath(); g.arc(0,0,r*1.22,0,Math.PI*2); g.stroke(); g.restore();
+    g.save(); g.shadowColor='#FF2A00'; g.shadowBlur=16*pl;
+    g.strokeStyle=`rgba(255,60,0,${0.55+0.35*pl})`; g.lineWidth=Math.max(2,r*0.16);
+    g.beginPath(); g.arc(0,r*0.25,r*1.25,0,Math.PI*2); g.stroke(); g.restore();
   } else if(p.pep){
-    g.save(); g.shadowColor='#39D8FF'; g.shadowBlur=14;
-    g.strokeStyle='rgba(80,220,255,0.75)'; g.lineWidth=Math.max(1.5,r*0.12);
-    g.beginPath(); g.arc(0,0,r*1.18,0,Math.PI*2); g.stroke(); g.restore();
+    g.save(); g.shadowColor='#39D8FF'; g.shadowBlur=12;
+    g.strokeStyle='rgba(80,220,255,0.7)'; g.lineWidth=Math.max(1.5,r*0.12);
+    g.beginPath(); g.arc(0,r*0.25,r*1.2,0,Math.PI*2); g.stroke(); g.restore();
   }
-  // soft champion glow for the local sense of presence
-  const _sb=(p.id===myPid)?1:(_isMobile?0:0.55);
-  if(_sb>0 && !p.pow && !p.pep){ g.shadowColor=champ.col; g.shadowBlur=8*_sb; }
-  _legs(g,r,moving?p._walk:0,champ.col,champ.leg);
   g.shadowBlur=0;
-  // flip horizontally to face movement direction, then draw the body upright
-  g.save(); g.scale(p._face,1);
-  champ.body(g,r,t,moving?p._walk:0);
-  g.restore(); // end flip
-  g.restore(); // end translate
+  // Facing flip + lean + squash, then blit the real champion artwork.
+  g.save();
+  g.scale(p._face,1);
+  if(lean) g.rotate(lean*p._face);
+  if(sq) g.scale(1+sq*0.6, 1-sq);
+  const drewn=_blitSprite(g,champ.key,0,0,r*2.85,true);
+  g.restore();
+  if(!drewn){ // sprite still loading — coloured token so the player is visible
+    g.fillStyle=champ.col; g.beginPath(); g.arc(0,0,r*0.9,0,Math.PI*2); g.fill();
+  }
+  g.restore();
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -4393,6 +4434,8 @@ function _drawDeathFx(g,f,pr){
 // HUD and mobile buttons.
 // ════════════════════════════════════════════════════════════════════════════
 function drawOrb(c,cx,cy,r){
+  const _b=Math.sin(performance.now()/320+cx*0.05)*r*0.10;
+  if(_blitSprite(c,'orb',cx,cy-_b,r*2.7,false)) return;
   c.save(); c.translate(cx,cy);
   c.shadowColor='#FFC400'; c.shadowBlur=r*0.6;
   c.fillStyle='#FF9500'; c.beginPath(); c.arc(0,0,r*0.92,0,Math.PI*2); c.fill();
@@ -4408,6 +4451,8 @@ function drawOrb(c,cx,cy,r){
   c.restore();
 }
 function drawBomb(c,cx,cy,r){
+  const _b=Math.sin(performance.now()/300+cx*0.05)*r*0.10;
+  if(_blitSprite(c,'bomb',cx,cy-_b,r*2.7,false)) return;
   c.save(); c.translate(cx,cy);
   c.fillStyle='#14141c';
   const n=10;
@@ -4421,6 +4466,8 @@ function drawBomb(c,cx,cy,r){
   c.restore();
 }
 function drawMystery(c,cx,cy,r,t){
+  const _b=Math.sin((t||performance.now())/300+cx*0.05)*r*0.10;
+  if(_blitSprite(c,'mystery',cx,cy-_b,r*2.7,false)) return;
   c.save(); c.translate(cx,cy);
   const pulse=0.7+0.3*Math.sin((t||0)/220);
   c.shadowColor='#23E0FF'; c.shadowBlur=r*0.55*pulse;
@@ -4503,8 +4550,8 @@ function draw(){
         // without this cap the gap exceeds 5 and the teleport snap fires (the visible "jump").
         let nddx=p.x-nrX; if(nddx>C/2) nddx-=C; else if(nddx<-C/2) nddx+=C;
         let nddy=p.y-nrY; if(nddy>R/2) nddy-=R; else if(nddy<-R/2) nddy+=R;
-        if(Math.abs(nddx)<=1.2) p.renderX=nrX;
-        if(Math.abs(nddy)<=1.2) p.renderY=nrY;
+        if(Math.abs(nddx)<=2.0) p.renderX=nrX;
+        if(Math.abs(nddy)<=2.0) p.renderY=nrY;
       }
       let ddx=p.x-p.renderX, ddy=p.y-p.renderY;
       if(ddx>C/2) ddx-=C; else if(ddx<-C/2) ddx+=C;
