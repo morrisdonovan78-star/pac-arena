@@ -1336,7 +1336,7 @@ function initSnakeGame(players){
     if(p.id!==myPid)
       SG.snakes.set(p.id,makeSnake(p.id,p.color||colorFromId(p.id),p.name||'SNAKE'));
   });
-  if(isHost){SG.food=seedFoodLayout();if(players.length===0)loadKillFood();} // restore uneaten SOL pellets when rejoining an empty lobby
+  if(isHost){SG.food=seedFoodLayout();if(!players.some(p=>p.id!==myPid))loadKillFood();} // restore uneaten SOL pellets when rejoining alone (no other players)
   else{_firstRemoteSync=true;} // guest: snap own position to host-assigned spot on first ss
   _hostPid=isHost?myPid:null; _lastSsTs=Date.now(); // host-migration tracking
   _myUsd=ST.lobbyUsd||0; // start at entry wager value
