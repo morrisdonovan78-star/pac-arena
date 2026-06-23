@@ -349,8 +349,13 @@ module.exports = async function handler(req, res) {
           clearTimeout(guard); done = true;
           return res.status(403).json({ error: 'No wager on record — you may have been eliminated or already cashed out' });
         }
-        const wagerLamports = kvWager;
-        console.log('[settle] cashout kv=' + kvWager + ' using=' + wagerLamports);
+        // Use client-signed accumulated amount (initial wager + kill-food winnings).
+        // kvWager confirms the player has an active deposit; wagerLamportsRaw is the signed total they claim.
+        // Cap at 20× initial to guard against fraudulent inflation; avail caps the actual transfer.
+        const wagerLamports = wagerLamportsRaw > kvWager
+          ? Math.min(wagerLamportsRaw, kvWager * 20)
+          : kvWager;
+        console.log('[settle] cashout kv=' + kvWager + ' signed=' + wagerLamportsRaw + ' using=' + wagerLamports);
 
         let sig, playerCut, creatorCut, txConfirmed = false;
         for (let attempt = 1; attempt <= 2; attempt++) {

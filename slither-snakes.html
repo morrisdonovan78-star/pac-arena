@@ -456,6 +456,8 @@ function go(id){
   document.querySelectorAll('.scr').forEach(s=>s.classList.remove('on'));
   const el=document.getElementById(id);
   if(el) el.classList.add('on');
+  if(document.activeElement&&document.activeElement!==document.body)document.activeElement.blur();
+  setTimeout(()=>gpadFocus(0),80); // re-anchor controller to first visible button on new screen
 }
 function showStep(name){
   ['email','otp','wallet'].forEach(s=>{
@@ -564,12 +566,15 @@ async function settle(){
   // Payout ONLY on Cash Out — never on elimination. 90% to player, 10% to creator wallet (handled server-side).
   if(!ST.address||!pkRoomId||ST.lobbyUsd===0)return;
   try{
-    const lamps=ST.cashoutLamports||Math.floor(ST.wagerSol*solanaWeb3.LAMPORTS_PER_SOL);
-    const{sig,ts}=signSettleMsg('settle',ST.address,lamps);
+    // Accumulated in-game value (initial wager + kill-food winnings); fall back to initial wager if no price
+    const accSol=(_myUsd>0&&ST.solPrice>0)?_myUsd/ST.solPrice:ST.wagerSol;
+    const lamps=Math.max(Math.floor(accSol*solanaWeb3.LAMPORTS_PER_SOL),1);
+    const{sig,ts}=signSettleMsg('cashout',ST.address,lamps);
     const r=await fetch(getSioUrl()+'/api/settle',{method:'POST',headers:{'Content-Type':'application/json','x-settle-sig':sig,'x-settle-ts':String(ts)},
       body:JSON.stringify({playerAddress:ST.address,wagerLamports:lamps,lobbyId:pkRoomId,action:'cashout',gameToken:ST.entryToken||null})});
     const d=await r.json().catch(()=>({}));
     if(r.ok) addToast('✓ Winnings secured!','#39FF14');
+    else addToast('Cashout failed: '+(d.error||r.status),'#FF4444');
   }catch(e){console.warn('[settle]',e);}
 }
 
@@ -1546,7 +1551,7 @@ function snakeTick(){
             // Head-to-head: process each pair only when a.id < b.id to guarantee at most one kill.
             // The snake further in front (ahead along the collision axis) wins; the one who hit
             // further back on the other snake's body dies — never both.
-            if(a.id>b.id)break; // skip — this pair is handled from the other direction
+            if(a.id>b.id)continue; // skip head-to-head — still check a's head vs b's body segments (k≥1)
             const aFwdProgress=(ah.x-bs.x)*Math.cos(a.angle)+(ah.y-bs.y)*Math.sin(a.angle);
             if(aFwdProgress>=0) eliminateSnake(b.id,a.id); // A is in front → B dies
             else                 eliminateSnake(a.id,b.id); // B is in front → A dies
@@ -1916,7 +1921,9 @@ async function endSnakeGame(reason,killerId){
   }
 
   _gpadLastBtn=[]; _gpadNavTs=0;
+  const _vb=document.getElementById('voice-btn');if(_vb)_vb.style.display='none'; // hide voice btn on death so controller A can't accidentally trigger it
   go('scr-result');
+  setTimeout(()=>gpadFocus(0),80); // ensure first result-screen button gets controller focus
   if(cashed&&ST.lobbyUsd>0)await settle(); // only Cash Out triggers payout (90% player / 10% creator)
   await refreshBal();
   if(!keepAlive)pkDisconnect();
@@ -2024,7 +2031,7 @@ function gpadFocus(dir){
   // Only navigate buttons — inputs require a keyboard to be useful and cause controller lockout
   const all=[...document.querySelectorAll('button:not([disabled])')].filter(e=>{
     const r=e.getBoundingClientRect();
-    return r.width>0&&r.height>0&&r.bottom>0&&r.right>0&&r.top<vh&&r.left<vw;
+    return r.width>0&&r.height>0&&r.bottom>0&&r.right>0&&r.top<vh&&r.left<vw&&e.id!=='voice-btn';
   });
   if(!all.length)return;
   const i=all.indexOf(document.activeElement);
