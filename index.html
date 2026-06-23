@@ -4483,14 +4483,13 @@ function draw(){
   if(_mazeOC) ctx.drawImage(_mazeOC,0,0);
 
   // ── Smooth position interpolation (runs every frame at 60fps) ─
-  const frameFrac=Math.min(dt/TICK_MS, 2);
+  const frameFrac=Math.min(dt/TICK_MS, 1.5);
   G.players.forEach(p=>{
     if(p.renderX===undefined){ p.renderX=p.x; p.renderY=p.y; return; }
-    // pspd is per-frame (60fps). At ~16.67ms per frame vs 33ms tick: frameFrac≈0.5.
-    // Multiplying pspd*frameFrac made chars look half-speed vs original feel.
-    // Use fixed pspd so the visual prediction runs at original speed; the 2.5-tile
-    // drift cap prevents the client running more than 2.5 tiles ahead of the server.
-    const pspd=(p.pep?0.2185*1.55:p.pow?0.2185*1.25:0.2185);
+    // pspd scales with dt so movement is frame-rate-independent.
+    // At 60fps (dt≈16.67ms, frameFrac≈0.5): pspd≈0.1093 → matches server speed exactly.
+    // Without dt-scaling, pspd ran at 2× server speed and constantly tripped the cap.
+    const pspd=(p.pep?0.2185*1.55:p.pow?0.2185*1.25:0.2185)*frameFrac;
     if(p.id===myPid&&!isHost){
       // ── Guest local player: client-side prediction ───────────────
       const _pdx=p.dx, _pdy=p.dy; // direction before applying queued turn
