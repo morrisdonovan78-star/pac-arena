@@ -1565,16 +1565,19 @@ function snakeTick(){
     if(h.x*h.x+h.y*h.y>=ARENA_R*ARENA_R) eliminateSnake(snake.id,null);
   });
 
-  // Head-vs-body collision using getBodyPoints (damnbruh.com: edge circle at head tip)
-  // Each unordered head-to-head pair is processed ONCE (a.id < b.id) so both can never die
-  // from the same encounter. Body collisions (k>0) are directional and processed normally.
+  // Head-vs-body collision — each unordered (A,B) pair resolved EXACTLY ONCE per tick via
+  // _h2hDone Set, covering both the trueH2H path AND the swept-head (segHitsCircle) path.
+  // This is the bulletproof "never both die" guarantee regardless of collision geometry.
   const alive=[...SG.snakes.values()].filter(s=>s.alive);
+  const _h2hDone=new Set(); // "id1:id2" canonical key (id1<id2 lexicographically)
+  // Sub-pixel angle diff helper: returns absolute angular distance in [0,π]
+  const angDiff=(a,r)=>{let d=a-r;d=((d+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI;return Math.abs(d);};
   for(let i=0;i<alive.length;i++){
     const a=alive[i]; if(!a.alive)continue;
     const ah=a.path[0];
     const aR=sectionRadius(a);
     for(let j=0;j<alive.length;j++){
-      if(!a.alive)break; // early exit — a was killed by a previous j iteration this tick
+      if(!a.alive)break;
       const b=alive[j]; if(!b.alive)continue;
       const bR=sectionRadius(b);
       const bPts=getBodyPoints(b);
@@ -1586,21 +1589,23 @@ function snakeTick(){
         const hit=dx*dx+dy*dy<(aR+bR)*(aR+bR)||(k===0&&b.id!==a.id&&segHitsCircle(aPrev,ah,bs,aR+bR));
         if(hit){
           if(k===0&&b.id!==a.id){
-            // Check if this is a true head-to-head (A's head overlaps B's actual head b.path[0])
-            // vs A's head clipping B's first body segment near the head.
-            const bh=b.path[0];
+            // Guarantee one resolution per pair per tick — covers both direct overlap AND
+            // swept-head (segHitsCircle) cases which previously let both fall through to eliminate.
+            const pk=a.id<b.id?a.id+':'+b.id:b.id+':'+a.id;
+            if(_h2hDone.has(pk)){break;} // already resolved from the other direction this tick
+            _h2hDone.add(pk);
+            const bh=b.path[0]; // actual head (same as bPts[0])
             const bhdx=ah.x-bh.x,bhdy=ah.y-bh.y;
             const trueH2H=bhdx*bhdx+bhdy*bhdy<(aR+bR)*(aR+bR);
             if(trueH2H){
-              // Process each head-to-head pair exactly once (a.id < b.id) — NEVER both die.
-              // The attacker (moving into the other's face) dies; the defender survives.
-              if(a.id>b.id){break;} // pair handled from the reverse direction
-              // aFwdProgress > 0 → collision vector points in A's direction → B approached A → B dies
-              const aFwdProgress=(ah.x-bh.x)*Math.cos(a.angle)+(ah.y-bh.y)*Math.sin(a.angle);
-              if(aFwdProgress>=0) eliminateSnake(b.id,a.id);
-              else                 eliminateSnake(a.id,b.id);
+              // Sub-pixel angle tiebreaker (DamnBruh method): the snake pointing MORE directly
+              // at the other is the attacker (dies); the more-tilted snake "slips past" (survives).
+              const aMisalign=angDiff(a.angle,Math.atan2(bh.y-ah.y,bh.x-ah.x));
+              const bMisalign=angDiff(b.angle,Math.atan2(ah.y-bh.y,ah.x-bh.x));
+              if(aMisalign<=bMisalign) eliminateSnake(a.id,b.id);
+              else                      eliminateSnake(b.id,a.id);
             } else {
-              // A's head hit B's first body segment (not a true head-to-head) → A dies
+              // A swept into B's head zone but final positions don't perfectly overlap → A is attacker
               eliminateSnake(a.id,b.id);
             }
           } else {
