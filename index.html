@@ -144,17 +144,17 @@ window.addEventListener('pageshow',function(e){if(e.persisted)location.reload(tr
 <style>
 :root{--y:#FFD700;--c:#00FFFF;--pk:#FF69B4;--g:#39FF14;--r:#FF3333;--dark:#07070f;--panel:#0e0e1c;--border:#1c1c38;--txt:#e0e0ff;--muted:#555588;}
 *{box-sizing:border-box;margin:0;padding:0;}
-html,body{background-image:linear-gradient(rgba(4,4,12,0.48),rgba(4,4,12,0.48)),url('/arena-bg.png');background-size:cover;background-position:center;background-attachment:fixed;background-color:var(--dark);color:var(--txt);font-family:'Exo 2',sans-serif;min-height:100vh;overflow-x:hidden;}
+html,body{background-image:linear-gradient(rgba(4,4,12,0.18),rgba(4,4,12,0.18)),url('/arena-bg.png');background-size:cover;background-position:center;background-attachment:fixed;background-color:var(--dark);color:var(--txt);font-family:'Exo 2',sans-serif;min-height:100vh;overflow-x:hidden;}
 .scr{display:none;min-height:100vh;flex-direction:column;align-items:center;justify-content:center;padding:1.5rem 1rem;}
 .scr.on{display:flex;}
 /* Home + Lobby: show promo art more prominently with neon overlays */
 #scr-home.on,#scr-lobby.on{
   background:
-    radial-gradient(ellipse 120% 60% at 50% 110%,rgba(100,0,255,0.20) 0%,transparent 70%),
-    radial-gradient(ellipse 80% 40% at 50% -10%,rgba(0,100,220,0.16) 0%,transparent 70%),
-    linear-gradient(rgba(4,4,12,0.36),rgba(4,4,12,0.36)),
+    radial-gradient(ellipse 120% 60% at 50% 110%,rgba(120,0,255,0.22) 0%,transparent 70%),
+    radial-gradient(ellipse 80% 40% at 50% -10%,rgba(0,80,220,0.18) 0%,transparent 70%),
+    linear-gradient(rgba(2,2,10,0.07),rgba(2,2,10,0.07)),
     url('/arena-bg.png');
-  background-size:cover;background-position:center;background-attachment:fixed;
+  background-size:cover;background-position:center top;background-attachment:fixed;
 }
 .card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:2rem 1.75rem;width:100%;max-width:440px;}
 .logo{font-family:'Orbitron',sans-serif;font-weight:900;font-size:clamp(32px,7vw,64px);letter-spacing:6px;animation:glow 2.2s ease-in-out infinite;line-height:1;}
@@ -3631,7 +3631,7 @@ function drawSkinPreview(){
   // draw with upward offset to show legs
   c.save(); c.translate(pcx, pcy-r*0.22);
   _legs(c,r,0.8,champ.col,champ.leg);
-  champ.body(c,r,performance.now());
+  champ.body(c,r,performance.now(),0.8);
   c.restore();
   // label below preview canvas (not drawn inside canvas anymore)
   const lbl=document.getElementById('champ-name-label');
@@ -3790,319 +3790,391 @@ function champEyes(g,r,style,lx,ly){
 function _legs(g,r,swing,col,style){
   if(style==='float') return;
   const sp=Math.sin(swing), spO=Math.sin(swing+Math.PI);
-  // thigh: from body bottom, swings forward/back
-  const oy=r*0.86, thighLen=r*0.52, shinLen=r*0.44;
-  const lw=Math.max(3,r*0.32);
-  g.strokeStyle=col; g.lineWidth=lw; g.lineCap='round';
-  // LEFT leg
-  const lkx=-r*0.28+sp*thighLen*0.65, lky=oy+thighLen-Math.abs(sp)*thighLen*0.28;
-  g.beginPath(); g.moveTo(-r*0.28,oy); g.lineTo(lkx,lky); g.stroke();
-  // shin (knee to foot)
-  g.lineWidth=Math.max(2,r*0.22);
-  const lfx=lkx-sp*shinLen*0.30, lfy=lky+shinLen-Math.abs(sp)*shinLen*0.18;
+  const oy=r*0.84, thL=r*0.55, shL=r*0.44;
+  const lw=Math.max(3,r*0.30), fw=Math.max(4,r*0.42), fh=Math.max(2,r*0.18);
+  g.lineCap='round';
+  // ── LEFT leg ──
+  const lkx=-r*0.25+sp*thL*0.68, lky=oy+thL-Math.abs(sp)*thL*0.28;
+  g.strokeStyle=col; g.lineWidth=lw;
+  g.beginPath(); g.moveTo(-r*0.25,oy); g.lineTo(lkx,lky); g.stroke();
+  g.lineWidth=Math.max(2,r*0.20);
+  const lfx=lkx-sp*shL*0.32, lfy=lky+shL-Math.abs(sp)*shL*0.14;
   g.beginPath(); g.moveTo(lkx,lky); g.lineTo(lfx,lfy); g.stroke();
-  // RIGHT leg
-  const rkx= r*0.28+spO*thighLen*0.65, rky=oy+thighLen-Math.abs(spO)*thighLen*0.28;
-  g.lineWidth=lw;
-  g.beginPath(); g.moveTo( r*0.28,oy); g.lineTo(rkx,rky); g.stroke();
-  g.lineWidth=Math.max(2,r*0.22);
-  const rfx=rkx-spO*shinLen*0.30, rfy=rky+shinLen-Math.abs(spO)*shinLen*0.18;
-  g.beginPath(); g.moveTo(rkx,rky); g.lineTo(rfx,rfy); g.stroke();
+  // left foot
+  g.fillStyle=col; g.save(); g.translate(lfx,lfy); g.rotate(sp*0.28);
   if(style==='skate'){
-    // inline skate blades at foot positions
-    g.lineWidth=Math.max(1.5,r*0.13); g.strokeStyle='rgba(220,240,255,0.9)';
-    g.beginPath(); g.moveTo(lfx-r*0.18,lfy+lw*0.4); g.lineTo(lfx+r*0.18,lfy+lw*0.4); g.stroke();
-    g.beginPath(); g.moveTo(rfx-r*0.18,rfy+lw*0.4); g.lineTo(rfx+r*0.18,rfy+lw*0.4); g.stroke();
-  }
+    _rr(g,-fw*0.65,-fh*0.5,fw*1.30,fh,fh*0.5); g.fill();
+    g.strokeStyle='rgba(200,225,255,0.92)'; g.lineWidth=Math.max(1.5,r*0.12);
+    g.beginPath(); g.moveTo(-fw*0.30,fh*0.20); g.lineTo(fw*0.65,fh*0.20); g.stroke();
+  } else { _rr(g,-fw*0.16,-fh*0.5,fw,fh,fh*0.5); g.fill(); }
+  g.restore();
+  // ── RIGHT leg ──
+  const rkx=r*0.25+spO*thL*0.68, rky=oy+thL-Math.abs(spO)*thL*0.28;
+  g.strokeStyle=col; g.lineWidth=lw;
+  g.beginPath(); g.moveTo(r*0.25,oy); g.lineTo(rkx,rky); g.stroke();
+  g.lineWidth=Math.max(2,r*0.20);
+  const rfx=rkx-spO*shL*0.32, rfy=rky+shL-Math.abs(spO)*shL*0.14;
+  g.beginPath(); g.moveTo(rkx,rky); g.lineTo(rfx,rfy); g.stroke();
+  // right foot
+  g.fillStyle=col; g.save(); g.translate(rfx,rfy); g.rotate(spO*0.28);
+  if(style==='skate'){
+    _rr(g,-fw*0.65,-fh*0.5,fw*1.30,fh,fh*0.5); g.fill();
+    g.strokeStyle='rgba(200,225,255,0.92)'; g.lineWidth=Math.max(1.5,r*0.12);
+    g.beginPath(); g.moveTo(-fw*0.30,fh*0.20); g.lineTo(fw*0.65,fh*0.20); g.stroke();
+  } else { _rr(g,-fw*0.16,-fh*0.5,fw,fh,fh*0.5); g.fill(); }
+  g.restore();
 }
 
 // ── Per-champion body drawers — match the promotional reference art exactly.
 // Local space: (0,0)=body center, facing +x, radius r. Legs drawn before body in drawChampion.
 
-function _bodyZippy(g,r,t){
-  const anim=Math.sin(t/110)*0.07;
-  // Spiky golden hair crown — 8 big triangular spikes, upper 270° arc (NOT lower — legs are there)
-  g.fillStyle='#FF9800';
-  g.beginPath();
-  const ns=8; const arcStart=-Math.PI*1.20, arcEnd=Math.PI*0.20;
+function _bodyZippy(g,r,t,sw){
+  const sp=Math.sin(sw||0), anim=Math.sin(t/110)*0.05;
+  // ── Outer electric aura ──
+  g.save(); g.shadowColor='#FFD700'; g.shadowBlur=r*1.10;
+  g.strokeStyle='rgba(255,210,0,0.14)'; g.lineWidth=r*0.34;
+  g.beginPath(); g.arc(0,0,r*1.55,0,Math.PI*2); g.stroke(); g.restore();
+  // ── 12 large orange-yellow spikes ALL AROUND ──
+  g.fillStyle='#FF8C00'; g.beginPath();
+  const ns=12;
   for(let i=0;i<ns;i++){
-    const a=arcStart+(arcEnd-arcStart)*(i/ns);
-    const aM=arcStart+(arcEnd-arcStart)*((i+0.5)/ns);
-    const outer=r*(1.60+anim); const inner=r*0.88;
-    const hw=(arcEnd-arcStart)/ns*0.38;
-    g.lineTo(Math.cos(a-hw)*inner,Math.sin(a-hw)*inner);
-    g.lineTo(Math.cos(aM)*outer,Math.sin(aM)*outer);
-    g.lineTo(Math.cos(a+hw)*inner,Math.sin(a+hw)*inner);
+    const a=(i/ns)*Math.PI*2-Math.PI/2+anim;
+    const aM=a+Math.PI/ns;
+    const out=r*(1.82+anim*0.5), inn=r*0.78, hw=Math.PI/ns*0.36;
+    g.lineTo(Math.cos(a-hw)*inn,Math.sin(a-hw)*inn);
+    g.lineTo(Math.cos(aM)*out, Math.sin(aM)*out);
+    g.lineTo(Math.cos(a+hw)*inn,Math.sin(a+hw)*inn);
   }
   g.closePath(); g.fill();
-  // Inner layer of shorter yellow spikes
-  g.fillStyle='#FFD700';
-  g.beginPath();
+  // ── 12 shorter bright-gold inner spikes (between outer) ──
+  g.fillStyle='#FFD700'; g.beginPath();
   for(let i=0;i<ns;i++){
-    const a=arcStart+(arcEnd-arcStart)*((i+0.5)/ns);
-    const aM=arcStart+(arcEnd-arcStart)*((i+1.0)/ns);
-    const outer=r*(1.26); const inner=r*0.90;
-    const hw=(arcEnd-arcStart)/ns*0.30;
-    g.lineTo(Math.cos(a-hw)*inner,Math.sin(a-hw)*inner);
-    g.lineTo(Math.cos(aM)*outer,Math.sin(aM)*outer);
-    g.lineTo(Math.cos(a+hw)*inner,Math.sin(a+hw)*inner);
+    const a=(i/ns)*Math.PI*2-Math.PI/2+Math.PI/ns+anim;
+    const aM=a+Math.PI/ns;
+    const out=r*1.34, inn=r*0.80, hw=Math.PI/ns*0.28;
+    g.lineTo(Math.cos(a-hw)*inn,Math.sin(a-hw)*inn);
+    g.lineTo(Math.cos(aM)*out, Math.sin(aM)*out);
+    g.lineTo(Math.cos(a+hw)*inn,Math.sin(a+hw)*inn);
   }
   g.closePath(); g.fill();
-  // Black round head
-  g.fillStyle='#111118'; g.beginPath(); g.arc(0,0,r*0.88,0,Math.PI*2); g.fill();
-  // Faint inner glow
-  g.fillStyle='rgba(255,200,30,0.09)'; g.beginPath(); g.arc(0,0,r*0.78,0,Math.PI*2); g.fill();
-  // Glowing yellow angry eyes
-  g.save(); g.shadowColor='#FFE000'; g.shadowBlur=r*0.55;
+  // ── Main compact black head ──
+  g.fillStyle='#0d0d10'; g.beginPath(); g.arc(0,0,r*0.84,0,Math.PI*2); g.fill();
+  g.fillStyle='rgba(255,180,0,0.07)'; g.beginPath(); g.arc(0,0,r*0.72,0,Math.PI*2); g.fill();
+  // ── Angry angled eyes (slanted trapezoid — not round) ──
+  g.save(); g.shadowColor='#FFE000'; g.shadowBlur=r*0.85;
   g.fillStyle='#FFE000';
-  g.beginPath(); g.ellipse(-r*0.28,-r*0.14,r*0.21,r*0.27,0,0,Math.PI*2); g.fill();
-  g.beginPath(); g.ellipse( r*0.28,-r*0.14,r*0.21,r*0.27,0,0,Math.PI*2); g.fill();
+  g.beginPath(); g.moveTo(-r*0.56,-r*0.30); g.lineTo(-r*0.10,-r*0.44); g.lineTo(-r*0.10,-r*0.10); g.lineTo(-r*0.56,-r*0.04); g.closePath(); g.fill();
+  g.beginPath(); g.moveTo( r*0.56,-r*0.30); g.lineTo( r*0.10,-r*0.44); g.lineTo( r*0.10,-r*0.10); g.lineTo( r*0.56,-r*0.04); g.closePath(); g.fill();
   g.restore();
-  g.fillStyle='#000'; g.beginPath(); g.arc(-r*0.28,-r*0.10,r*0.10,0,Math.PI*2); g.fill();
-  g.beginPath(); g.arc( r*0.28,-r*0.10,r*0.10,0,Math.PI*2); g.fill();
-  // Heavy angry brows (yellow)
-  g.strokeStyle='#FFD000'; g.lineWidth=Math.max(2,r*0.16); g.lineCap='round';
-  g.beginPath(); g.moveTo(-r*0.52,-r*0.46); g.lineTo(-r*0.06,-r*0.32); g.stroke();
-  g.beginPath(); g.moveTo( r*0.52,-r*0.46); g.lineTo( r*0.06,-r*0.32); g.stroke();
-  // Small grimacing mouth
-  g.strokeStyle='#FF8800'; g.lineWidth=Math.max(1.5,r*0.09); g.lineCap='round';
-  g.beginPath(); g.arc(0,r*0.26,r*0.22,0.08*Math.PI,0.92*Math.PI); g.stroke();
-  // Side fist protrusions (small dark-yellow circles)
-  g.fillStyle='#CC6600';
-  g.beginPath(); g.arc(-r*1.04,r*0.10,r*0.24,0,Math.PI*2); g.fill();
-  g.beginPath(); g.arc( r*1.04,r*0.10,r*0.24,0,Math.PI*2); g.fill();
-  g.fillStyle='#222'; g.beginPath(); g.arc(-r*1.04,r*0.12,r*0.11,0,Math.PI*2); g.fill();
-  g.beginPath(); g.arc( r*1.04,r*0.12,r*0.11,0,Math.PI*2); g.fill();
-  // Electric spark highlights
-  g.save(); g.shadowColor='#FFE000'; g.shadowBlur=r*0.35;
-  g.strokeStyle='rgba(255,240,80,0.75)'; g.lineWidth=Math.max(1,r*0.06); g.lineCap='round';
-  for(let i=0;i<4;i++){
-    const sa=(i/4)*Math.PI*2+t/180; const sd=r*1.3;
-    g.beginPath(); g.moveTo(Math.cos(sa)*r*1.0,Math.sin(sa)*r*1.0); g.lineTo(Math.cos(sa)*sd,Math.sin(sa)*sd); g.stroke();
+  g.fillStyle='#060606';
+  g.beginPath(); g.ellipse(-r*0.33,-r*0.22,r*0.11,r*0.13,-0.25,0,Math.PI*2); g.fill();
+  g.beginPath(); g.ellipse( r*0.33,-r*0.22,r*0.11,r*0.13, 0.25,0,Math.PI*2); g.fill();
+  // ── Heavy V-shaped angry brows ──
+  g.strokeStyle='#FF9500'; g.lineWidth=Math.max(2.5,r*0.20); g.lineCap='round';
+  g.beginPath(); g.moveTo(-r*0.64,-r*0.54); g.lineTo(-r*0.08,-r*0.46); g.stroke();
+  g.beginPath(); g.moveTo( r*0.64,-r*0.54); g.lineTo( r*0.08,-r*0.46); g.stroke();
+  // ── Grimacing mouth with jagged gold teeth ──
+  g.fillStyle='#050505'; g.beginPath(); g.arc(0,r*0.24,r*0.26,0.07*Math.PI,0.93*Math.PI); g.fill();
+  g.fillStyle='#FFD700';
+  _rr(g,-r*0.24,r*0.22,r*0.16,r*0.13,r*0.02); g.fill();
+  _rr(g,-r*0.04,r*0.22,r*0.16,r*0.13,r*0.02); g.fill();
+  _rr(g, r*0.08,r*0.22,r*0.14,r*0.11,r*0.02); g.fill();
+  // ── Animated fist arms (bob opposite each other with walk) ──
+  const aL=sp*r*0.34, aR=-sp*r*0.34;
+  g.fillStyle='#CC6A00';
+  g.save(); g.translate(-r*0.98,r*0.06+aL);
+  g.beginPath(); g.arc(0,0,r*0.30,0,Math.PI*2); g.fill();
+  g.fillStyle='rgba(255,140,0,0.55)'; g.beginPath(); g.arc(0,0,r*0.18,0,Math.PI*2); g.fill();
+  g.restore();
+  g.fillStyle='#CC6A00';
+  g.save(); g.translate( r*0.98,r*0.06+aR);
+  g.beginPath(); g.arc(0,0,r*0.30,0,Math.PI*2); g.fill();
+  g.fillStyle='rgba(255,140,0,0.55)'; g.beginPath(); g.arc(0,0,r*0.18,0,Math.PI*2); g.fill();
+  g.restore();
+  // ── 6 jagged electric spark arcs ──
+  g.save(); g.shadowColor='#FFEE00'; g.shadowBlur=r*0.50;
+  g.strokeStyle='rgba(255,235,60,0.82)'; g.lineWidth=Math.max(1,r*0.07); g.lineCap='round';
+  for(let i=0;i<6;i++){
+    const sa=(i/6)*Math.PI*2+t/200;
+    const s1=r*0.88, s2=r*1.14+Math.sin(t/80+i*1.3)*r*0.06, s3=r*1.48;
+    g.beginPath(); g.moveTo(Math.cos(sa)*s1,Math.sin(sa)*s1);
+    g.lineTo(Math.cos(sa+0.12)*s2,Math.sin(sa+0.12)*s2);
+    g.lineTo(Math.cos(sa)*s3,Math.sin(sa)*s3); g.stroke();
   }
   g.restore();
 }
 
-function _bodyGloom(g,r,t){
-  const wob=Math.sin(t/130)*r*0.06;
-  // Dark smoky wisps below body (drawn first)
-  for(let i=0;i<4;i++){
-    const wx=(i-1.5)*r*0.44+Math.sin(t/160+i*1.3)*r*0.12;
-    g.fillStyle=`rgba(20,0,50,${0.35-i*0.04})`;
-    g.beginPath(); g.ellipse(wx,r*0.96+i*r*0.08,r*(0.20-i*0.02),r*0.22,0,0,Math.PI*2); g.fill();
-  }
-  // Main ghost body — near-black with deep purple tint
-  g.fillStyle='#150228';
-  g.beginPath();
-  g.arc(0,-r*0.06,r*0.92,Math.PI,0,false);
-  // 5 wavy scallops at the bottom
-  const tails=5, bW=r*1.84;
-  for(let i=0;i<=tails;i++){
-    const fx=r*0.92-(bW/tails)*i;
-    const fy=r*0.80+(i%2===0?wob:-wob)+Math.sin(t/140+i*1.1)*r*0.08;
+function _bodyGloom(g,r,t,sw){
+  const wob=Math.sin(t/130)*r*0.08;
+  // ── Purple outer glow ──
+  g.save(); g.shadowColor='#7800C0'; g.shadowBlur=r*1.30;
+  g.fillStyle='rgba(70,0,150,0.10)'; g.beginPath(); g.arc(0,-r*0.10,r*1.24,0,Math.PI*2); g.fill(); g.restore();
+  // ── Animated ghost wisp hands on sides ──
+  const ghL=Math.sin(t/200)*r*0.08, ghR=Math.sin(t/200+Math.PI)*r*0.08;
+  g.fillStyle='rgba(28,0,56,0.92)';
+  g.beginPath(); g.ellipse(-r*1.06,r*0.22+ghL,r*0.26,r*0.32,0,0,Math.PI*2); g.fill();
+  g.beginPath(); g.ellipse( r*1.06,r*0.22+ghR,r*0.26,r*0.32,0,0,Math.PI*2); g.fill();
+  g.fillStyle='rgba(50,0,90,0.65)';
+  g.beginPath(); g.ellipse(-r*1.12,r*0.54+ghL,r*0.15,r*0.20,0,0,Math.PI*2); g.fill();
+  g.beginPath(); g.ellipse( r*1.12,r*0.54+ghR,r*0.15,r*0.20,0,0,Math.PI*2); g.fill();
+  // ── Main ghost body (large teardrop ghost shape) ──
+  g.fillStyle='#130220';
+  g.beginPath(); g.arc(0,-r*0.08,r*0.96,Math.PI,0,false);
+  const nt=5, bW=r*1.92;
+  for(let i=0;i<=nt;i++){
+    const fx=r*0.96-(bW/nt)*i;
+    const fy=r*0.78+(i%2===0?wob*1.3:-wob*1.1)+Math.sin(t/145+i*1.1)*r*0.10;
     g.lineTo(fx,fy);
   }
   g.closePath(); g.fill();
-  // Slightly lighter inner body (dark purple sheen)
-  g.fillStyle='#200540';
-  g.beginPath(); g.arc(0,-r*0.10,r*0.72,0,Math.PI*2); g.fill();
-  // Very faint top-left highlight
-  g.fillStyle='rgba(90,30,160,0.18)';
-  g.beginPath(); g.ellipse(-r*0.28,-r*0.36,r*0.34,r*0.22,0,0,Math.PI*2); g.fill();
-  // Tiny eerie glowing purple eyes (almost hidden in the dark)
-  g.save(); g.shadowColor='#CC44FF'; g.shadowBlur=r*0.90;
-  g.fillStyle='#CC44FF';
-  g.beginPath(); g.ellipse(-r*0.26,-r*0.18,r*0.12,r*0.17,0,0,Math.PI*2); g.fill();
-  g.beginPath(); g.ellipse( r*0.26,-r*0.18,r*0.12,r*0.17,0,0,Math.PI*2); g.fill();
+  // ── Inner purple-dark sheen ──
+  g.fillStyle='#200448'; g.beginPath(); g.arc(0,-r*0.14,r*0.76,0,Math.PI*2); g.fill();
+  // ── Faint top highlight ──
+  g.fillStyle='rgba(100,40,190,0.16)'; g.beginPath(); g.ellipse(-r*0.28,-r*0.42,r*0.36,r*0.22,0,0,Math.PI*2); g.fill();
+  // ── Tiny eerie glowing purple eyes deep inside ──
+  g.save(); g.shadowColor='#BB33FF'; g.shadowBlur=r*1.20;
+  g.fillStyle='#BB33FF';
+  g.beginPath(); g.ellipse(-r*0.27,-r*0.24,r*0.15,r*0.19,0,0,Math.PI*2); g.fill();
+  g.beginPath(); g.ellipse( r*0.27,-r*0.24,r*0.15,r*0.19,0,0,Math.PI*2); g.fill();
   g.restore();
-  g.fillStyle='#08001a'; g.beginPath(); g.arc(-r*0.26,-r*0.17,r*0.06,0,Math.PI*2); g.fill();
-  g.beginPath(); g.arc( r*0.26,-r*0.17,r*0.06,0,Math.PI*2); g.fill();
+  g.fillStyle='#06001a';
+  g.beginPath(); g.arc(-r*0.27,-r*0.23,r*0.07,0,Math.PI*2); g.fill();
+  g.beginPath(); g.arc( r*0.27,-r*0.23,r*0.07,0,Math.PI*2); g.fill();
+  g.fillStyle='rgba(240,200,255,0.50)';
+  g.beginPath(); g.arc(-r*0.23,-r*0.28,r*0.04,0,Math.PI*2); g.fill();
+  g.beginPath(); g.arc( r*0.31,-r*0.28,r*0.04,0,Math.PI*2); g.fill();
 }
 
-function _bodyByte(g,r,t){
-  const blink=Math.sin(t/900)>0.92;
-  // Yellow antenna (offset to one side, like reference)
-  g.strokeStyle='#B89000'; g.lineWidth=Math.max(1.5,r*0.10); g.lineCap='round';
-  g.beginPath(); g.moveTo(-r*0.10,-r*0.90); g.lineTo(-r*0.22,-r*1.52); g.stroke();
-  g.save(); g.shadowColor='#FFD700'; g.shadowBlur=r*0.65;
-  g.fillStyle='#FFD700'; g.beginPath(); g.arc(-r*0.22,-r*1.58,r*0.20,0,Math.PI*2); g.fill();
-  // Inner highlight on antenna ball
-  g.fillStyle='rgba(255,255,200,0.55)'; g.beginPath(); g.arc(-r*0.28,-r*1.64,r*0.09,0,Math.PI*2); g.fill();
+function _bodyByte(g,r,t,sw){
+  const sp=Math.sin(sw||0), blink=Math.sin(t/900)>0.90;
+  // ── Golden antenna (top-left, offset like reference) ──
+  g.strokeStyle='#8A7000'; g.lineWidth=Math.max(1.5,r*0.10); g.lineCap='round';
+  g.beginPath(); g.moveTo(-r*0.12,-r*0.92); g.lineTo(-r*0.28,-r*1.60); g.stroke();
+  g.save(); g.shadowColor='#FFD700'; g.shadowBlur=r*0.75;
+  g.fillStyle='#FFD700'; g.beginPath(); g.arc(-r*0.28,-r*1.66,r*0.24,0,Math.PI*2); g.fill();
+  g.fillStyle='rgba(255,255,200,0.60)'; g.beginPath(); g.arc(-r*0.34,-r*1.72,r*0.11,0,Math.PI*2); g.fill();
   g.restore();
-  // Robot ear/side panels
+  // ── Robot ear panels (prominent side features) ──
   g.fillStyle='#0A8FAF';
-  _rr(g,-r*1.14,-r*0.58,r*0.24,r*0.50,r*0.08); g.fill();
-  _rr(g, r*0.90,-r*0.58,r*0.24,r*0.50,r*0.08); g.fill();
-  g.fillStyle='#055870';
-  _rr(g,-r*1.10,-r*0.46,r*0.12,r*0.28,r*0.04); g.fill();
-  _rr(g, r*0.98,-r*0.46,r*0.12,r*0.28,r*0.04); g.fill();
-  // Small torso below head
-  g.fillStyle='#10A0BC';
-  _rr(g,-r*0.54,r*0.34,r*1.08,r*0.52,r*0.12); g.fill();
-  g.fillStyle='rgba(255,255,255,0.10)';
-  _rr(g,-r*0.48,r*0.38,r*0.52,r*0.20,r*0.06); g.fill();
-  // Main square/boxy head (teal)
-  g.fillStyle='#14C8DC'; _rr(g,-r*0.90,-r*0.90,r*1.80,r*1.26,r*0.30); g.fill();
-  g.fillStyle='rgba(255,255,255,0.17)'; _rr(g,-r*0.82,-r*0.86,r*0.96,r*0.40,r*0.16); g.fill();
-  // Dark screen face
-  g.fillStyle='#031420'; _rr(g,-r*0.68,-r*0.64,r*1.36,r*1.00,r*0.16); g.fill();
-  g.save(); g.shadowColor='#30E0FF'; g.shadowBlur=r*0.40;
-  g.strokeStyle='rgba(50,220,255,0.65)'; g.lineWidth=Math.max(1.5,r*0.08);
-  _rr(g,-r*0.68,-r*0.64,r*1.36,r*1.00,r*0.16); g.stroke(); g.restore();
-  // Cross/plus pixel eyes on the screen (like reference image)
-  g.save(); g.shadowColor='#40F0FF'; g.shadowBlur=r*0.45;
+  _rr(g,-r*1.20,-r*0.64,r*0.28,r*0.56,r*0.09); g.fill();
+  _rr(g, r*0.92,-r*0.64,r*0.28,r*0.56,r*0.09); g.fill();
+  g.fillStyle='#054A60';
+  _rr(g,-r*1.15,-r*0.52,r*0.14,r*0.32,r*0.04); g.fill();
+  _rr(g, r*1.01,-r*0.52,r*0.14,r*0.32,r*0.04); g.fill();
+  // ── Torso (below head) ──
+  g.fillStyle='#10A4BC'; _rr(g,-r*0.58,r*0.32,r*1.16,r*0.58,r*0.14); g.fill();
+  g.fillStyle='rgba(255,255,255,0.12)'; _rr(g,-r*0.50,r*0.36,r*0.56,r*0.24,r*0.06); g.fill();
+  g.fillStyle='rgba(5,50,70,0.55)'; _rr(g,r*0.14,r*0.38,r*0.30,r*0.38,r*0.06); g.fill();
+  // ── Main boxy square head (teal) ──
+  g.fillStyle='#14C8DC'; _rr(g,-r*0.94,-r*0.94,r*1.88,r*1.30,r*0.30); g.fill();
+  g.fillStyle='rgba(255,255,255,0.18)'; _rr(g,-r*0.86,-r*0.90,r*1.04,r*0.44,r*0.16); g.fill();
+  // ── Dark face screen ──
+  g.fillStyle='#030D18'; _rr(g,-r*0.72,-r*0.68,r*1.44,r*1.04,r*0.17); g.fill();
+  g.save(); g.shadowColor='#30E0FF'; g.shadowBlur=r*0.55;
+  g.strokeStyle='rgba(50,220,255,0.72)'; g.lineWidth=Math.max(1.5,r*0.09);
+  _rr(g,-r*0.72,-r*0.68,r*1.44,r*1.04,r*0.17); g.stroke(); g.restore();
+  // ── Cross/plus pixel eyes ──
+  g.save(); g.shadowColor='#40F0FF'; g.shadowBlur=r*0.55;
   g.fillStyle='#5CF5FF';
-  const ey=-r*0.26, esc=blink?0.15:1;
-  // Left eye — cross shape
-  _rr(g,-r*0.54,ey-r*0.14*esc,r*0.24,r*0.28*esc,r*0.03); g.fill();
-  _rr(g,-r*0.60,ey-r*0.06,r*0.36,r*0.12,r*0.03); g.fill();
-  // Right eye — cross shape
-  _rr(g, r*0.30,ey-r*0.14*esc,r*0.24,r*0.28*esc,r*0.03); g.fill();
-  _rr(g, r*0.24,ey-r*0.06,r*0.36,r*0.12,r*0.03); g.fill();
+  const ey=-r*0.28, esc=blink?0.10:1;
+  _rr(g,-r*0.58,ey-r*0.15*esc,r*0.26,r*0.30*esc,r*0.04); g.fill();
+  _rr(g,-r*0.64,ey-r*0.07,r*0.38,r*0.13,r*0.04); g.fill();
+  _rr(g, r*0.32,ey-r*0.15*esc,r*0.26,r*0.30*esc,r*0.04); g.fill();
+  _rr(g, r*0.26,ey-r*0.07,r*0.38,r*0.13,r*0.04); g.fill();
   g.restore();
-  // Pixel LED smile (3 dots / squares)
-  g.fillStyle='#40DDFF'; g.save(); g.shadowColor='#40DDFF'; g.shadowBlur=r*0.25;
-  const sdx=r*0.13, sy2=r*0.24;
-  _rr(g,-sdx*2.2,sy2,r*0.14,r*0.11,r*0.03); g.fill();
-  _rr(g,-sdx*0.5,sy2+r*0.08,r*0.14,r*0.11,r*0.03); g.fill();
-  _rr(g, sdx*1.2,sy2,r*0.14,r*0.11,r*0.03); g.fill();
+  // ── Pixel LED smile (3 squares) ──
+  g.save(); g.shadowColor='#30E0FF'; g.shadowBlur=r*0.30;
+  g.fillStyle='#40E0FF';
+  _rr(g,-r*0.42,r*0.22,r*0.18,r*0.14,r*0.04); g.fill();
+  _rr(g,-r*0.14,r*0.30,r*0.18,r*0.14,r*0.04); g.fill();
+  _rr(g, r*0.14,r*0.22,r*0.18,r*0.14,r*0.04); g.fill();
+  g.restore();
+  // ── Animated robot arms ──
+  const aL=sp*r*0.32, aR=-sp*r*0.32;
+  g.fillStyle='#0A8FAF';
+  g.save(); g.translate(-r*1.08,r*0.46+aL);
+  _rr(g,-r*0.18,-r*0.22,r*0.34,r*0.42,r*0.09); g.fill();
+  g.fillStyle='#054A60'; _rr(g,-r*0.11,-r*0.07,r*0.22,r*0.11,r*0.04); g.fill();
+  g.restore();
+  g.fillStyle='#0A8FAF';
+  g.save(); g.translate( r*1.08,r*0.46+aR);
+  _rr(g,-r*0.16,-r*0.22,r*0.34,r*0.42,r*0.09); g.fill();
+  g.fillStyle='#054A60'; _rr(g,-r*0.11,-r*0.07,r*0.22,r*0.11,r*0.04); g.fill();
   g.restore();
 }
 
-function _bodyNova(g,r,t){
-  // Back half of the Saturn-like ring (behind sphere)
-  g.save(); g.rotate(-0.36);
-  g.save(); g.shadowColor='#50C8FF'; g.shadowBlur=r*0.50;
-  g.strokeStyle='rgba(80,190,255,0.48)'; g.lineWidth=Math.max(3,r*0.22);
-  g.beginPath(); g.ellipse(0,0,r*1.60,r*0.52,0,Math.PI*0.04,Math.PI*1.04); g.stroke();
-  g.restore(); g.restore();
-  // Outer cosmic glow
+function _bodyNova(g,r,t,sw){
+  const rt=-0.34;
+  // ── Cosmic aura ──
   g.save();
-  const gr=g.createRadialGradient(0,0,r*0.25,0,0,r*1.20);
-  gr.addColorStop(0,'rgba(40,100,255,0.32)'); gr.addColorStop(1,'rgba(0,20,100,0)');
-  g.fillStyle=gr; g.beginPath(); g.arc(0,0,r*1.20,0,Math.PI*2); g.fill(); g.restore();
-  // Main dark-blue sphere (radial gradient for depth)
-  g.save(); g.shadowColor='#4499FF'; g.shadowBlur=r*0.80;
-  const sph=g.createRadialGradient(-r*0.28,-r*0.32,r*0.04,0,0,r*0.92);
-  sph.addColorStop(0,'#2855E8'); sph.addColorStop(0.55,'#1030A8'); sph.addColorStop(1,'#060830');
-  g.fillStyle=sph; g.beginPath(); g.arc(0,0,r*0.92,0,Math.PI*2); g.fill(); g.restore();
-  // Highlight on sphere
-  g.fillStyle='rgba(160,220,255,0.22)'; g.beginPath(); g.ellipse(-r*0.26,-r*0.32,r*0.38,r*0.22,0,0,Math.PI*2); g.fill();
-  // Front half of ring (over sphere — makes it look 3-D)
-  g.save(); g.rotate(-0.36);
-  g.save(); g.shadowColor='#90E8FF'; g.shadowBlur=r*0.80;
-  g.strokeStyle='rgba(160,240,255,0.96)'; g.lineWidth=Math.max(3,r*0.22);
-  g.beginPath(); g.ellipse(0,0,r*1.60,r*0.52,0,Math.PI*1.04,Math.PI*2.04); g.stroke();
+  const cg=g.createRadialGradient(0,0,r*0.20,0,0,r*1.38);
+  cg.addColorStop(0,'rgba(40,100,240,0.30)'); cg.addColorStop(0.6,'rgba(20,50,180,0.12)'); cg.addColorStop(1,'rgba(0,10,80,0)');
+  g.fillStyle=cg; g.beginPath(); g.arc(0,0,r*1.38,0,Math.PI*2); g.fill(); g.restore();
+  // ── Back half of Saturn ring (dim, behind sphere) ──
+  g.save(); g.rotate(rt);
+  g.save(); g.shadowColor='#50C0FF'; g.shadowBlur=r*0.40;
+  g.strokeStyle='rgba(80,180,255,0.44)'; g.lineWidth=Math.max(3,r*0.26);
+  g.beginPath(); g.ellipse(0,0,r*1.80,r*0.56,0,Math.PI*0.02,Math.PI*1.02); g.stroke();
   g.restore(); g.restore();
-  // Bright glowing cyan eyes
-  g.save(); g.shadowColor='#80F0FF'; g.shadowBlur=r*0.65;
+  // ── Main dark-blue sphere ──
+  g.save(); g.shadowColor='#3366FF'; g.shadowBlur=r*0.90;
+  const sph=g.createRadialGradient(-r*0.30,-r*0.34,r*0.04,0,0,r*0.92);
+  sph.addColorStop(0,'#2C60F0'); sph.addColorStop(0.5,'#1030B0'); sph.addColorStop(1,'#050828');
+  g.fillStyle=sph; g.beginPath(); g.arc(0,0,r*0.92,0,Math.PI*2); g.fill(); g.restore();
+  g.fillStyle='rgba(150,210,255,0.24)'; g.beginPath(); g.ellipse(-r*0.28,-r*0.34,r*0.40,r*0.24,0,0,Math.PI*2); g.fill();
+  // constellation dots
+  g.fillStyle='rgba(180,220,255,0.34)';
+  const cds=[0.20,-0.34,-0.30,-0.18,0.40,0.20,-0.10,0.36];
+  for(let ci=0;ci<cds.length;ci+=2){ g.beginPath(); g.arc(cds[ci]*r,cds[ci+1]*r,Math.max(1,r*0.046),0,Math.PI*2); g.fill(); }
+  // ── Front half of ring (BRIGHT — dominant feature, over sphere) ──
+  g.save(); g.rotate(rt);
+  g.save(); g.shadowColor='#90E8FF'; g.shadowBlur=r*1.10;
+  g.strokeStyle='rgba(150,235,255,0.97)'; g.lineWidth=Math.max(3,r*0.26);
+  g.beginPath(); g.ellipse(0,0,r*1.80,r*0.56,0,Math.PI*1.02,Math.PI*2.02); g.stroke();
+  g.restore(); g.restore();
+  // ── Glowing cyan dot eyes ──
+  g.save(); g.shadowColor='#80F0FF'; g.shadowBlur=r*0.72;
   g.fillStyle='#60EEFF';
-  g.beginPath(); g.arc(-r*0.28,-r*0.14,r*0.18,0,Math.PI*2); g.fill();
-  g.beginPath(); g.arc( r*0.28,-r*0.14,r*0.18,0,Math.PI*2); g.fill();
+  g.beginPath(); g.arc(-r*0.28,-r*0.16,r*0.20,0,Math.PI*2); g.fill();
+  g.beginPath(); g.arc( r*0.28,-r*0.16,r*0.20,0,Math.PI*2); g.fill();
   g.restore();
-  g.fillStyle='#fff'; g.beginPath(); g.arc(-r*0.28,-r*0.14,r*0.08,0,Math.PI*2); g.fill();
-  g.beginPath(); g.arc( r*0.28,-r*0.14,r*0.08,0,Math.PI*2); g.fill();
-  // Orbiting star sparkles
-  g.fillStyle='#C8F8FF';
+  g.fillStyle='#fff';
+  g.beginPath(); g.arc(-r*0.28,-r*0.16,r*0.09,0,Math.PI*2); g.fill();
+  g.beginPath(); g.arc( r*0.28,-r*0.16,r*0.09,0,Math.PI*2); g.fill();
+  // ── Orbiting sparkle stars ──
+  g.fillStyle='#D0F8FF';
   for(let i=0;i<5;i++){
-    const a=t/380+i*1.256; const sd=r*(0.052-i*0.003);
-    g.beginPath(); g.arc(Math.cos(a)*r*0.70,Math.sin(a)*r*0.40,Math.max(1,sd),0,Math.PI*2); g.fill();
+    const a=t/380+i*1.256;
+    g.beginPath(); g.arc(Math.cos(a)*r*0.74,Math.sin(a)*r*0.44,Math.max(1,r*(0.054-i*0.003)),0,Math.PI*2); g.fill();
+  }
+  g.fillStyle='rgba(200,240,255,0.56)';
+  for(let i=0;i<3;i++){
+    const a=-t/500+i*2.094;
+    g.beginPath(); g.arc(Math.cos(a)*r*0.54,Math.sin(a)*r*0.30,Math.max(0.8,r*0.040),0,Math.PI*2); g.fill();
   }
 }
 
-function _bodySpike(g,r,t){
-  // Dense green spikes all around (14 spikes, shorter/tighter than Zippy)
-  g.fillStyle='#158020';
-  g.beginPath();
-  const ns=14;
-  for(let i=0;i<ns;i++){
-    const a=(i/ns)*Math.PI*2-Math.PI/2;
-    const aM=a+Math.PI/ns;
-    const outer=r*1.50, inner=r*0.88;
-    const hw=Math.PI/ns*0.42;
-    g.lineTo(Math.cos(a-hw)*inner,Math.sin(a-hw)*inner);
-    g.lineTo(Math.cos(aM)*outer,Math.sin(aM)*outer);
-    g.lineTo(Math.cos(a+hw)*inner,Math.sin(a+hw)*inner);
+function _bodySpike(g,r,t,sw){
+  const sp=Math.sin(sw||0);
+  // ── Bright green body base ──
+  g.save(); g.shadowColor='#00A020'; g.shadowBlur=r*0.32;
+  g.fillStyle='#28D038'; g.beginPath(); g.arc(0,0,r*0.90,0,Math.PI*2); g.fill(); g.restore();
+  g.fillStyle='rgba(200,255,200,0.24)'; g.beginPath(); g.ellipse(-r*0.24,-r*0.30,r*0.40,r*0.22,0,0,Math.PI*2); g.fill();
+  // ── Dense spikes on TOP (mohawk crown — upper arc only) ──
+  g.fillStyle='#158020'; g.beginPath();
+  const nsp=10, sS=-Math.PI*0.86, sE=-Math.PI*0.14;
+  for(let i=0;i<nsp;i++){
+    const a=sS+(i/nsp)*(sE-sS);
+    const aM=a+(sE-sS)/nsp*0.55;
+    const out=r*(1.56+Math.sin(t/400+i*0.8)*0.04), inn=r*0.86, hw=(sE-sS)/nsp*0.40;
+    g.lineTo(Math.cos(a-hw)*inn,Math.sin(a-hw)*inn);
+    g.lineTo(Math.cos(aM)*out, Math.sin(aM)*out);
+    g.lineTo(Math.cos(a+hw)*inn,Math.sin(a+hw)*inn);
   }
   g.closePath(); g.fill();
-  // Main bright green round body
-  g.fillStyle='#28D038'; g.beginPath(); g.arc(0,0,r*0.90,0,Math.PI*2); g.fill();
-  // Highlight
-  g.fillStyle='rgba(200,255,200,0.22)'; g.beginPath(); g.ellipse(-r*0.24,-r*0.28,r*0.38,r*0.22,0,0,Math.PI*2); g.fill();
-  // Yellow headphones — arc over top + big pads on sides (key feature)
-  g.save(); g.shadowColor='#FFDD00'; g.shadowBlur=r*0.30;
-  g.strokeStyle='#E8C000'; g.lineWidth=Math.max(3,r*0.20); g.lineCap='round';
-  g.beginPath(); g.arc(0,-r*0.08,r*1.04,Math.PI*1.08,Math.PI*1.92); g.stroke();
-  g.restore();
-  g.fillStyle='#D0A800';
-  g.beginPath(); g.arc(-r*1.02,r*0.06,r*0.32,0,Math.PI*2); g.fill();
-  g.beginPath(); g.arc( r*1.02,r*0.06,r*0.32,0,Math.PI*2); g.fill();
-  g.fillStyle='#FFEE40';
-  g.beginPath(); g.arc(-r*1.02,r*0.06,r*0.18,0,Math.PI*2); g.fill();
-  g.beginPath(); g.arc( r*1.02,r*0.06,r*0.18,0,Math.PI*2); g.fill();
-  // Angry white eyes with dark pupils
+  g.fillStyle='#3AE040'; g.beginPath();
+  for(let i=0;i<nsp;i++){
+    const a=sS+(i/nsp)*(sE-sS);
+    const aM=a+(sE-sS)/nsp*0.55;
+    const out=r*1.26, inn=r*0.88, hw=(sE-sS)/nsp*0.26;
+    g.lineTo(Math.cos(a-hw)*inn,Math.sin(a-hw)*inn);
+    g.lineTo(Math.cos(aM)*out, Math.sin(aM)*out);
+    g.lineTo(Math.cos(a+hw)*inn,Math.sin(a+hw)*inn);
+  }
+  g.closePath(); g.fill();
+  // ── BIG yellow headphone arc ──
+  g.save(); g.shadowColor='#FFDD00'; g.shadowBlur=r*0.38;
+  g.strokeStyle='#D8B800'; g.lineWidth=Math.max(3,r*0.24); g.lineCap='round';
+  g.beginPath(); g.arc(0,-r*0.10,r*1.08,Math.PI*1.06,Math.PI*1.94); g.stroke(); g.restore();
+  // ── Large headphone ear pads ──
+  g.save(); g.shadowColor='#FFDD00'; g.shadowBlur=r*0.28;
+  g.fillStyle='#C8A000';
+  g.beginPath(); g.arc(-r*1.06,r*0.06,r*0.36,0,Math.PI*2); g.fill();
+  g.beginPath(); g.arc( r*1.06,r*0.06,r*0.36,0,Math.PI*2); g.fill(); g.restore();
+  g.fillStyle='#FFE830';
+  g.beginPath(); g.arc(-r*1.06,r*0.06,r*0.24,0,Math.PI*2); g.fill();
+  g.beginPath(); g.arc( r*1.06,r*0.06,r*0.24,0,Math.PI*2); g.fill();
+  g.fillStyle='#9A7800';
+  g.beginPath(); g.arc(-r*1.06,r*0.06,r*0.10,0,Math.PI*2); g.fill();
+  g.beginPath(); g.arc( r*1.06,r*0.06,r*0.10,0,Math.PI*2); g.fill();
+  // ── Angry white oval eyes ──
   g.fillStyle='#fff';
-  g.beginPath(); g.ellipse(-r*0.28,-r*0.14,r*0.24,r*0.28,0,0,Math.PI*2); g.fill();
-  g.beginPath(); g.ellipse( r*0.28,-r*0.14,r*0.24,r*0.28,0,0,Math.PI*2); g.fill();
-  g.fillStyle='#0a1a00'; g.beginPath(); g.arc(-r*0.28,-r*0.11,r*0.13,0,Math.PI*2); g.fill();
-  g.beginPath(); g.arc( r*0.28,-r*0.11,r*0.13,0,Math.PI*2); g.fill();
-  // Angry brows (dark green)
-  g.strokeStyle='#0a2a00'; g.lineWidth=Math.max(2,r*0.15); g.lineCap='round';
-  g.beginPath(); g.moveTo(-r*0.54,-r*0.48); g.lineTo(-r*0.06,-r*0.34); g.stroke();
-  g.beginPath(); g.moveTo( r*0.54,-r*0.48); g.lineTo( r*0.06,-r*0.34); g.stroke();
-  // Big toothy grin
-  g.fillStyle='#061206'; g.beginPath(); g.arc(0,r*0.28,r*0.36,0.05*Math.PI,0.95*Math.PI); g.fill();
+  g.beginPath(); g.ellipse(-r*0.28,-r*0.14,r*0.25,r*0.29,0,0,Math.PI*2); g.fill();
+  g.beginPath(); g.ellipse( r*0.28,-r*0.14,r*0.25,r*0.29,0,0,Math.PI*2); g.fill();
+  g.fillStyle='#0a1a00';
+  g.beginPath(); g.arc(-r*0.28,-r*0.10,r*0.15,0,Math.PI*2); g.fill();
+  g.beginPath(); g.arc( r*0.28,-r*0.10,r*0.15,0,Math.PI*2); g.fill();
+  g.fillStyle='rgba(255,255,255,0.55)';
+  g.beginPath(); g.arc(-r*0.22,-r*0.18,r*0.06,0,Math.PI*2); g.fill();
+  g.beginPath(); g.arc( r*0.34,-r*0.18,r*0.06,0,Math.PI*2); g.fill();
+  // ── Heavy dark brows ──
+  g.strokeStyle='#0a2200'; g.lineWidth=Math.max(2.5,r*0.18); g.lineCap='round';
+  g.beginPath(); g.moveTo(-r*0.58,-r*0.50); g.lineTo(-r*0.06,-r*0.36); g.stroke();
+  g.beginPath(); g.moveTo( r*0.58,-r*0.50); g.lineTo( r*0.06,-r*0.36); g.stroke();
+  // ── Wide toothy grin ──
+  g.fillStyle='#051205'; g.beginPath(); g.arc(0,r*0.28,r*0.39,0.06*Math.PI,0.94*Math.PI); g.fill();
   g.fillStyle='#EAFAEA';
-  const tw=r*0.17,th=r*0.11,ty=r*0.28;
-  for(let i=-1;i<=1;i++){_rr(g,i*tw*1.12-tw/2,ty,tw,th,r*0.02); g.fill();}
-  // Fist protrusions on sides
+  for(let i=-2;i<=2;i++){ _rr(g,i*r*0.16-r*0.08,r*0.27,r*0.15,r*0.12,r*0.02); g.fill(); }
+  // ── Animated green fist arms ──
+  const faL=sp*r*0.32, faR=-sp*r*0.32;
   g.fillStyle='#1C9030';
-  g.beginPath(); g.arc(-r*1.16,r*0.16,r*0.24,0,Math.PI*2); g.fill();
-  g.beginPath(); g.arc( r*1.16,r*0.16,r*0.24,0,Math.PI*2); g.fill();
-  g.fillStyle='#0a1a00'; g.beginPath(); g.arc(-r*1.16,r*0.17,r*0.12,0,Math.PI*2); g.fill();
-  g.beginPath(); g.arc( r*1.16,r*0.17,r*0.12,0,Math.PI*2); g.fill();
+  g.save(); g.translate(-r*1.20,r*0.18+faL);
+  g.beginPath(); g.arc(0,0,r*0.28,0,Math.PI*2); g.fill();
+  g.fillStyle='#0E5018'; g.beginPath(); g.arc(0,0,r*0.14,0,Math.PI*2); g.fill(); g.restore();
+  g.fillStyle='#1C9030';
+  g.save(); g.translate( r*1.20,r*0.18+faR);
+  g.beginPath(); g.arc(0,0,r*0.28,0,Math.PI*2); g.fill();
+  g.fillStyle='#0E5018'; g.beginPath(); g.arc(0,0,r*0.14,0,Math.PI*2); g.fill(); g.restore();
 }
 
-function _bodyRoxi(g,r,t){
-  // Tall pink bunny ears (drawn first so head covers their bases)
-  // Left ear
-  g.save(); g.rotate(-0.10);
-  g.fillStyle='#FF3D90';
-  _rr(g,-r*0.60,-r*2.18,r*0.42,r*1.30,r*0.21); g.fill();
-  g.fillStyle='#FFB0D8';
-  _rr(g,-r*0.52,-r*2.06,r*0.26,r*0.92,r*0.13); g.fill();
+function _bodyRoxi(g,r,t,sw){
+  const sp=Math.sin(sw||0), earWag=Math.sin(t/260)*0.04;
+  // ── Tall bunny ears (outer pink, inner light) ──
+  g.save(); g.rotate(-0.08+earWag);
+  g.fillStyle='#FF3D90'; _rr(g,-r*0.64,-r*2.26,r*0.46,r*1.40,r*0.23); g.fill();
+  g.fillStyle='#FFAAD6'; _rr(g,-r*0.56,-r*2.14,r*0.30,r*1.00,r*0.15); g.fill();
   g.restore();
-  // Right ear
-  g.save(); g.rotate(0.10);
-  g.fillStyle='#FF3D90';
-  _rr(g, r*0.18,-r*2.18,r*0.42,r*1.30,r*0.21); g.fill();
-  g.fillStyle='#FFB0D8';
-  _rr(g, r*0.26,-r*2.06,r*0.26,r*0.92,r*0.13); g.fill();
+  g.save(); g.rotate( 0.08-earWag);
+  g.fillStyle='#FF3D90'; _rr(g, r*0.18,-r*2.26,r*0.46,r*1.40,r*0.23); g.fill();
+  g.fillStyle='#FFAAD6'; _rr(g, r*0.26,-r*2.14,r*0.30,r*1.00,r*0.15); g.fill();
   g.restore();
-  // Main pink body
-  g.fillStyle='#FF5BA0'; g.beginPath(); g.arc(0,0,r*0.90,0,Math.PI*2); g.fill();
-  // Top highlight
-  g.fillStyle='rgba(255,230,245,0.42)'; g.beginPath(); g.ellipse(-r*0.24,-r*0.30,r*0.40,r*0.24,0,0,Math.PI*2); g.fill();
-  // Rosy cheek blushes
-  g.fillStyle='rgba(255,80,140,0.48)';
-  g.beginPath(); g.ellipse(-r*0.54,r*0.16,r*0.24,r*0.14,0,0,Math.PI*2); g.fill();
-  g.beginPath(); g.ellipse( r*0.54,r*0.16,r*0.24,r*0.14,0,0,Math.PI*2); g.fill();
-  // Big cute eyes (white + dark pupil + sparkle)
+  // ── Main pink body ──
+  g.save(); g.shadowColor='#FF4090'; g.shadowBlur=r*0.36;
+  g.fillStyle='#FF5BA0'; g.beginPath(); g.arc(0,0,r*0.90,0,Math.PI*2); g.fill(); g.restore();
+  g.fillStyle='rgba(255,235,248,0.46)'; g.beginPath(); g.ellipse(-r*0.22,-r*0.32,r*0.44,r*0.26,0,0,Math.PI*2); g.fill();
+  // ── Rosy cheek blushes ──
+  g.fillStyle='rgba(255,100,160,0.52)';
+  g.beginPath(); g.ellipse(-r*0.56,r*0.14,r*0.27,r*0.17,0,0,Math.PI*2); g.fill();
+  g.beginPath(); g.ellipse( r*0.56,r*0.14,r*0.27,r*0.17,0,0,Math.PI*2); g.fill();
+  // ── Big sparkle eyes ──
   g.fillStyle='#fff';
-  g.beginPath(); g.ellipse(-r*0.28,-r*0.16,r*0.26,r*0.30,0,0,Math.PI*2); g.fill();
-  g.beginPath(); g.ellipse( r*0.28,-r*0.16,r*0.26,r*0.30,0,0,Math.PI*2); g.fill();
-  g.fillStyle='#1a0020'; g.beginPath(); g.arc(-r*0.28,-r*0.14,r*0.16,0,Math.PI*2); g.fill();
-  g.beginPath(); g.arc( r*0.28,-r*0.14,r*0.16,0,Math.PI*2); g.fill();
-  // Eye sparkles
-  g.fillStyle='#fff'; g.beginPath(); g.arc(-r*0.22,-r*0.21,r*0.07,0,Math.PI*2); g.fill();
-  g.beginPath(); g.arc( r*0.34,-r*0.21,r*0.07,0,Math.PI*2); g.fill();
-  // Cute smile
-  g.strokeStyle='#A00060'; g.lineWidth=Math.max(1.5,r*0.10); g.lineCap='round';
-  g.beginPath(); g.arc(0,r*0.24,r*0.24,0.12*Math.PI,0.88*Math.PI); g.stroke();
-  // Small arm stubs on sides (cute pose)
+  g.beginPath(); g.ellipse(-r*0.28,-r*0.16,r*0.28,r*0.33,0,0,Math.PI*2); g.fill();
+  g.beginPath(); g.ellipse( r*0.28,-r*0.16,r*0.28,r*0.33,0,0,Math.PI*2); g.fill();
+  g.fillStyle='#1a0022';
+  g.beginPath(); g.arc(-r*0.28,-r*0.13,r*0.18,0,Math.PI*2); g.fill();
+  g.beginPath(); g.arc( r*0.28,-r*0.13,r*0.18,0,Math.PI*2); g.fill();
+  g.fillStyle='#fff';
+  g.beginPath(); g.arc(-r*0.22,-r*0.20,r*0.09,0,Math.PI*2); g.fill();
+  g.beginPath(); g.arc( r*0.35,-r*0.20,r*0.09,0,Math.PI*2); g.fill();
+  g.beginPath(); g.arc(-r*0.35,-r*0.09,r*0.04,0,Math.PI*2); g.fill();
+  g.beginPath(); g.arc( r*0.22,-r*0.09,r*0.04,0,Math.PI*2); g.fill();
+  // ── Button nose ──
+  g.fillStyle='rgba(210,60,130,0.72)'; g.beginPath(); g.ellipse(0,r*0.06,r*0.09,r*0.07,0,0,Math.PI*2); g.fill();
+  // ── Happy smile ──
+  g.strokeStyle='#A00060'; g.lineWidth=Math.max(1.5,r*0.12); g.lineCap='round';
+  g.beginPath(); g.arc(0,r*0.20,r*0.23,0.13*Math.PI,0.87*Math.PI); g.stroke();
+  // ── Animated arm stubs ──
+  const aL=sp*r*0.32, aR=-sp*r*0.32;
   g.fillStyle='#FF5BA0';
-  g.beginPath(); g.arc(-r*1.00,r*0.10,r*0.20,0,Math.PI*2); g.fill();
-  g.beginPath(); g.arc( r*1.00,r*0.10,r*0.20,0,Math.PI*2); g.fill();
+  g.save(); g.translate(-r*1.02,r*0.10+aL);
+  g.beginPath(); g.arc(0,0,r*0.24,0,Math.PI*2); g.fill();
+  g.fillStyle='rgba(255,200,230,0.42)'; g.beginPath(); g.arc(-r*0.06,-r*0.07,r*0.11,0,Math.PI*2); g.fill();
+  g.restore();
+  g.fillStyle='#FF5BA0';
+  g.save(); g.translate( r*1.02,r*0.10+aR);
+  g.beginPath(); g.arc(0,0,r*0.24,0,Math.PI*2); g.fill();
+  g.fillStyle='rgba(255,200,230,0.42)'; g.beginPath(); g.arc( r*0.06,-r*0.07,r*0.11,0,Math.PI*2); g.fill();
+  g.restore();
 }
 
 const CHAMPIONS=[
@@ -4154,7 +4226,7 @@ function drawChampion(g,p,px,py,r){
   g.shadowBlur=0;
   // flip horizontally to face movement direction, then draw the body upright
   g.save(); g.scale(p._face,1);
-  champ.body(g,r,t);
+  champ.body(g,r,t,moving?p._walk:0);
   g.restore(); // end flip
   g.restore(); // end translate
 }
@@ -4186,52 +4258,132 @@ function _drawKillFx(g,f,pr){
   const c=f.champ.trail, r=T*0.5, fade=1-pr;
   let dx=(f.tx-f.x), dy=(f.ty-f.y);
   if(dx>C/2)dx-=C; else if(dx<-C/2)dx+=C; if(dy>R/2)dy-=R; else if(dy<-R/2)dy+=R;
-  const ang=Math.atan2(dy,dx), reach=Math.min(Math.hypot(dx,dy),2.2)*T;
+  const ang=Math.atan2(dy,dx), dist=Math.min(Math.hypot(dx,dy),2.5)*T;
+  const k=f.champ.key;
   g.rotate(ang);
-  if(f.champ.key==='zippy'||f.champ.key==='byte'){
-    // beam / lightning strike toward victim
-    g.strokeStyle=_col(c,fade); g.lineWidth=Math.max(2,r*0.4*fade); g.lineCap='round'; g.shadowColor=_col(c,1); g.shadowBlur=14;
+
+  if(k==='zippy'){
+    // ── Electric UPPERCUT: jagged lightning fist flies toward victim ──
+    const prog=Math.min(pr*2.8,1.0), fistX=dist*prog;
+    g.save(); g.shadowColor='#FFE000'; g.shadowBlur=18;
+    g.strokeStyle=_col(c,fade*0.92); g.lineWidth=Math.max(2,r*0.36*fade); g.lineCap='round';
     g.beginPath(); g.moveTo(0,0);
-    const segs=5; for(let i=1;i<=segs;i++){ g.lineTo(reach*i/segs, (i<segs?(Math.sin(i*9+f.seed)*r*0.5):0)); }
+    for(let i=1;i<=6;i++){ g.lineTo(fistX*i/6,(i<6?Math.sin(i*8+f.seed)*r*0.46:0)); }
     g.stroke();
-  } else if(f.champ.key==='gloom'){
-    // crescent shadow slash
-    g.strokeStyle=_col(c,fade); g.lineWidth=Math.max(2,r*0.5*fade); g.lineCap='round';
-    g.beginPath(); g.arc(reach*0.5,0,r*1.1,(-0.6+pr)*Math.PI,(0.6+pr)*Math.PI); g.stroke();
-  } else if(f.champ.key==='nova'){
-    // shooting star streak + sparkles
-    g.strokeStyle=_col(c,fade); g.lineWidth=Math.max(2,r*0.35*fade); g.lineCap='round'; g.shadowColor='#bff'; g.shadowBlur=12;
-    g.beginPath(); g.moveTo(0,0); g.lineTo(reach*pr,0); g.stroke();
-    g.fillStyle=_col([220,245,255],fade); g.beginPath(); g.arc(reach*pr,0,r*0.3,0,Math.PI*2); g.fill();
-  } else { // spike / roxi — projectile burst that lands on victim
-    g.rotate(-ang);
-    const n=f.champ.key==='roxi'?6:8;
-    for(let i=0;i<n;i++){ const a=(i/n)*Math.PI*2; const rr=reach*pr*0.5+r*0.4;
-      g.fillStyle=_col(c,fade);
-      if(f.champ.key==='roxi'){ _heart(g,Math.cos(a)*rr,Math.sin(a)*rr,r*0.3*fade); }
-      else { g.beginPath(); g.arc(dx*T*pr+Math.cos(a)*r*0.8,dy*T*pr+Math.sin(a)*r*0.8,r*0.2*fade,0,Math.PI*2); g.fill(); }
+    if(prog>0.35){ g.fillStyle=_col([255,220,0],fade*0.88); g.beginPath(); g.arc(fistX,0,r*(0.28+fade*0.38),0,Math.PI*2); g.fill(); }
+    if(prog>0.68){
+      g.strokeStyle=_col([255,240,80],fade*0.80); g.lineWidth=Math.max(1,r*0.14);
+      for(let i=0;i<8;i++){ const sa=(i/8)*Math.PI*2; g.beginPath(); g.moveTo(dist,0); g.lineTo(dist+Math.cos(sa)*r*0.7*fade,Math.sin(sa)*r*0.7*fade); g.stroke(); }
     }
+    g.restore();
+
+  } else if(k==='gloom'){
+    // ── Dark shadow CLAW: tentacle curves to victim then claws open ──
+    g.save(); g.shadowColor='#8800CC'; g.shadowBlur=14;
+    const tx=dist*Math.min(pr*2.2,1);
+    g.strokeStyle=_col(c,fade*0.92); g.lineWidth=Math.max(2,r*0.44*fade); g.lineCap='round';
+    g.beginPath(); g.moveTo(0,0); g.bezierCurveTo(tx*0.3,-r*0.9,tx*0.7,r*0.9,tx,0); g.stroke();
+    if(pr>0.42){ g.strokeStyle=_col([180,100,255],fade*0.82); g.lineWidth=Math.max(1.5,r*0.20);
+      for(let ci=0;ci<3;ci++){ const ca=(ci-1)*0.38; g.beginPath(); g.moveTo(tx,0); g.lineTo(tx+Math.cos(ca)*r*0.56*fade,Math.sin(ca)*r*0.56*fade); g.stroke(); } }
+    g.restore();
+
+  } else if(k==='byte'){
+    // ── Digital LASER BEAM: cyan beam fires to victim, pixel impact ──
+    g.save(); g.shadowColor='#40F0FF'; g.shadowBlur=20;
+    const bx=dist*Math.min(pr*3.2,1);
+    g.strokeStyle=_col([80,240,255],fade*0.96); g.lineWidth=Math.max(2,r*0.28*fade); g.lineCap='round';
+    g.beginPath(); g.moveTo(0,0); g.lineTo(bx,0); g.stroke();
+    g.strokeStyle=_col([40,200,255],fade*0.40); g.lineWidth=Math.max(5,r*0.60*fade);
+    g.beginPath(); g.moveTo(0,0); g.lineTo(bx,0); g.stroke();
+    if(pr>0.28){ g.fillStyle=_col(c,fade*0.82);
+      for(let pi=0;pi<6;pi++){ const pa=(pi/6)*Math.PI*2, pd=r*0.32*fade; _rr(g,bx+Math.cos(pa)*pd-r*0.09,Math.sin(pa)*pd-r*0.09,r*0.18,r*0.18,r*0.03); g.fill(); } }
+    g.restore();
+
+  } else if(k==='nova'){
+    // ── Orbital RING SLAM: ring expands outward from attacker to victim ──
+    g.rotate(-ang);
+    g.save(); g.shadowColor='#80E8FF'; g.shadowBlur=16;
+    const rr=r*(0.38+pr*1.90);
+    g.strokeStyle=_col([140,230,255],fade*0.92); g.lineWidth=Math.max(2,r*0.24*fade);
+    g.beginPath(); g.ellipse(0,0,rr,rr*0.34,0,0,Math.PI*2); g.stroke();
+    g.fillStyle=_col([200,245,255],fade*0.78);
+    for(let si=0;si<8;si++){ const sa=(si/8)*Math.PI*2, sr=r*(0.50+pr*1.70); g.beginPath(); g.arc(Math.cos(sa)*sr,Math.sin(sa)*sr*0.50,Math.max(1,r*0.055*fade),0,Math.PI*2); g.fill(); }
+    g.restore();
+
+  } else if(k==='spike'){
+    // ── Spiky TACKLE: green spiked ball rolls to victim ──
+    const bx=dist*Math.min(pr*2.2,1);
+    g.save(); g.shadowColor='#40D050'; g.shadowBlur=12;
+    g.save(); g.translate(bx,0); g.rotate(pr*10);
+    g.fillStyle=_col([30,140,40],fade*0.92); g.beginPath();
+    const bns=8, br=r*0.44*fade;
+    for(let i=0;i<bns;i++){ const a=(i/bns)*Math.PI*2, aM=a+Math.PI/bns, out=br*1.65, inn=br*0.80, hw=Math.PI/bns*0.36;
+      g.lineTo(Math.cos(a-hw)*inn,Math.sin(a-hw)*inn); g.lineTo(Math.cos(aM)*out,Math.sin(aM)*out); g.lineTo(Math.cos(a+hw)*inn,Math.sin(a+hw)*inn); }
+    g.closePath(); g.fill();
+    g.fillStyle=_col([60,220,80],fade*0.82); g.beginPath(); g.arc(0,0,br*0.80,0,Math.PI*2); g.fill();
+    g.restore();
+    if(pr>0.50){ g.strokeStyle=_col(c,fade*0.72); g.lineWidth=Math.max(1.5,r*0.22*fade);
+      for(let si=0;si<6;si++){ const sa=(si/6)*Math.PI*2+f.seed; g.beginPath(); g.moveTo(dist,0); g.lineTo(dist+Math.cos(sa)*r*0.55*fade,Math.sin(sa)*r*0.55*fade); g.stroke(); } }
+    g.restore();
+
+  } else { // roxi — HEART BARRAGE
+    g.rotate(-ang);
+    g.fillStyle=_col(c,fade*0.92);
+    for(let i=0;i<7;i++){ const ha=(i/7)*Math.PI*2, hd=r*(0.28+pr*1.60)+f.seed*0.08; _heart(g,Math.cos(ha)*hd,Math.sin(ha)*hd,r*0.28*fade); }
+    _heart(g,0,0,r*0.36*fade);
   }
 }
 function _heart(g,x,y,s){ if(s<=0)return; g.beginPath(); g.moveTo(x,y+s*0.3); g.bezierCurveTo(x+s,y-s*0.6,x+s*1.3,y+s*0.4,x,y+s); g.bezierCurveTo(x-s*1.3,y+s*0.4,x-s,y-s*0.6,x,y+s*0.3); g.fill(); }
 function _drawDeathFx(g,f,pr){
-  const c=f.champ.trail, r=T*0.5, fade=1-pr;
-  const k=f.champ.key;
-  if(k==='gloom'){ // dissipate upward
-    g.fillStyle=_col(c,fade*0.8);
-    for(let i=0;i<6;i++){ const a=f.seed+i; g.beginPath(); g.arc(Math.cos(a)*r*0.5,-pr*r*2.2+Math.sin(a)*r*0.4,r*0.45*fade,0,Math.PI*2); g.fill(); }
-  } else if(k==='byte'){ // glitch scatter + dark screen
-    for(let i=0;i<10;i++){ const a=f.seed+i*1.7, d=pr*r*2.4; g.fillStyle=_col(c,fade); _rr(g,Math.cos(a)*d-r*0.15,Math.sin(a)*d-r*0.15,r*0.3,r*0.3,r*0.05); g.fill(); }
-  } else if(k==='nova'){ // supernova flash → collapse
-    const flash=pr<0.3?1:fade; g.fillStyle=_col([220,245,255],flash*0.9); g.beginPath(); g.arc(0,0,r*(0.4+pr*2.4),0,Math.PI*2); g.fill();
-    g.strokeStyle=_col(c,fade); g.lineWidth=Math.max(1.5,r*0.25*fade); g.beginPath(); g.arc(0,0,r*(0.5+pr*2.6),0,Math.PI*2); g.stroke();
-  } else if(k==='roxi'){ // heart pop
-    g.fillStyle=_col(c,fade);
-    for(let i=0;i<7;i++){ const a=(i/7)*Math.PI*2; const d=pr*r*2.2; _heart(g,Math.cos(a)*d,Math.sin(a)*d-pr*r,r*0.34*fade); }
-  } else { // zippy / spike — shard / spark explosion
-    g.strokeStyle=_col(c,fade); g.lineWidth=Math.max(1.5,r*0.22*fade); g.lineCap='round'; g.shadowColor=_col(c,1); g.shadowBlur=10;
-    for(let i=0;i<10;i++){ const a=(i/10)*Math.PI*2+f.seed; const d0=r*0.3, d1=r*(0.6+pr*2.2);
+  const c=f.champ.trail, r=T*0.5, fade=1-pr, k=f.champ.key;
+
+  if(k==='gloom'){
+    // Dissolve upward into purple smoke wisps
+    g.save(); g.shadowColor='#8800CC'; g.shadowBlur=14;
+    for(let i=0;i<8;i++){ const a=f.seed+i*0.80;
+      g.fillStyle=_col(c,fade*0.78-i*0.06);
+      g.beginPath(); g.arc(Math.cos(a)*r*0.56,-pr*r*2.60+Math.sin(a)*r*0.46,r*0.42*fade,0,Math.PI*2); g.fill(); }
+    g.restore();
+
+  } else if(k==='byte'){
+    // Glitch scatter — pixel squares + static lines
+    for(let i=0;i<12;i++){ const a=f.seed+i*1.50, d=pr*r*2.70;
+      g.fillStyle=_col(c,fade*0.86); _rr(g,Math.cos(a)*d-r*0.13,Math.sin(a)*d-r*0.13,r*0.26,r*0.26,r*0.04); g.fill(); }
+    g.strokeStyle=_col([80,240,255],fade*0.48); g.lineWidth=Math.max(1,r*0.10);
+    for(let li=0;li<4;li++){ const ly=(li-1.5)*r*0.40; g.beginPath(); g.moveTo(-r*(0.8+pr*0.9),ly); g.lineTo(r*(0.8+pr*0.9),ly); g.stroke(); }
+
+  } else if(k==='nova'){
+    // Supernova: white flash then ring-collapse
+    const sz=pr<0.25?1:fade;
+    g.save(); g.shadowColor='#80EEFF'; g.shadowBlur=26*sz;
+    g.fillStyle=_col([220,245,255],sz*0.92); g.beginPath(); g.arc(0,0,r*(0.50+pr*2.70),0,Math.PI*2); g.fill();
+    g.strokeStyle=_col(c,fade*0.86); g.lineWidth=Math.max(2,r*0.30*fade);
+    g.beginPath(); g.arc(0,0,r*(0.60+pr*2.90),0,Math.PI*2); g.stroke();
+    g.strokeStyle=_col([180,230,255],fade*0.62); g.lineWidth=Math.max(1,r*0.16*fade);
+    for(let ri=0;ri<10;ri++){ const ra=(ri/10)*Math.PI*2; g.beginPath(); g.moveTo(Math.cos(ra)*r*0.30,Math.sin(ra)*r*0.30); g.lineTo(Math.cos(ra)*r*(0.50+pr*2.30),Math.sin(ra)*r*(0.50+pr*2.30)); g.stroke(); }
+    g.restore();
+
+  } else if(k==='roxi'){
+    // Heart explosion + sparkles
+    g.fillStyle=_col(c,fade*0.92);
+    for(let i=0;i<8;i++){ const a=(i/8)*Math.PI*2, d=pr*r*2.30; _heart(g,Math.cos(a)*d,Math.sin(a)*d-pr*r*0.52,r*0.34*fade); }
+    g.fillStyle=_col([255,200,230],fade*0.72);
+    for(let si=0;si<12;si++){ const sa=(si/12)*Math.PI*2, sd=pr*r*2.90; g.beginPath(); g.arc(Math.cos(sa)*sd,Math.sin(sa)*sd,Math.max(1,r*0.046*fade),0,Math.PI*2); g.fill(); }
+
+  } else {
+    // zippy / spike — explosive shard burst
+    const isZ=k==='zippy';
+    g.save(); g.shadowColor=_col(c,1); g.shadowBlur=14;
+    g.strokeStyle=_col(c,fade*0.92); g.lineWidth=Math.max(1.5,r*0.26*fade); g.lineCap='round';
+    const shards=isZ?12:10;
+    for(let i=0;i<shards;i++){ const a=(i/shards)*Math.PI*2+f.seed, d0=r*0.28, d1=r*(0.54+pr*2.50);
       g.beginPath(); g.moveTo(Math.cos(a)*d0,Math.sin(a)*d0); g.lineTo(Math.cos(a)*d1,Math.sin(a)*d1); g.stroke(); }
+    if(isZ){
+      g.strokeStyle=_col([255,240,60],fade*0.68); g.lineWidth=Math.max(1,r*0.12*fade);
+      for(let i=0;i<6;i++){ const a=(i/6)*Math.PI*2+f.seed+0.50, d=r*(0.30+pr*1.90);
+        g.beginPath(); g.moveTo(Math.cos(a)*r*0.28,Math.sin(a)*r*0.28); g.lineTo(Math.cos(a+0.26)*d,Math.sin(a+0.26)*d); g.stroke(); }
+    }
+    g.restore();
   }
 }
 
