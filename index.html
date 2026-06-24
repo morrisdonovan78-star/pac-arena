@@ -156,6 +156,7 @@ html,body{background-image:linear-gradient(rgba(4,4,12,0.18),rgba(4,4,12,0.18)),
     url('/arena-bg.webp');
   background-size:cover;background-position:center top;background-attachment:fixed;
 }
+#scr-home.on{justify-content:flex-start;padding-top:200px;}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:2rem 1.75rem;width:100%;max-width:440px;}
 .logo{font-family:'Orbitron',sans-serif;font-weight:900;font-size:clamp(32px,7vw,64px);letter-spacing:6px;animation:glow 2.2s ease-in-out infinite;line-height:1;}
 .logo .pac{color:#FF8C00;text-shadow:0 0 20px rgba(255,140,0,.95),0 0 50px rgba(255,140,0,.6),0 0 90px rgba(255,140,0,.3);}
@@ -3146,6 +3147,7 @@ function _gpBack(scrId){
   }catch(_){}
 }
 function _menuGpRaf(){
+  requestAnimationFrame(_menuGpRaf);
   try{
     const rjo=document.getElementById('rejoin-overlay');
     const rejoinUp=rjo&&rjo.style.display!=='none';
@@ -3159,7 +3161,7 @@ function _menuGpRaf(){
       const pads=navigator.getGamepads?navigator.getGamepads():[];
       let gp=null;
       for(let i=0;i<pads.length;i++) if(pads[i]&&pads[i].connected){gp=pads[i];break;}
-      if(!gp){_mClearFocus();_mPrevScr=null;}
+      if(!gp){_mClearFocus();_mPrevScr=null;_mPrev={};}
       else{
         const scrId=_activeScr();
         if(!scrId){_mClearFocus();_mPrevScr=null;}
@@ -3278,7 +3280,6 @@ function _menuGpRaf(){
       }
     }
   }catch(e){}
-  requestAnimationFrame(_menuGpRaf);
 }
 requestAnimationFrame(_menuGpRaf);
 // ── Gamepad in-game controls ─────────────────────────────────────────────────
