@@ -1428,19 +1428,23 @@ function saveKillFood(){
   if(!pkRoomId||!SG)return;
   const kf=SG.food.filter(f=>f.k); // save ALL kill food regardless of SOL value (w=0 is still gold/valid)
   if(!kf.length){localStorage.removeItem('kf:'+pkRoomId);return;}
-  try{localStorage.setItem('kf:'+pkRoomId,JSON.stringify({ts:Date.now(),food:kf.map(f=>({x:Math.round(f.x),y:Math.round(f.y),w:f.w||0,s:Math.round(f.size)}))}))}catch(e){console.warn('[saveKillFood]',e);}
+  try{
+    localStorage.setItem('kf:'+pkRoomId,JSON.stringify({ts:Date.now(),food:kf.map(f=>({x:Math.round(f.x),y:Math.round(f.y),w:f.w||0,s:Math.round(f.size)}))}));
+    console.log('[saveKillFood] saved',kf.length,'items to','kf:'+pkRoomId);
+    addToast('💾 Saved '+kf.length+' gold pellets','#FFD700');
+  }catch(e){console.warn('[saveKillFood]',e);}
 }
 function loadKillFood(){
   if(!pkRoomId||!SG)return;
   try{
     const raw=localStorage.getItem('kf:'+pkRoomId);
-    if(!raw)return;
+    if(!raw){console.log('[loadKillFood] nothing saved for','kf:'+pkRoomId);return;}
     const {ts,food}=JSON.parse(raw);
-    if(Date.now()-ts>_KF_TTL){localStorage.removeItem('kf:'+pkRoomId);return;}
+    if(Date.now()-ts>_KF_TTL){localStorage.removeItem('kf:'+pkRoomId);console.log('[loadKillFood] expired');return;}
     food.forEach(f=>{SG.food.push({x:f.x,y:f.y,ci:3,size:f.s||10,k:1,w:f.w});});
-    if(food.length){addToast('⚠ Unclaimed SOL pellets from last session!','#FFD700');_forceFoodSend=true;}
+    if(food.length){addToast('⚠ Loaded '+food.length+' unclaimed SOL pellets!','#FFD700');_forceFoodSend=true;}
     localStorage.removeItem('kf:'+pkRoomId); // clear — re-saved on next leave if still uneaten
-  }catch(e){}
+  }catch(e){console.warn('[loadKillFood]',e);}
 }
 
 function initSnakeGame(players){
@@ -1814,6 +1818,9 @@ function spawnFoodFromSnake(snake){
     SG.food.push({x:p.x,y:p.y,ci:3,size:9+Math.random()*5,k:1,w:w});
   });
   _forceFoodSend=true; // push kill food to guests on the very next ss packet
+  const kCount=SG.food.filter(f=>f.k).length;
+  console.log('[spawnFoodFromSnake]',bPts.length,'pellets spawned, total kill food on map:',kCount);
+  if(snake.id===myPid)addToast('💀 '+bPts.length+' gold pellets dropped!','#FFD700');
 }
 
 // ── Food upkeep ──────────────────────────────────────────────────────────────
