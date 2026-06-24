@@ -135,7 +135,20 @@ function getOrCreateRoom(lobbyId) {
 }
 
 let _si = 0;
-function nextSpawn() { const s = SPAWNS[_si++ % SPAWNS.length]; return { x: s.x, y: s.y }; }
+function nextSpawn(room) {
+  const occupied = room ? [...room.players.values()].filter(p => p.alive) : [];
+  if (occupied.length === 0) return SPAWNS[_si++ % SPAWNS.length];
+  let best = SPAWNS[0], bestDist = -1;
+  for (const s of SPAWNS) {
+    let minD = Infinity;
+    for (const p of occupied) {
+      const d = Math.hypot(s.x - p.x, s.y - p.y);
+      if (d < minD) minD = d;
+    }
+    if (minD > bestDist) { bestDist = minD; best = s; }
+  }
+  return { x: best.x, y: best.y };
+}
 
 // ── Game logic (authoritative — runs on server) ───────────────────────────────
 function movePlayer(p, room) {
@@ -196,9 +209,12 @@ function eatCell(p, room) {
 
 function checkCollisions(room, io) {
   const alive = [...room.players.values()].filter(p => p.alive);
+  const now = Date.now();
   for (let i = 0; i < alive.length; i++) {
     for (let j = i + 1; j < alive.length; j++) {
       const a = alive[i], b = alive[j];
+      // Skip kill if either player has active spawn protection
+      if ((a.spawnProt && now < a.spawnProt) || (b.spawnProt && now < b.spawnProt)) continue;
       const same = a.x === b.x && a.y === b.y;
       const crossed = a.x === (b.prevX ?? b.x) && a.y === (b.prevY ?? b.y) &&
                       b.x === (a.prevX ?? a.x) && b.y === (a.prevY ?? a.y);
@@ -241,7 +257,8 @@ function tick(room, io) {
     room.players.forEach((p, id) => {
       const hN = (p.held?.includes('cherry') ? 1 : 0) | (p.held?.includes('pepper') ? 2 : 0);
       ps.push([id, p.x, p.y, p.dx, p.dy, p.sc, p.alive ? 1 : 0,
-               p.pow ? 1 : 0, p.pt || 0, p.pep ? 1 : 0, p.pet || 0, hN]);
+               p.pow ? 1 : 0, p.pt || 0, p.pep ? 1 : 0, p.pet || 0, hN,
+               p.spawnProt && Date.now() < p.spawnProt ? 1 : 0]);
     });
     const msg = { ps };
     if (room.pkSent % 40 === 0) msg.maze = room.maze;
@@ -305,7 +322,7 @@ io.on('connection', socket => {
     existing.socketId = socket.id;
     player = existing;
   } else {
-    const spawn = nextSpawn();
+    const spawn = nextSpawn(room);
     player = {
       id: pid, socketId: socket.id,
       name: name || 'Player', color: color || '#FFD700',
@@ -315,7 +332,8 @@ io.on('connection', socket => {
       sc: 0, alive: true, mc: 0,
       pow: false, pt: 0, pep: false, pet: 0,
       held: ['cherry', 'pepper'], sol: wagerSol || 0,
-      num: room.players.size
+      num: room.players.size,
+      spawnProt: Date.now() + 2500
     };
     room.players.set(pid, player);
   }
@@ -369,8 +387,9 @@ io.on('connection', socket => {
     if (isPaid && GAME_SECRET && !validateGameToken(rt, lobbyId, pid)) return;
     const p = room.players.get(pid);
     if (!p) return;
-    const s = nextSpawn();
+    const s = nextSpawn(room);
     p.x = s.x; p.y = s.y; p.dx = 0; p.dy = 0; p.alive = true; p.sc = 0;
+    p.spawnProt = Date.now() + 2500;
     p.pow = false; p.pt = 0; p.pep = false; p.pet = 0; p.held = ['cherry', 'pepper'];
     // Include spawn coords so clients snap immediately instead of waiting for the next state tick
     io.to(lobbyId).emit('rejoin', { id: pid, x: s.x, y: s.y });
