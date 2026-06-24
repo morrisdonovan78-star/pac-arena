@@ -1426,9 +1426,9 @@ function foodColor(f){return f.k?KILL_FOOD_COLOR:(FOOD_COLORS[f.ci]||FOOD_COLORS
 const _KF_TTL=3600000; // 1 hour expiry
 function saveKillFood(){
   if(!pkRoomId||!SG)return;
-  const kf=SG.food.filter(f=>f.k&&f.w>0);
+  const kf=SG.food.filter(f=>f.k); // save ALL kill food regardless of SOL value (w=0 is still gold/valid)
   if(!kf.length){localStorage.removeItem('kf:'+pkRoomId);return;}
-  try{localStorage.setItem('kf:'+pkRoomId,JSON.stringify({ts:Date.now(),food:kf.map(f=>({x:Math.round(f.x),y:Math.round(f.y),w:f.w,s:Math.round(f.size)}))}))}catch(e){}
+  try{localStorage.setItem('kf:'+pkRoomId,JSON.stringify({ts:Date.now(),food:kf.map(f=>({x:Math.round(f.x),y:Math.round(f.y),w:f.w||0,s:Math.round(f.size)}))}))}catch(e){console.warn('[saveKillFood]',e);}
 }
 function loadKillFood(){
   if(!pkRoomId||!SG)return;
