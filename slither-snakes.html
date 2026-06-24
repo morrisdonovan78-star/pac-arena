@@ -729,28 +729,42 @@ function wdPreview(){
     el.textContent='≈ '+sol+' SOL'+(reqLamps>balLamps?' ⚠ exceeds balance':'');
   } else { el.textContent=''; }
 }
+const RENT_MIN_LAMPS=890880; // lamports — Solana rent-exempt minimum; balance must be 0 or >= this
 async function doWithdraw(){
   const toAddr=document.getElementById('wd-addr').value.trim();
   const amtUsd=parseFloat(document.getElementById('wd-amt').value);
   if(!toAddr||isNaN(amtUsd)||amtUsd<=0){addToast('Enter a valid address and amount','#f55');return;}
   if(!_keypair){addToast('Wallet not loaded','#f55');return;}
   try{
-    // Refresh price + balance right before sending
-    await Promise.all([fetchPrice(),refreshBal()]).catch(()=>{});
+    await fetchPrice().catch(()=>{});
     if(!ST.solPrice||ST.solPrice<=0){addToast('SOL price unavailable — try again','#f55');return;}
-    const balLamps=Math.round(ST.balance*1e9);
-    let lamps=Math.floor(amtUsd/ST.solPrice*1e9);
-    // If amount+fee would meet or exceed balance, drain to exactly 0 (send balance minus fee)
-    if(lamps+WD_TX_FEE>=balLamps) lamps=balLamps-WD_TX_FEE;
-    if(lamps<=0){addToast('Insufficient balance after network fee (~$'+(WD_TX_FEE/1e9*ST.solPrice).toFixed(4)+')','#f55');return;}
 
-    // getLatestBlockhash via HTTP proxy (no WebSocket — confirmTransaction hangs on Vercel endpoint)
-    const bhRes=await fetch('/api/rpc',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({jsonrpc:'2.0',id:1,method:'getLatestBlockhash',params:[{commitment:'confirmed'}]})});
-    const bhData=await bhRes.json();
-    if(bhData.error)throw new Error(bhData.error.message);
-    const blockhash=bhData.result.value.blockhash;
-    const lastValidBlockHeight=bhData.result.value.lastValidBlockHeight;
+    // Batch: fetch live on-chain balance + latest blockhash in one HTTP call
+    // Using the live balance (not ST.balance) avoids the stale-float rounding that triggers
+    // the rent-exempt error when we think we're draining to 0 but actually leave 1 lamport.
+    const batchRes=await fetch('/api/rpc',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify([
+        {jsonrpc:'2.0',id:1,method:'getBalance',params:[ST.address,{commitment:'confirmed'}]},
+        {jsonrpc:'2.0',id:2,method:'getLatestBlockhash',params:[{commitment:'confirmed'}]}
+      ])});
+    const batchData=await batchRes.json();
+    const balEntry=Array.isArray(batchData)?batchData.find(x=>x.id===1):null;
+    const bhEntry =Array.isArray(batchData)?batchData.find(x=>x.id===2):null;
+    if(balEntry?.error)throw new Error(balEntry.error.message);
+    if(bhEntry?.error) throw new Error(bhEntry.error.message);
+    const actualLamps=balEntry?.result?.value??0;
+    const blockhash=bhEntry?.result?.value?.blockhash??bhEntry?.result?.blockhash;
+    const lastValidBlockHeight=bhEntry?.result?.value?.lastValidBlockHeight??0;
+    if(!blockhash)throw new Error('Could not fetch blockhash');
+
+    let lamps=Math.floor(amtUsd/ST.solPrice*1e9);
+    // Drain-to-zero: if requested+fee meets or exceeds balance, send everything minus fee
+    if(lamps+WD_TX_FEE>=actualLamps) lamps=actualLamps-WD_TX_FEE;
+    // Rent-exempt safety: sender must end up at exactly 0 or >= 890,880 lamports.
+    // If remaining would fall in the forbidden zone (1–890,879), drain to 0 instead.
+    const remaining=actualLamps-lamps-WD_TX_FEE;
+    if(remaining>0&&remaining<RENT_MIN_LAMPS) lamps=actualLamps-WD_TX_FEE;
+    if(lamps<=0){addToast('Insufficient balance after network fee','#f55');return;}
 
     const from=new solanaWeb3.PublicKey(ST.address);
     const to=new solanaWeb3.PublicKey(toAddr);
