@@ -1792,6 +1792,8 @@ async function pkConnect(roomId, gameToken){
       p.x=data.x; p.y=data.y; p.dx=0; p.dy=0; p.nx=0; p.ny=0;
       p.prevX=data.x; p.prevY=data.y; p.renderX=data.x; p.renderY=data.y;
       p.alive=true; p.sc=0; p._waitSnap=false;
+      // Reset dedup so next keypress always fires even if same direction as before death
+      if(data.id===myPid){ _lastSentDx=null; _lastSentDy=null; _localFirstSyncDone=false; }
     });
 
     document.getElementById('mm-sub').textContent='Looking for players…';
@@ -2987,6 +2989,7 @@ function initGame(allPlayers){
     powRespawnQ:[]  // [{type:3|4, at:frameTick}]
   };
   _mazeDirty=true; _mazeOC=null; _lastSbSig=''; // invalidate caches on new game
+  _lastSentDx=null; _lastSentDy=null; // reset dir dedup so first keypress always sends
   allPlayers.forEach(p=>G.players.set(p.id, mkP(p)));
   // Only place initial powerups when host is starting a fresh game with no pre-existing maze
   if(isHost&&!hadRosterMaze){
@@ -4271,7 +4274,7 @@ const CHAMPIONS=[
   { key:'gloom', name:'GLOOM', col:'#9B30FF', trail:[155,60,255], leg:'float', body:_bodyGloom },
   { key:'byte',  name:'BYTE',  col:'#14C8DC', trail:[50,215,255], leg:'run',   body:_bodyByte  },
   { key:'nova',  name:'NOVA',  col:'#1840D0', trail:[80,160,255], leg:'float', body:_bodyNova  },
-  { key:'spike', name:'SPIKE', col:'#28D038', trail:[60,210,60],  leg:'run',   body:_bodySpike },
+  { key:'spike', name:'SPIKE', col:'#28D038', trail:[60,210,60],  leg:'run',   body:_bodySpike, flip:true },
   { key:'roxi',  name:'ROXI',  col:'#FF4D95', trail:[255,100,170],leg:'skate', body:_bodyRoxi  },
 ];
 
@@ -4348,7 +4351,7 @@ function drawChampion(g,p,px,py,r){
   g.shadowBlur=0;
   // Facing flip + lean + squash, then blit the real champion artwork.
   g.save();
-  g.scale(p._face,1);
+  g.scale(champ.flip ? -p._face : p._face, 1);
   if(lean) g.rotate(lean*p._face);
   if(sq) g.scale(1+sq*0.6, 1-sq);
   const drewn=_blitSprite(g,champ.key,0,0,r*2.85,true);
