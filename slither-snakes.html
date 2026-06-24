@@ -438,6 +438,7 @@ const GPAD_DEADZONE=0.2,GPAD_NAV_MS=180;
 let _guestInputs=new Map();
 let _killFeed=[];
 let _pendingKills=[];
+let _elimPairTick=-1,_elimPairSet=new Set(); // per-tick pair guard: never both die from same h2h
 let _playerMeta=new Map();
 let _ping=0,_pingIv=null;
 let _fps=0,_fpsFrames=0,_fpsLast=0;
@@ -970,7 +971,7 @@ async function pkConnect(roomId,gameToken){
         document.getElementById('mm-sub').textContent='Connected!';
         lg('mm-log','Joined! Role: '+(isHost?'HOST':'GUEST'),'lok');
         initSnakeGame(allPlayers);
-        setTimeout(()=>launchSnakeGame(),300);
+        setTimeout(()=>launchSnakeGame(),50);
       }catch(e){lg('mm-log','❌ Game init error: '+e.message,'lerr');console.error('[init]',e);}
     });
 
@@ -1628,7 +1629,8 @@ function snakeTick(){
       const f=SG.food[i];
       if(f.o===snake.id&&f.ne&&_nowEat<f.ne)continue; // can't re-eat your own fresh boost-shed (anti circle-farm)
       const dx=h.x-f.x,dy=h.y-f.y;
-      if(dx*dx+dy*dy<(r+f.size)*(r+f.size)){
+      const pickR=f.k?(r+f.size*2):(r+f.size); // SOL kill food: 2× size bonus so latency desync can't miss it
+      if(dx*dx+dy*dy<pickR*pickR){
         snake.growQueue+=FOOD_GROW;
         snake.score+=10;
         if(f.w){ if(snake.id===myPid){_myUsd+=f.w;_spawnMoneyFx(h.x,h.y);} else snake.usd=(snake.usd||0)+f.w; } // collect wager share from kill food
@@ -1646,6 +1648,15 @@ function snakeTick(){
 function eliminateSnake(id,killerId){
   const snake=SG.snakes.get(id);
   if(!snake||!snake.alive)return;
+  // Absolute pair guard: first call wins, second call for same pair same tick is silently dropped.
+  // This is the final safety net — works regardless of which code path caused the call.
+  const tick=SG?SG.tick:-1;
+  if(tick!==_elimPairTick){_elimPairTick=tick;_elimPairSet.clear();}
+  if(killerId!=null){
+    const pk=id<killerId?id+':'+killerId:killerId+':'+id;
+    if(_elimPairSet.has(pk))return;
+    _elimPairSet.add(pk);
+  }
   snake.alive=false;
   spawnFoodFromSnake(snake);
   const km=_playerMeta.get(killerId)||{};
@@ -1824,7 +1835,10 @@ function launchSnakeGame(){
   mmCtx=mmCanvas?mmCanvas.getContext('2d'):null;
 
   const my=SG&&SG.snakes.get(myPid);
-  if(my&&my.path.length){_camX=my.path[0].x;_camY=my.path[0].y;}
+  // Host: start camera at own spawn. Guest: start at arena center (0,0) — food is everywhere
+  // there; _firstRemoteSync will snap to the real assigned spawn on first ss packet.
+  if(isHost&&my&&my.path.length){_camX=my.path[0].x;_camY=my.path[0].y;}
+  else if(!isHost){_camX=0;_camY=0;}
 
   document.getElementById('hud-pot').textContent=ST.lobbyUsd===0?'FREE':'$'+(ST.lobbyUsd*2);
 
@@ -1876,7 +1890,7 @@ function onGameKey(e){
   if(e.key==='='||e.key==='+')_zoomOffset=Math.min(2.0,_zoomOffset+0.12);
   if(e.key==='-'||e.key==='_')_zoomOffset=Math.max(-2.0,_zoomOffset-0.12);
   if(e.key==='m'||e.key==='M')voiceToggle(); // keyboard/mouse: toggle voice chat
-  if(e.key==='e'||e.key==='E')toggleAutoCircle(); // auto-circle: press E to start/stop
+  if((e.key==='e'||e.key==='E')&&!e.repeat)toggleAutoCircle(); // auto-circle: first press only, no keydown repeat
 }
 function onGameKeyUp(e){
   if(e.key===' '||e.key==='Shift')_mouseBoost=false;
@@ -1999,7 +2013,16 @@ async function rejoinGame(){
   goHome();
   if(roomId){
     await new Promise(r=>setTimeout(r,200));
-    await pkConnect(roomId,null);
+    go('scr-mm');
+    document.getElementById('mm-sub').textContent='Reconnecting…';
+    document.getElementById('mm-log').innerHTML='';
+    lg('mm-log','Rejoining '+roomId+'…','lhi');
+    try{
+      await pkConnect(roomId,null);
+    }catch(e){
+      addToast('Reconnect failed — try again','#FF4444');
+      setTimeout(()=>{try{go('scr-lobby');populateLobby();}catch(_){}},1500);
+    }
   } else {
     go('scr-lobby');populateLobby();
   }
