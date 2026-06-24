@@ -1175,7 +1175,7 @@ async function pkConnect(roomId,gameToken){
         }
       }
       const _su=SG.snakes.get(data.id); if(_su&&_su.usd==null)_su.usd=data.usd||0; // seed entry value once; winnings are host-owned after
-      _guestInputs.set(data.id,{angle:data.angle||0,boost:!!data.boost,x:data.x,y:data.y,ts:Date.now(),fresh:true});
+      _guestInputs.set(data.id,{angle:data.angle||0,boost:!!data.boost,circle:!!data.circle,x:data.x,y:data.y,ts:Date.now(),fresh:true});
     });
 
     _sio.on('join',(h)=>{
@@ -1453,7 +1453,7 @@ function initSnakeGame(players){
     if(p.id!==myPid)
       SG.snakes.set(p.id,makeSnake(p.id,p.color||colorFromId(p.id),p.name||'SNAKE'));
   });
-  if(isHost){SG.food=seedFoodLayout();if(!players.some(p=>p.id!==myPid))loadKillFood();} // restore uneaten SOL pellets when rejoining alone (no other players)
+  if(isHost){SG.food=seedFoodLayout();loadKillFood();} // restore uneaten SOL pellets when rejoining
   else{_firstRemoteSync=true;} // guest: snap own position to host-assigned spot on first ss
   _hostPid=isHost?myPid:null; _lastSsTs=Date.now(); // host-migration tracking
   _myUsd=ST.lobbyUsd||0; // start at entry wager value
@@ -1517,6 +1517,7 @@ function _electHost(){
   isHost=true; _hostPid=myPid;
   _hostGraceTicks=6; // skip collision for ~200ms so dual-host ss packets can cross and demote
   if(!SG.food||!SG.food.length)SG.food=seedFoodLayout(); // ensure dots exist if we never synced
+  loadKillFood(); // restore SOL pellets on host migration
   if(_guestInputLoop){clearInterval(_guestInputLoop);_guestInputLoop=null;}
   _forceFoodSend=true;
   _lastTickTs=performance.now();
@@ -1554,7 +1555,7 @@ function _bgSimStep(){
   if(!_localDead){
     const my=SG.snakes.get(myPid);
     if(my&&my.alive&&my.path.length){
-      if(_autoCircle){my.angle+=MAX_TURN;}else{const da=angleDiff(targetAngleToMouse(my),my.angle);my.angle+=Math.max(-MAX_TURN,Math.min(MAX_TURN,da));}
+      if(_autoCircle){my.angle+=MAX_TURN;}else if(!document.hidden){const da=angleDiff(targetAngleToMouse(my),my.angle);my.angle+=Math.max(-MAX_TURN,Math.min(MAX_TURN,da));}
       my.boost=(_mouseBoost||_padBoost)&&my.numSections>INIT_SECTIONS;
       const spd=my.boost?BOOST_SPD:SNAKE_SPD;
       const h=my.path[0];
@@ -1726,12 +1727,8 @@ function snakeTick(){
                 if(aMis<=bMis) eliminateSnake(a.id,b.id);
                 else            eliminateSnake(b.id,a.id);
               } else {
-                // Within 10% epsilon: value→size tiebreaker (never ID)
-                const aUsd=a.id===myPid?_myUsd:(a.usd||0);
-                const bUsd=b.id===myPid?_myUsd:(b.usd||0);
-                if(aUsd<bUsd-0.0001) eliminateSnake(a.id,b.id);
-                else if(bUsd<aUsd-0.0001) eliminateSnake(b.id,a.id);
-                else if(a.numSections<=b.numSections) eliminateSnake(a.id,b.id);
+                // Within 10% epsilon: larger snake (by numSections/width) wins — never by SOL value
+                if(a.numSections<=b.numSections) eliminateSnake(a.id,b.id);
                 else eliminateSnake(b.id,a.id);
               }
             } else {
@@ -1741,20 +1738,19 @@ function snakeTick(){
             eliminateSnake(a.id,null); // self-collision
           } else {
             // A's head hit B's body (k>0, cross-snake body cut)
+            // Hurtbox = front of A's head only: B's body point must be in A's forward hemisphere
+            const fwdDot=(bs.x-ah.x)*Math.cos(a.angle)+(bs.y-ah.y)*Math.sin(a.angle);
+            if(fwdDot<=0)break; // body point is beside/behind A's head — side-clip, no kill
             // _h2hDone prevents both hosts from each killing the other's snake on same tick
             const pk=a.id<b.id?a.id+':'+b.id:b.id+':'+a.id;
             if(_h2hDone.has(pk)){break;}
             _h2hDone.add(pk);
-            // Check if B's head also overlaps A's body — happens in dual-host when stale
-            // positions create a phantom mutual hit; apply value→size tiebreaker if so
+            // Check if B's head also overlaps A's body — dual-host stale-position phantom mutual hit
             const bh2=b.path[0];const aPts2=getBodyPoints(a);let _mutual2=false;
             for(let m=1;m<aPts2.length;m++){const ap2=aPts2[m];if(!ap2)continue;const mdx=bh2.x-ap2.x,mdy=bh2.y-ap2.y;if(mdx*mdx+mdy*mdy<(aR+bR)*(aR+bR)){_mutual2=true;break;}}
             if(_mutual2){
-              const aUsd2=a.id===myPid?_myUsd:(a.usd||0);
-              const bUsd2=b.id===myPid?_myUsd:(b.usd||0);
-              if(aUsd2<bUsd2-0.0001) eliminateSnake(a.id,b.id);
-              else if(bUsd2<aUsd2-0.0001) eliminateSnake(b.id,a.id);
-              else if(a.numSections<=b.numSections) eliminateSnake(a.id,b.id);
+              // Mutual body cut: larger snake (by numSections/width) wins
+              if(a.numSections<=b.numSections) eliminateSnake(a.id,b.id);
               else eliminateSnake(b.id,a.id);
             } else {
               eliminateSnake(a.id,b.id); // clear body cut: A's head in B's body → A dies

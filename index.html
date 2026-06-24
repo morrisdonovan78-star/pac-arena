@@ -1481,6 +1481,7 @@ let _myHelloTs=0;
 async function pkConnect(roomId, gameToken){
   if(_sio){ try{ _sio.disconnect(); }catch(_){} _sio=null; }
   _kickedOut=false;
+  _localFirstSyncDone=false;
   pkRoomId=roomId;
   myPid=ST.address||('anon-'+Math.random().toString(36).slice(2,8));
   isHost=false;
@@ -1871,7 +1872,12 @@ function applyRemoteState(d){
     }
     // Update mobile powerup buttons for local player
     if(id===myPid && !isHost) _updatePowBtns(p);
-    // Init renderX/Y if somehow missing (old client reconnect)
+    // On the very first server packet for the local player, snap render position
+    // unconditionally — local bestSpawn() may be a different tile than server nextSpawn(),
+    // and the ±2-tile prediction cap will trap the render near the wrong spawn indefinitely.
+    if(id===myPid && !isHost && !_localFirstSyncDone){
+      _localFirstSyncDone=true; p.renderX=x; p.renderY=y;
+    }
     if(p.renderX===undefined){ p.renderX=x; p.renderY=y; }
   });
   // G.dotTimer removed — no small dots, powerups respawn via queue
@@ -2478,6 +2484,7 @@ function playCoinSfx(){
 
 // ── Powerup use ───────────────────────────────────────────────
 let _localPowUntil=0; // protect local pow/pep state from stale server broadcasts for 500ms after use
+let _localFirstSyncDone=false; // snap renderX/Y to server on first 's' packet to fix spawn-position mismatch
 function usePow(type){
   if(!G||G.over) return;
   const me=G.players.get(myPid);
@@ -2562,6 +2569,7 @@ function _doFreeRejoin(){
   // Hard guard — never allow free rejoin in a paid lobby regardless of ST.wagerSol value
   if(_lobbyIsPaid){ addToast('❌ Paid lobby — use the REJOIN button to pay','#FF4444'); return; }
   if(_rejoinCountdown){ clearInterval(_rejoinCountdown); _rejoinCountdown=null; }
+  _localFirstSyncDone=false;
   const sp=bestSpawn();
   const rjName=getMyName();
   G.players.set(myPid,{
