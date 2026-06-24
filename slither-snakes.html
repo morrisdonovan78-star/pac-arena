@@ -573,8 +573,14 @@ function signSettleMsg(action,playerAddress,wagerLamports){
 }
 
 async function recordWager(walletAddress,wagerLamports,txSig,lobbyId,playerName){
-  const{sig,ts}=signSettleMsg('join',walletAddress,wagerLamports);
-  const r=await fetch(getSioUrl()+'/api/join',{method:'POST',headers:{'Content-Type':'application/json','x-settle-sig':sig,'x-settle-ts':String(ts)},
+  if(!_keypair)throw new Error('No wallet loaded');
+  const ts=Date.now();
+  // 'pac-arena:' prefix matches Vercel api/join.js verifyPlayerSig
+  const _jmsg=new TextEncoder().encode('pac-arena:join:'+walletAddress+':'+wagerLamports+':'+ts);
+  const _jsigBytes=nacl.sign.detached(_jmsg,_keypair.secretKey);
+  const sig=btoa(String.fromCharCode(..._jsigBytes));
+  // Route through Vercel — has on-chain tx verification, replay guard, ban check, game token
+  const r=await fetch('/api/join',{method:'POST',headers:{'Content-Type':'application/json','x-settle-sig':sig,'x-settle-ts':String(ts)},
     body:JSON.stringify({walletAddress,wagerLamports,txSig,lobbyId,playerName:playerName||''})});
   const d=await r.json().catch(()=>({}));
   if(!r.ok)throw new Error(d.error||'join failed');
@@ -893,12 +899,28 @@ async function joinLobby(usd){
     const tx=new solanaWeb3.Transaction().add(
       solanaWeb3.SystemProgram.transfer({fromPubkey:from,toPubkey:escPubkey,lamports:lamps})
     );
-    const lb=await ST.conn.getLatestBlockhash('confirmed');
+    // Use direct HTTP fetch to /api/rpc — avoids Connection WebSocket hang on confirmTransaction
+    const _lbr=await fetch('/api/rpc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'getLatestBlockhash',params:[{commitment:'confirmed'}]})});
+    const _lbd=await _lbr.json();if(_lbd.error)throw new Error('Blockhash: '+_lbd.error.message);
+    const lb={blockhash:_lbd.result.value.blockhash,lastValidBlockHeight:_lbd.result.value.lastValidBlockHeight};
     tx.recentBlockhash=lb.blockhash; tx.feePayer=from;
     lg('mm-log','Signing…','lwarn');
     await signLocalTx(tx);
-    const sig=await ST.conn.sendRawTransaction(tx.serialize());
-    await ST.conn.confirmTransaction({signature:sig,blockhash:lb.blockhash,lastValidBlockHeight:lb.lastValidBlockHeight},'confirmed');
+    const _rawB64=btoa(String.fromCharCode(...tx.serialize()));
+    const _sndr=await fetch('/api/rpc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:2,method:'sendTransaction',params:[_rawB64,{encoding:'base64',preflightCommitment:'confirmed'}]})});
+    const _sndd=await _sndr.json();if(_sndd.error)throw new Error('Send failed: '+_sndd.error.message);
+    const sig=_sndd.result;
+    lg('mm-log','Confirming on-chain…','lwarn');
+    let _txConfirmed=false;
+    for(let _ci=0;_ci<60&&!_txConfirmed;_ci++){
+      await new Promise(r=>setTimeout(r,1500));
+      const _sr=await fetch('/api/rpc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:3,method:'getSignatureStatuses',params:[[sig],{searchTransactionHistory:false}]})});
+      const _sd=await _sr.json().catch(()=>({}));
+      const _st=_sd?.result?.value?.[0];
+      if(_st){if(_st.err)throw new Error('Transaction rejected by network');if(_st.confirmationStatus==='confirmed'||_st.confirmationStatus==='finalized'){_txConfirmed=true;break;}}
+      if(_ci>0&&_ci%8===0){const _bhr=await fetch('/api/rpc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:4,method:'getBlockHeight',params:[]})});const _bhd=await _bhr.json().catch(()=>({}));if(typeof _bhd.result==='number'&&_bhd.result>lb.lastValidBlockHeight)throw new Error('Transaction expired — please try again');}
+    }
+    if(!_txConfirmed)throw new Error('Confirmation timeout — check your wallet then try again');
     ST.hasEscrow=true;
     lg('mm-log','Deposit confirmed ✓','lok');
     lg('mm-log','Recording wager…','lhi');
@@ -1614,14 +1636,39 @@ function snakeTick(){
                 if(aMis<=bMis) eliminateSnake(a.id,b.id);
                 else            eliminateSnake(b.id,a.id);
               } else {
-                if(a.id<b.id) eliminateSnake(a.id,b.id);
-                else           eliminateSnake(b.id,a.id);
+                // Within 10% epsilon: value→size tiebreaker (never ID)
+                const aUsd=a.id===myPid?_myUsd:(a.usd||0);
+                const bUsd=b.id===myPid?_myUsd:(b.usd||0);
+                if(aUsd<bUsd-0.0001) eliminateSnake(a.id,b.id);
+                else if(bUsd<aUsd-0.0001) eliminateSnake(b.id,a.id);
+                else if(a.numSections<=b.numSections) eliminateSnake(a.id,b.id);
+                else eliminateSnake(b.id,a.id);
               }
             } else {
               eliminateSnake(a.id,b.id); // swept into B's head zone → A is the attacker
             }
+          } else if(a.id===b.id){
+            eliminateSnake(a.id,null); // self-collision
           } else {
-            eliminateSnake(a.id,a.id===b.id?null:b.id);
+            // A's head hit B's body (k>0, cross-snake body cut)
+            // _h2hDone prevents both hosts from each killing the other's snake on same tick
+            const pk=a.id<b.id?a.id+':'+b.id:b.id+':'+a.id;
+            if(_h2hDone.has(pk)){break;}
+            _h2hDone.add(pk);
+            // Check if B's head also overlaps A's body — happens in dual-host when stale
+            // positions create a phantom mutual hit; apply value→size tiebreaker if so
+            const bh2=b.path[0];const aPts2=getBodyPoints(a);let _mutual2=false;
+            for(let m=1;m<aPts2.length;m++){const ap2=aPts2[m];if(!ap2)continue;const mdx=bh2.x-ap2.x,mdy=bh2.y-ap2.y;if(mdx*mdx+mdy*mdy<(aR+bR)*(aR+bR)){_mutual2=true;break;}}
+            if(_mutual2){
+              const aUsd2=a.id===myPid?_myUsd:(a.usd||0);
+              const bUsd2=b.id===myPid?_myUsd:(b.usd||0);
+              if(aUsd2<bUsd2-0.0001) eliminateSnake(a.id,b.id);
+              else if(bUsd2<aUsd2-0.0001) eliminateSnake(b.id,a.id);
+              else if(a.numSections<=b.numSections) eliminateSnake(a.id,b.id);
+              else eliminateSnake(b.id,a.id);
+            } else {
+              eliminateSnake(a.id,b.id); // clear body cut: A's head in B's body → A dies
+            }
           }
           break;
         }
