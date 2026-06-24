@@ -1554,8 +1554,7 @@ function _bgSimStep(){
   if(!_localDead){
     const my=SG.snakes.get(myPid);
     if(my&&my.alive&&my.path.length){
-      const da=angleDiff(_autoCircle?(my.angle+Math.PI):targetAngleToMouse(my),my.angle);
-      my.angle+=Math.max(-MAX_TURN,Math.min(MAX_TURN,da));
+      if(_autoCircle){my.angle+=MAX_TURN;}else{const da=angleDiff(targetAngleToMouse(my),my.angle);my.angle+=Math.max(-MAX_TURN,Math.min(MAX_TURN,da));}
       my.boost=(_mouseBoost||_padBoost)&&my.numSections>INIT_SECTIONS;
       const spd=my.boost?BOOST_SPD:SNAKE_SPD;
       const h=my.path[0];
@@ -1625,7 +1624,7 @@ function snakeTick(){
     if(now-inp.ts>1500)return;
     const s=SG.snakes.get(pid);
     if(!s||!s.alive)return;
-    applyTurn(s,inp.angle);
+    if(inp.circle) s.angle+=MAX_TURN; else applyTurn(s,inp.angle);
     s.boost=inp.boost;
     // Snap head to guest's reported position ONCE per new ssin (fresh flag).
     // Using snap (not unshift) prevents stale data from pushing an out-of-order point
@@ -1965,11 +1964,11 @@ function startGuestLoop(){
     if(!SG||SG.over||!ablyChannel||isSpectating||_localDead)return;
     const my=SG.snakes.get(myPid);
     if(!my||!my.alive)return;
-    const targetAngle=_autoCircle?(my.angle+Math.PI):targetAngleToMouse(my);
     const canBoost=(_mouseBoost||_padBoost)&&my.numSections>INIT_SECTIONS;
     my.boost=canBoost;
     const h=my.path[0];
-    _sio.emit('ssin',{id:myPid,angle:targetAngle,boost:canBoost,x:Math.round(h.x),y:Math.round(h.y),usd:_myUsd});
+    // circle:true tells host to apply +MAX_TURN directly — avoids angleDiff(angle+π) float ambiguity
+    _sio.emit('ssin',{id:myPid,angle:targetAngleToMouse(my),circle:_autoCircle||undefined,boost:canBoost,x:Math.round(h.x),y:Math.round(h.y),usd:_myUsd});
   },40);
 }
 
@@ -2288,8 +2287,7 @@ function rafDraw(ts){
       _guestPredTs=ts;
       const frac=dt/TICK_MS;
       // Scale turn and speed proportionally to frame time
-      const da=angleDiff(_autoCircle?(my.angle+Math.PI):targetAngleToMouse(my),my.angle);
-      my.angle+=Math.max(-MAX_TURN*frac,Math.min(MAX_TURN*frac,da));
+      if(_autoCircle){my.angle+=MAX_TURN*frac;}else{const da=angleDiff(targetAngleToMouse(my),my.angle);my.angle+=Math.max(-MAX_TURN*frac,Math.min(MAX_TURN*frac,da));}
       // damnbruh: no boost below minimum size
       my.boost=(_mouseBoost||_padBoost)&&my.numSections>INIT_SECTIONS;
       const spd=(my.boost?BOOST_SPD:SNAKE_SPD)*frac;
@@ -2324,8 +2322,7 @@ function rafDraw(ts){
       const dt=Math.min(_hostPredTs?ts-_hostPredTs:TICK_MS,80);
       _hostPredTs=ts;
       const frac=dt/TICK_MS;
-      const da=angleDiff(_autoCircle?(my.angle+Math.PI):targetAngleToMouse(my),my.angle);
-      my.angle+=Math.max(-MAX_TURN*frac,Math.min(MAX_TURN*frac,da));
+      if(_autoCircle){my.angle+=MAX_TURN*frac;}else{const da=angleDiff(targetAngleToMouse(my),my.angle);my.angle+=Math.max(-MAX_TURN*frac,Math.min(MAX_TURN*frac,da));}
       my.boost=(_mouseBoost||_padBoost)&&my.numSections>INIT_SECTIONS;
       const spd=(my.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=my.path[0];
