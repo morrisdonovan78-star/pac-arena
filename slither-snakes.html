@@ -518,7 +518,9 @@ function setGameServer(r){
 
 // ══ WALLET / AUTH ════════════════════════════════════════════
 function makeConnection(){
-  return new solanaWeb3.Connection(getRpc(),{commitment:'confirmed',disableRetryOnRateLimit:true});
+  // Connection constructor calls new URL(endpoint) internally — needs absolute URL.
+  // Relative '/api/rpc' would throw, breaking finishLogin silently.
+  return new solanaWeb3.Connection(window.location.origin+'/api/rpc',{commitment:'confirmed',disableRetryOnRateLimit:true});
 }
 async function fetchPrice(){
   try{const r=await fetch('/api/price');const d=await r.json();if(d.price>0)ST.solPrice=d.price;}
@@ -1603,13 +1605,18 @@ function snakeTick(){
             const bhdx=ah.x-bh.x,bhdy=ah.y-bh.y;
             const trueH2H=bhdx*bhdx+bhdy*bhdy<(aR+bR)*(aR+bR);
             if(trueH2H){
-              // Sub-pixel angle tiebreaker: the snake whose heading points MORE directly
-              // at the other head is the attacker and dies; the more-tilted one slips past.
               const angDiff=(av,rv)=>{let d=av-rv;d=((d+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI;return Math.abs(d);};
               const aMis=angDiff(a.angle,Math.atan2(bh.y-ah.y,bh.x-ah.x));
               const bMis=angDiff(b.angle,Math.atan2(ah.y-bh.y,ah.x-bh.x));
-              if(aMis<=bMis) eliminateSnake(a.id,b.id);
-              else            eliminateSnake(b.id,a.id);
+              // Skill-based if one angle is >10% more head-on; ID tiebreaker if too close
+              // (within 10% the dual-host position drift can flip the result → ID is safer)
+              if(Math.abs(aMis-bMis)>0.10*Math.max(aMis,bMis,0.001)){
+                if(aMis<=bMis) eliminateSnake(a.id,b.id);
+                else            eliminateSnake(b.id,a.id);
+              } else {
+                if(a.id<b.id) eliminateSnake(a.id,b.id);
+                else           eliminateSnake(b.id,a.id);
+              }
             } else {
               eliminateSnake(a.id,b.id); // swept into B's head zone → A is the attacker
             }
