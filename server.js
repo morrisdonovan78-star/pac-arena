@@ -388,7 +388,7 @@ io.on('connection', socket => {
     const p = room.players.get(pid);
     if (!p) return;
     const s = nextSpawn(room);
-    p.x = s.x; p.y = s.y; p.dx = 0; p.dy = 0; p.alive = true; p.sc = 0;
+    p.x = s.x; p.y = s.y; p.dx = 0; p.dy = 0; p.nx = 0; p.ny = 0; p.alive = true; p.sc = 0;
     p.spawnProt = Date.now() + 2500;
     p.pow = false; p.pt = 0; p.pep = false; p.pet = 0; p.held = ['cherry', 'pepper'];
     // Include spawn coords so clients snap immediately instead of waiting for the next state tick
