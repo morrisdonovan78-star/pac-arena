@@ -1718,21 +1718,11 @@ function snakeTick(){
             const bhdx=ah.x-bh.x,bhdy=ah.y-bh.y;
             const trueH2H=bhdx*bhdx+bhdy*bhdy<(aR+bR)*(aR+bR);
             if(trueH2H){
-              const angDiff=(av,rv)=>{let d=av-rv;d=((d+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI;return Math.abs(d);};
-              const aMis=angDiff(a.angle,Math.atan2(bh.y-ah.y,bh.x-ah.x));
-              const bMis=angDiff(b.angle,Math.atan2(ah.y-bh.y,ah.x-bh.x));
-              // Skill-based if one angle is >10% more head-on; ID tiebreaker if too close
-              // (within 10% the dual-host position drift can flip the result → ID is safer)
-              if(Math.abs(aMis-bMis)>0.10*Math.max(aMis,bMis,0.001)){
-                if(aMis<=bMis) eliminateSnake(a.id,b.id);
-                else            eliminateSnake(b.id,a.id);
-              } else {
-                // Within 10% epsilon: larger snake (by numSections/width) wins — never by SOL value
-                if(a.numSections<=b.numSections) eliminateSnake(a.id,b.id);
-                else eliminateSnake(b.id,a.id);
-              }
+              // Both head-fronts touching: larger snake (by numSections/width) ALWAYS wins — no angle, no SOL value
+              if(a.numSections<=b.numSections) eliminateSnake(a.id,b.id);
+              else eliminateSnake(b.id,a.id);
             } else {
-              eliminateSnake(a.id,b.id); // swept into B's head zone → A is the attacker
+              eliminateSnake(a.id,b.id); // A swept into B's head zone → A is the attacker, A dies
             }
           } else if(a.id===b.id){
             eliminateSnake(a.id,null); // self-collision
@@ -1740,7 +1730,7 @@ function snakeTick(){
             // A's head hit B's body (k>0, cross-snake body cut)
             // Hurtbox = front of A's head only: B's body point must be in A's forward hemisphere
             const fwdDot=(bs.x-ah.x)*Math.cos(a.angle)+(bs.y-ah.y)*Math.sin(a.angle);
-            if(fwdDot<=0)break; // body point is beside/behind A's head — side-clip, no kill
+            if(fwdDot<=0)continue; // body point is beside/behind A's head — side-clip, check next point
             // _h2hDone prevents both hosts from each killing the other's snake on same tick
             const pk=a.id<b.id?a.id+':'+b.id:b.id+':'+a.id;
             if(_h2hDone.has(pk)){break;}
