@@ -428,7 +428,7 @@ let REGION=localStorage.getItem('ss_region')||'US';
 // Game state
 let SG=null;
 let canvas=null,ctx=null,mmCanvas=null,mmCtx=null;
-let rafHandle=null,_hostRaf=null,_lastTickTs=0;
+let rafHandle=null,_hostRaf=null,_lastTickTs=0,_hostGraceTicks=0;
 let _bgPump=null,_bgLastTs=0,_bgSuppressSend=false;
 let _camX=0,_camY=0,_camZoom=0.6,_zoomOffset=0;
 let _mouseX=0,_mouseY=0,_mouseBoost=false,_padBoost=false,_cashoutTimer=null,_showHitboxes=false;
@@ -454,7 +454,7 @@ let _localDead=false;
 let _autoCircle=false; // toggle: snake auto-circles until toggled off (E key / L3 button)
 let _lastRoomId=null;
 
-function getRpc(){return RPC_REGIONS[REGION]||RPC_REGIONS['US'];}
+function getRpc(){return '/api/rpc';} // proxy through Vercel to avoid 403 from public RPCs
 function getSioUrl(){return GAME_SERVERS[GAME_SERVER].url;}
 function usdToSol(usd){return ST.solPrice>0?parseFloat((usd/ST.solPrice).toFixed(4)):0;}
 
@@ -1400,6 +1400,7 @@ function stopHostLoop(){if(_hostRaf){cancelAnimationFrame(_hostRaf);_hostRaf=nul
 function _electHost(){
   if(isHost||!SG||SG.over)return;
   isHost=true; _hostPid=myPid;
+  _hostGraceTicks=6; // skip collision for ~200ms so dual-host ss packets can cross and demote
   if(!SG.food||!SG.food.length)SG.food=seedFoodLayout(); // ensure dots exist if we never synced
   if(_guestInputLoop){clearInterval(_guestInputLoop);_guestInputLoop=null;}
   _forceFoodSend=true;
@@ -1569,9 +1570,10 @@ function snakeTick(){
     if(h.x*h.x+h.y*h.y>=ARENA_R*ARENA_R) eliminateSnake(snake.id,null);
   });
 
-  // Head-vs-body collision — each unordered (A,B) pair resolved EXACTLY ONCE per tick via
-  // _h2hDone Set, covering both the trueH2H path AND the swept-head (segHitsCircle) path.
-  // This is the bulletproof "never both die" guarantee regardless of collision geometry.
+  // Head-vs-body collision. Grace period skips this for ~200ms after host migration fires,
+  // giving dual-host ss packets time to cross so the lower-pid host stays authoritative.
+  if(_hostGraceTicks>0){_hostGraceTicks--;}
+  else{
   const alive=[...SG.snakes.values()].filter(s=>s.alive);
   const _h2hDone=new Set(); // "id1:id2" canonical key (id1<id2 lexicographically)
   // Sub-pixel angle diff helper: returns absolute angular distance in [0,π]
@@ -1597,11 +1599,20 @@ function snakeTick(){
             const pk=a.id<b.id?a.id+':'+b.id:b.id+':'+a.id;
             if(_h2hDone.has(pk)){break;} // already resolved from the other direction this tick
             _h2hDone.add(pk);
-            // ID-based tiebreaker: always eliminate the lex-smaller ID.
-            // This is deterministic from BOTH players' perspectives, so if host-migration
-            // causes dual-host, both independently pick the SAME loser — only one player dies.
-            if(a.id<b.id) eliminateSnake(a.id,b.id);
-            else           eliminateSnake(b.id,a.id);
+            const bh=b.path[0];
+            const bhdx=ah.x-bh.x,bhdy=ah.y-bh.y;
+            const trueH2H=bhdx*bhdx+bhdy*bhdy<(aR+bR)*(aR+bR);
+            if(trueH2H){
+              // Sub-pixel angle tiebreaker: the snake whose heading points MORE directly
+              // at the other head is the attacker and dies; the more-tilted one slips past.
+              const angDiff=(av,rv)=>{let d=av-rv;d=((d+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI;return Math.abs(d);};
+              const aMis=angDiff(a.angle,Math.atan2(bh.y-ah.y,bh.x-ah.x));
+              const bMis=angDiff(b.angle,Math.atan2(ah.y-bh.y,ah.x-bh.x));
+              if(aMis<=bMis) eliminateSnake(a.id,b.id);
+              else            eliminateSnake(b.id,a.id);
+            } else {
+              eliminateSnake(a.id,b.id); // swept into B's head zone → A is the attacker
+            }
           } else {
             eliminateSnake(a.id,a.id===b.id?null:b.id);
           }
@@ -1611,6 +1622,7 @@ function snakeTick(){
       if(!a.alive)break;
     }
   }
+  } // end else(_hostGraceTicks)
 
   // Food collection — head radius pickup (damnbruh.com style)
   const _nowEat=Date.now();
