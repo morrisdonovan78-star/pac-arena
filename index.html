@@ -351,11 +351,8 @@ body{touch-action:manipulation;}
           </div>
           <div id="name-saved-msg" style="font-size:9px;color:#39FF14;margin-top:5px;display:none;">✓ Saved! Shows in-game &amp; leaderboard.</div>
         </div>
-        <!-- Action buttons row -->
-        <div style="display:flex;gap:8px;">
-          <button id="enter-arena-btn" class="btn btn-g" onclick="go('scr-lobby');populateLobby();" style="flex:1;padding:18px 10px;font-size:11px;letter-spacing:2px;box-shadow:0 0 24px rgba(57,255,20,.22);">▶ ENTER ARENA</button>
-          <button class="btn" onclick="openCloset()" style="flex:0 0 auto;padding:18px 12px;font-size:9px;letter-spacing:1px;background:rgba(255,215,0,.1);border-color:rgba(255,215,0,.5);color:#FFD700;box-shadow:0 0 14px rgba(255,215,0,.15);">👗<br>CLOSET</button>
-        </div>
+        <!-- ENTER ARENA hero -->
+        <button id="enter-arena-btn" class="btn btn-g" onclick="go('scr-lobby');populateLobby();" style="padding:18px 10px;font-size:11px;letter-spacing:2px;box-shadow:0 0 24px rgba(57,255,20,.22);">▶ ENTER ARENA</button>
         <!-- Server selector -->
         <div style="background:rgba(0,255,255,.05);border:1px solid rgba(0,255,255,.2);border-radius:10px;padding:10px 14px;text-align:center;">
           <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:var(--c);margin-bottom:8px;">🌍 GAME SERVER</div>
@@ -400,12 +397,13 @@ body{touch-action:manipulation;}
         <!-- Cashout -->
         <button id="cashout-home-btn" class="btn" style="background:rgba(57,255,20,.12);color:var(--g);border-color:var(--g);font-family:'Press Start 2P',monospace;font-size:9px;padding:16px 10px;" onclick="openCashout()">💸 CASHOUT / WITHDRAW</button>
         <!-- Champion preview card -->
-        <div id="champ-home-card" onclick="openCloset()" style="background:rgba(255,215,0,.05);border:1px solid rgba(255,215,0,.25);border-radius:10px;padding:14px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;" onmouseover="this.style.borderColor='rgba(255,215,0,.55)';this.style.background='rgba(255,215,0,.09)';" onmouseout="this.style.borderColor='rgba(255,215,0,.25)';this.style.background='rgba(255,215,0,.05)';">
+        <div id="champ-home-card" onclick="openCloset()" style="background:rgba(255,215,0,.05);border:1px solid rgba(255,215,0,.25);border-radius:10px;padding:14px 10px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;" onmouseover="this.style.borderColor='rgba(255,215,0,.55)';this.style.background='rgba(255,215,0,.09)';" onmouseout="this.style.borderColor='rgba(255,215,0,.25)';this.style.background='rgba(255,215,0,.05)';">
           <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--muted);letter-spacing:2px;margin-bottom:10px;">YOUR CHAMPION</div>
-          <img id="champ-home-img" src="/sprites/zippy.png" alt="" style="width:72px;height:82px;object-fit:contain;display:block;margin:0 auto 8px;filter:drop-shadow(0 0 10px currentColor);">
-          <div id="champ-name-label" style="font-family:'Press Start 2P',monospace;font-size:8px;color:#FFD700;margin-bottom:6px;"></div>
-          <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:rgba(255,215,0,.4);">TAP TO CHANGE →</div>
+          <img id="champ-home-img" src="/sprites/zippy.png" alt="" style="width:92px;height:104px;object-fit:contain;display:block;margin:0 auto 8px;">
+          <div id="champ-name-label" style="font-family:'Press Start 2P',monospace;font-size:9px;color:#FFD700;margin-bottom:4px;"></div>
         </div>
+        <!-- CLOSET button -->
+        <button id="closet-home-btn" class="btn" onclick="openCloset()" style="width:100%;background:rgba(255,215,0,.08);border-color:rgba(255,215,0,.4);color:#FFD700;font-size:9px;letter-spacing:2px;padding:13px 10px;">👗 CLOSET</button>
         <!-- hidden elements kept for JS compatibility -->
         <div id="champ-picker" style="display:none;"></div>
         <canvas id="cust-preview" width="84" height="96" style="display:none;"></canvas>
@@ -3099,13 +3097,20 @@ function _gpCycleCust(catIdx,dir){
   d.set(d.arr[i]);
 }
 const GP_MENUS={
-  'scr-home':   ['enter-arena-btn','leaderboard-btn-home','cashout-home-btn','h-refresh-btn','cust-colors','cust-hats','cust-trails','cust-eyes','cust-aura'],
+  'scr-home':   ['enter-arena-btn','closet-home-btn','leaderboard-btn-home','cashout-home-btn','champ-home-card','h-refresh-btn'],
   'scr-lobby':  ['lobby-free-btn','lobby-gold-btn','lobby-diam-btn','lobby-home-btn','lobby-lb-btn'],
   'scr-result': ['result-rematch-btn','result-lobby-btn'],
   'scr-cashout':['co-send-btn','cashout-back-btn'],
 };
 const GP_HORIZ={'scr-lobby':[0,1,2]};
 let _mFocusIdx=0, _mPrevScr=null, _mPrev={};
+let _closetFocusIdx=0;
+function _applyClosetFocus(){
+  for(let i=0;i<6;i++){
+    const el=document.getElementById('closet-card-'+i);
+    if(el) el.classList.toggle('gp-focus',i===_closetFocusIdx);
+  }
+}
 function _activeScr(){
   const all=['scr-home','scr-lobby','scr-result','scr-cashout','scr-mm','scr-leaderboard','scr-game'];
   for(const id of all){ const el=document.getElementById(id); if(el&&el.classList.contains('on')) return id; }
@@ -3154,6 +3159,21 @@ function _menuGpRaf(){
         else{
           const down=(i)=>!!(gp.buttons[i]&&gp.buttons[i].pressed);
           const rose=(i)=>down(i)&&!_mPrev[i];
+          // Closet modal: intercept ALL input while open (must check before B-back handler)
+          const _closetModal=document.getElementById('closet-modal');
+          const _closetOpen=_closetModal&&_closetModal.style.display!=='none';
+          if(_closetOpen){
+            if(_mPrevScr!=='_closet'){ _closetFocusIdx=0; _mPrevScr='_closet'; _applyClosetFocus(); }
+            // 3-col grid: up/down jump a row, left/right move one cell
+            if(rose(12)){ _closetFocusIdx=(_closetFocusIdx-3+6)%6; _applyClosetFocus(); }
+            if(rose(13)){ _closetFocusIdx=(_closetFocusIdx+3)%6; _applyClosetFocus(); }
+            if(rose(14)){ _closetFocusIdx=Math.max(0,_closetFocusIdx-1); _applyClosetFocus(); }
+            if(rose(15)){ _closetFocusIdx=Math.min(5,_closetFocusIdx+1); _applyClosetFocus(); }
+            if(rose(0)){ const _cc=document.getElementById('closet-card-'+_closetFocusIdx); if(_cc) _cc.click(); }
+            if(rose(1)){ closeCloset(); }
+            for(let i=0;i<gp.buttons.length;i++) _mPrev[i]=down(i);
+            return;
+          }
           // B = universal back from anywhere
           if(rose(1)) _gpBack(scrId);
           // Y = voice chat toggle (works on all screens including home/lobby/spectate)
@@ -3787,6 +3807,7 @@ function openCloset(){
     card.style.cssText='border:2px solid '+(active?ch.col:'rgba(255,255,255,.12)')+';border-radius:14px;background:'+(active?ch.col+'1a':'rgba(255,255,255,.03)')+';padding:14px 8px;text-align:center;cursor:pointer;transition:all .18s;'+(active?'box-shadow:0 0 20px '+ch.col+'55;':'');
     card.onmouseover=()=>{ card.style.borderColor=ch.col; card.style.background=ch.col+'18'; };
     card.onmouseout=()=>{ card.style.borderColor=active?ch.col:'rgba(255,255,255,.12)'; card.style.background=active?ch.col+'1a':'rgba(255,255,255,.03)'; };
+    card.id='closet-card-'+i;
     card.onclick=()=>{ setMyChamp(i); closeCloset(); };
     const im=document.createElement('img');
     im.src='/sprites/'+ch.key+'.png';
@@ -3804,6 +3825,7 @@ function closeCloset(){
   const modal=document.getElementById('closet-modal');
   if(modal) modal.style.display='none';
   document.body.style.overflow='';
+  _mPrevScr=null; _mFocusIdx=0; _mClearFocus();
 }
 // rounded-rectangle path helper (used by robot/box/badge art)
 function _rr(g,x,y,w,h,r){ r=Math.min(r,w/2,h/2); g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r); g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); }
