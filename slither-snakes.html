@@ -986,7 +986,7 @@ async function pkConnect(roomId,gameToken){
             _sio.io.opts.transports=['polling','websocket'];
             _sio.disconnect(); _sio.connect();
           }
-        },4000);
+        },2000);
         res();
       });
       _sio.on('connect_error',(e)=>{
@@ -1149,6 +1149,7 @@ async function pkConnect(roomId,gameToken){
 function pkSend(data){if(ablyChannel)ablyChannel.publish(data.t,data,()=>{});}
 
 function pkDisconnect(){
+  stopHostLoop();
   clearInterval(_guestInputLoop);_guestInputLoop=null;
   clearInterval(_pingInterval);_pingInterval=null;_ping=0;
   if(_bgPump){clearInterval(_bgPump);_bgPump=null;}_bgSuppressSend=false;
@@ -2188,7 +2189,7 @@ function rafDraw(ts){
   // Camera — damnbruh.com exact: fixed zoom from screen resolution, instant follow
   // zoom = clamp(0.3, 2.0, min(w/1920, h/1080))  — same formula as damnbruh bundle
   const mySnake=SG&&SG.snakes.get(myPid);
-  if(mySnake&&mySnake.path.length&&mySnake.alive){
+  if(mySnake&&mySnake.path.length&&mySnake.alive&&!_firstRemoteSync){
     const h=mySnake.path[0];
     _camX=h.x;
     _camY=h.y;
