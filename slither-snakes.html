@@ -1349,7 +1349,9 @@ function addSnakePlayer(id,color,name){
   const existing=SG.snakes.get(id);
   if(existing&&existing.alive)return; // live snake — don't overwrite
   const pos=isHost?findSafeSpawn():[null,null];
-  SG.snakes.set(id,makeSnake(id,color,name,pos[0],pos[1]));
+  const s=makeSnake(id,color,name,pos[0],pos[1]);
+  s.usd=ST.lobbyUsd||0; // guest starts carrying their entry wager so kill food has correct SOL value
+  SG.snakes.set(id,s);
 }
 
 // ── Angle helpers ────────────────────────────────────────────
@@ -1573,7 +1575,6 @@ function snakeTick(){
   const alive=[...SG.snakes.values()].filter(s=>s.alive);
   const _h2hDone=new Set(); // "id1:id2" canonical key (id1<id2 lexicographically)
   // Sub-pixel angle diff helper: returns absolute angular distance in [0,π]
-  const angDiff=(a,r)=>{let d=a-r;d=((d+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI;return Math.abs(d);};
   for(let i=0;i<alive.length;i++){
     const a=alive[i]; if(!a.alive)continue;
     const ah=a.path[0];
@@ -1596,20 +1597,11 @@ function snakeTick(){
             const pk=a.id<b.id?a.id+':'+b.id:b.id+':'+a.id;
             if(_h2hDone.has(pk)){break;} // already resolved from the other direction this tick
             _h2hDone.add(pk);
-            const bh=b.path[0]; // actual head (same as bPts[0])
-            const bhdx=ah.x-bh.x,bhdy=ah.y-bh.y;
-            const trueH2H=bhdx*bhdx+bhdy*bhdy<(aR+bR)*(aR+bR);
-            if(trueH2H){
-              // Sub-pixel angle tiebreaker (DamnBruh method): the snake pointing MORE directly
-              // at the other is the attacker (dies); the more-tilted snake "slips past" (survives).
-              const aMisalign=angDiff(a.angle,Math.atan2(bh.y-ah.y,bh.x-ah.x));
-              const bMisalign=angDiff(b.angle,Math.atan2(ah.y-bh.y,ah.x-bh.x));
-              if(aMisalign<=bMisalign) eliminateSnake(a.id,b.id);
-              else                      eliminateSnake(b.id,a.id);
-            } else {
-              // A swept into B's head zone but final positions don't perfectly overlap → A is attacker
-              eliminateSnake(a.id,b.id);
-            }
+            // ID-based tiebreaker: always eliminate the lex-smaller ID.
+            // This is deterministic from BOTH players' perspectives, so if host-migration
+            // causes dual-host, both independently pick the SAME loser — only one player dies.
+            if(a.id<b.id) eliminateSnake(a.id,b.id);
+            else           eliminateSnake(b.id,a.id);
           } else {
             eliminateSnake(a.id,a.id===b.id?null:b.id);
           }
@@ -1671,14 +1663,15 @@ function eliminateSnake(id,killerId){
 
 function spawnFoodFromSnake(snake){
   if(!snake||!snake.path)return;
-  // Place kill food at EXACT body circle positions — matches the visible snake trail 1:1.
-  // SOL wager split evenly across all circles so the total is preserved.
   const bPts=getBodyPoints(snake);
   if(!bPts.length)return;
-  const w=(snake.usd||0)/bPts.length;
+  // Host snake tracks value in _myUsd; guest snakes track it in snake.usd
+  const totalUsd=snake.id===myPid?_myUsd:(snake.usd||0);
+  const w=totalUsd/bPts.length;
   bPts.forEach(p=>{
     SG.food.push({x:p.x,y:p.y,ci:3,size:9+Math.random()*5,k:1,w:w});
   });
+  _forceFoodSend=true; // push kill food to guests on the very next ss packet
 }
 
 // ── Food upkeep ──────────────────────────────────────────────────────────────
@@ -1918,8 +1911,9 @@ async function endSnakeGame(reason,killerId){
   const elim=reason==='eliminated';
   const cashed=reason==='cashout';
 
-  // HOST eliminated: enter spectator mode, keep host loop running for other players
-  if(isHost&&elim){
+  // ALL eliminated: go straight to spectate — host loop stays alive if isHost, rafDraw continues for both.
+  // Guests also spectate immediately (no result screen) so there's no black-screen flash.
+  if(elim){
     isSpectating=true;
     clearInterval(_guestInputLoop);_guestInputLoop=null;
     _gpadLastBtn=[];_gpadNavTs=0;_padBoost=false;
@@ -1928,13 +1922,12 @@ async function endSnakeGame(reason,killerId){
     if(_sb)_sb.style.display='flex';
     const _srb=document.getElementById('spec-rejoin-btn');
     if(_srb)_srb.style.display='';
-    if(ST.lobbyUsd>0)(async()=>{try{await refreshBal();}catch(_){}})(); // no auto-settle on elim — payout only on Cash Out
-    return; // host loop + rafDraw stay alive
+    if(ST.lobbyUsd>0)(async()=>{try{await refreshBal();}catch(_){}})();
+    return;
   }
 
-  // Keep connection + rafDraw alive when eliminated (guest) or when cashed out (any role).
-  // HOST cashout: host loop must keep running for remaining players — only set SG.over on 'over'.
-  const keepAlive = cashed || (elim && !isHost);
+  // Cashout or gameover — keep connection alive for cashout, full shutdown for over.
+  const keepAlive = cashed;
   if(keepAlive){
     isSpectating=true;
     clearInterval(_guestInputLoop);_guestInputLoop=null;
