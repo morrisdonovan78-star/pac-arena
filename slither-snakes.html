@@ -591,11 +591,19 @@ async function settle(){
   // Payout ONLY on Cash Out — never on elimination. 90% to player, 10% to creator wallet (handled server-side).
   if(!ST.address||!pkRoomId||ST.lobbyUsd===0)return;
   try{
+    // Refresh price right before cashout so lamport conversion is exact
+    await fetchPrice().catch(()=>{});
     // Accumulated in-game value (initial wager + kill-food winnings); fall back to initial wager if no price
     const accSol=(_myUsd>0&&ST.solPrice>0)?_myUsd/ST.solPrice:ST.wagerSol;
     const lamps=Math.max(Math.floor(accSol*solanaWeb3.LAMPORTS_PER_SOL),1);
-    const{sig,ts}=signSettleMsg('cashout',ST.address,lamps);
-    const r=await fetch(getSioUrl()+'/api/settle',{method:'POST',headers:{'Content-Type':'application/json','x-settle-sig':sig,'x-settle-ts':String(ts)},
+    if(!_keypair)throw new Error('No wallet loaded');
+    // ts in seconds — api/settle.js verifyPlayerSig checks Math.floor(Date.now()/1000)
+    const ts=Math.floor(Date.now()/1000);
+    // 'pac-arena:' prefix matches api/settle.js verifyPlayerSig message format
+    const _smsg=new TextEncoder().encode('pac-arena:cashout:'+ST.address+':'+lamps+':'+ts);
+    const _ssig=btoa(String.fromCharCode(...nacl.sign.detached(_smsg,_keypair.secretKey)));
+    // Route through Vercel — only Vercel has ESCROW_SECRET to sign the SOL transfer
+    const r=await fetch('/api/settle',{method:'POST',headers:{'Content-Type':'application/json','x-settle-sig':_ssig,'x-settle-ts':String(ts)},
       body:JSON.stringify({playerAddress:ST.address,wagerLamports:lamps,lobbyId:pkRoomId,action:'cashout',gameToken:ST.entryToken||null})});
     const d=await r.json().catch(()=>({}));
     if(r.ok) addToast('✓ Winnings secured!','#39FF14');
