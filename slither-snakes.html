@@ -257,16 +257,21 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
 <!-- Withdrawal modal -->
 <div id="wd-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;display:none;align-items:center;justify-content:center;">
   <div class="card" style="max-width:420px;width:90%;padding:1.5rem;">
-    <div style="font-family:'Press Start 2P',monospace;font-size:12px;color:var(--acc);margin-bottom:1.2rem;text-align:center;">WITHDRAW SOL</div>
+    <div style="font-family:'Press Start 2P',monospace;font-size:12px;color:var(--acc);margin-bottom:.6rem;text-align:center;">WITHDRAW SOL</div>
+    <div id="wd-bal-line" style="font-size:10px;color:var(--muted);text-align:center;margin-bottom:1rem;">Available: $0.00</div>
     <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">DESTINATION WALLET</div>
     <div style="display:flex;gap:6px;margin-bottom:10px;">
       <input id="wd-addr" placeholder="Solana wallet address…" autocomplete="off"
         style="flex:1;background:rgba(0,0,0,.4);border:1px solid rgba(57,255,20,.3);border-radius:6px;color:#fff;font-size:11px;padding:9px 10px;outline:none;"/>
       <button class="copy-btn" onclick="pasteWdAddr()" title="Paste from clipboard" style="white-space:nowrap;">📋 PASTE</button>
     </div>
-    <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">AMOUNT (SOL)</div>
-    <input id="wd-amt" type="number" min="0.001" step="0.001" placeholder="0.00"
-      style="width:100%;box-sizing:border-box;background:rgba(0,0,0,.4);border:1px solid rgba(57,255,20,.3);border-radius:6px;color:#fff;font-size:11px;padding:9px 10px;outline:none;margin-bottom:1rem;"/>
+    <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">AMOUNT (USD $)</div>
+    <div style="display:flex;gap:6px;margin-bottom:6px;">
+      <input id="wd-amt" type="number" min="0.01" step="0.01" placeholder="0.00" oninput="wdPreview()"
+        style="flex:1;box-sizing:border-box;background:rgba(0,0,0,.4);border:1px solid rgba(57,255,20,.3);border-radius:6px;color:#fff;font-size:11px;padding:9px 10px;outline:none;"/>
+      <button class="btn btn-c btn-sm" onclick="wdMax()" style="white-space:nowrap;">MAX</button>
+    </div>
+    <div id="wd-preview" style="font-size:10px;color:var(--muted);margin-bottom:1rem;min-height:14px;"></div>
     <div style="display:flex;gap:8px;">
       <button class="btn btn-g btn-sm" onclick="doWithdraw()" style="flex:1;">SEND</button>
       <button class="btn btn-r btn-sm" onclick="document.getElementById('wd-modal').style.display='none'" style="flex:1;">CANCEL</button>
@@ -695,29 +700,93 @@ async function checkSession(){
   }catch(e){localStorage.removeItem('ss_last');}
 }
 
+const WD_TX_FEE=5000; // lamports — 1 signature base fee
 function showWithdraw(){
   document.getElementById('wd-addr').value='';
   document.getElementById('wd-amt').value='';
+  document.getElementById('wd-preview').textContent='';
+  const balLamps=Math.round(ST.balance*1e9);
+  const maxLamps=Math.max(0,balLamps-WD_TX_FEE);
+  const balUsd=ST.solPrice>0?(balLamps/1e9*ST.solPrice).toFixed(2):'?';
+  const maxUsd=ST.solPrice>0?(maxLamps/1e9*ST.solPrice).toFixed(2):'?';
+  document.getElementById('wd-bal-line').textContent='Available: $'+balUsd+' (max send: $'+maxUsd+')';
   document.getElementById('wd-modal').style.display='flex';
+}
+function wdMax(){
+  const balLamps=Math.round(ST.balance*1e9);
+  const maxLamps=Math.max(0,balLamps-WD_TX_FEE);
+  const maxUsd=ST.solPrice>0?(maxLamps/1e9*ST.solPrice).toFixed(2):'0';
+  document.getElementById('wd-amt').value=maxUsd;
+  wdPreview();
+}
+function wdPreview(){
+  const amt=parseFloat(document.getElementById('wd-amt').value)||0;
+  const el=document.getElementById('wd-preview');
+  if(amt>0&&ST.solPrice>0){
+    const sol=(amt/ST.solPrice).toFixed(6);
+    const balLamps=Math.round(ST.balance*1e9);
+    const reqLamps=Math.floor(amt/ST.solPrice*1e9)+WD_TX_FEE;
+    el.textContent='≈ '+sol+' SOL'+(reqLamps>balLamps?' ⚠ exceeds balance':'');
+  } else { el.textContent=''; }
 }
 async function doWithdraw(){
   const toAddr=document.getElementById('wd-addr').value.trim();
-  const amt=parseFloat(document.getElementById('wd-amt').value);
-  if(!toAddr||isNaN(amt)||amt<=0){addToast('Enter a valid address and amount','#f55');return;}
-  if(!_keypair||!ST.conn){addToast('Wallet not loaded','#f55');return;}
+  const amtUsd=parseFloat(document.getElementById('wd-amt').value);
+  if(!toAddr||isNaN(amtUsd)||amtUsd<=0){addToast('Enter a valid address and amount','#f55');return;}
+  if(!_keypair){addToast('Wallet not loaded','#f55');return;}
   try{
+    // Refresh price + balance right before sending
+    await Promise.all([fetchPrice(),refreshBal()]).catch(()=>{});
+    if(!ST.solPrice||ST.solPrice<=0){addToast('SOL price unavailable — try again','#f55');return;}
+    const balLamps=Math.round(ST.balance*1e9);
+    let lamps=Math.floor(amtUsd/ST.solPrice*1e9);
+    // If amount+fee would meet or exceed balance, drain to exactly 0 (send balance minus fee)
+    if(lamps+WD_TX_FEE>=balLamps) lamps=balLamps-WD_TX_FEE;
+    if(lamps<=0){addToast('Insufficient balance after network fee (~$'+(WD_TX_FEE/1e9*ST.solPrice).toFixed(4)+')','#f55');return;}
+
+    // getLatestBlockhash via HTTP proxy (no WebSocket — confirmTransaction hangs on Vercel endpoint)
+    const bhRes=await fetch('/api/rpc',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({jsonrpc:'2.0',id:1,method:'getLatestBlockhash',params:[{commitment:'confirmed'}]})});
+    const bhData=await bhRes.json();
+    if(bhData.error)throw new Error(bhData.error.message);
+    const blockhash=bhData.result.value.blockhash;
+    const lastValidBlockHeight=bhData.result.value.lastValidBlockHeight;
+
     const from=new solanaWeb3.PublicKey(ST.address);
     const to=new solanaWeb3.PublicKey(toAddr);
-    const lamps=Math.floor(amt*solanaWeb3.LAMPORTS_PER_SOL);
-    const tx=new solanaWeb3.Transaction().add(
-      solanaWeb3.SystemProgram.transfer({fromPubkey:from,toPubkey:to,lamports:lamps})
-    );
-    const lb=await ST.conn.getLatestBlockhash('confirmed');
-    tx.recentBlockhash=lb.blockhash; tx.feePayer=from;
+    const tx=new solanaWeb3.Transaction();
+    tx.recentBlockhash=blockhash; tx.feePayer=from;
+    tx.add(solanaWeb3.SystemProgram.transfer({fromPubkey:from,toPubkey:to,lamports:lamps}));
     tx.sign(_keypair);
-    const sig=await ST.conn.sendRawTransaction(tx.serialize(),{skipPreflight:false});
-    await ST.conn.confirmTransaction(sig,'confirmed');
-    addToast('✓ Sent '+amt+' SOL!','#39FF14');
+
+    const sendRes=await fetch('/api/rpc',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({jsonrpc:'2.0',id:2,method:'sendTransaction',
+        params:[Buffer.from(tx.serialize()).toString('base64'),{encoding:'base64',skipPreflight:false,preflightCommitment:'confirmed',maxRetries:3}]})});
+    const sendData=await sendRes.json();
+    if(sendData.error)throw new Error(sendData.error.message);
+    const txSig=sendData.result;
+
+    // Poll confirmation via HTTP (no WebSocket)
+    let confirmed=false;
+    for(let i=0;i<20&&!confirmed;i++){
+      await new Promise(r=>setTimeout(r,1500));
+      try{
+        const stRes=await fetch('/api/rpc',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({jsonrpc:'2.0',id:3,method:'getSignatureStatuses',params:[[txSig],{searchTransactionHistory:false}]})});
+        const stData=await stRes.json();
+        const s=stData?.result?.value?.[0];
+        if(s){if(s.err)throw new Error('TX rejected: '+JSON.stringify(s.err));if(s.confirmationStatus==='confirmed'||s.confirmationStatus==='finalized'){confirmed=true;break;}}
+      }catch(pe){if(pe.message.startsWith('TX rejected'))throw pe;}
+      // Block-height expiry check every 6 polls (~9s)
+      if(i%6===5){
+        const bkRes=await fetch('/api/rpc',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({jsonrpc:'2.0',id:4,method:'getBlockHeight',params:[{commitment:'confirmed'}]})});
+        const bkData=await bkRes.json();
+        if((bkData?.result||0)>lastValidBlockHeight)throw new Error('Transaction expired — please try again');
+      }
+    }
+    const sentUsd=(lamps/1e9*ST.solPrice).toFixed(2);
+    addToast('✓ Sent $'+sentUsd+'!','#39FF14');
     document.getElementById('wd-modal').style.display='none';
     await refreshBal();
   }catch(e){addToast('Withdraw failed: '+(e.message||e),'#f55');console.warn('[withdraw]',e);}
