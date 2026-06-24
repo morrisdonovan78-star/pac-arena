@@ -302,12 +302,6 @@ body{touch-action:manipulation;}
     <span class="gf"><svg xmlns="http://www.w3.org/2000/svg" width="30" height="34" viewBox="-16 -18 32 36" style="display:inline-block;vertical-align:middle;overflow:visible"><g fill="#23232e"><polygon points="-3,-9 3,-9 0,-14"/><polygon points="6.5,-6.5 11,-2 12,-8"/><polygon points="9,2.5 14,3 11,8"/><polygon points="-6.5,-6.5 -11,-2 -12,-8"/><polygon points="-9,2.5 -14,3 -11,8"/></g><circle r="9" fill="#262630"/><circle cx="-2.8" cy="-3" r="2.8" fill="rgba(255,255,255,0.22)"/><path d="M0,-9 Q4.4,-11.6 2.6,-15" stroke="#b9a07a" stroke-width="1.4" fill="none"/><circle cx="2.6" cy="-15.4" r="2.3" fill="#FFD200"/></svg></span>
     <span class="gf"><svg xmlns="http://www.w3.org/2000/svg" width="30" height="32" viewBox="-15 -15 30 30" style="display:inline-block;vertical-align:middle;overflow:visible"><circle r="11" fill="#FF9500"/><circle r="8.4" fill="#FFC400"/><circle r="5.5" fill="#FFE680"/><polygon points="1.7,-7.5 -3.5,0.7 -0.3,0.7 -1.9,7.7 3.7,-0.5 0.5,-0.5" fill="#fff"/></svg></span>
   </div>
-  <div style="text-align:center;margin-bottom:2rem;">
-    <div class="logo"><span class="pac">PAC</span> <span class="arena">ARENA</span></div>
-    <div class="logo-sub">≡ SOLANA PVP WAGER ARENA ≡</div>
-    <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:#FF8C00;letter-spacing:1px;margin-top:6px;margin-bottom:2px;">SKILL-BASED BETTING · BEST PLAYER WINS</div>
-    <div id="ver-display" style="font-family:monospace;font-size:9px;color:rgba(255,215,0,0.4);letter-spacing:1px;">v3</div>
-  </div>
   <div id="home-on" class="card" style="display:none;text-align:center;max-width:880px;">
     <!-- Compact wallet bar -->
     <div class="w-strip" style="padding:10px 14px;margin-bottom:.6rem;gap:10px;align-items:center;">
@@ -3107,6 +3101,12 @@ const GP_MENUS={
 };
 const GP_HORIZ={'scr-lobby':[0,1,2]};
 let _mFocusIdx=0, _mPrevScr=null, _mPrev={};
+let _wasInActiveGame=false;
+// Re-arm button detection whenever tab regains focus or gamepad reconnects
+function _resetMPrev(){ _mPrev={}; }
+window.addEventListener('focus',_resetMPrev);
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) _resetMPrev(); });
+window.addEventListener('gamepadconnected',_resetMPrev);
 let _closetFocusIdx=0;
 function _applyClosetFocus(){
   for(let i=0;i<6;i++){
@@ -3151,6 +3151,9 @@ function _menuGpRaf(){
     const scrId0=_activeScr();
     const onGameScr=scrId0==='scr-game';
     const inActiveGame=onGameScr&&G.players&&!G.over&&!isSpectating&&!rejoinUp;
+    // Clear stale prev-state when transitioning out of active game (cashout, game-over, etc.)
+    if(_wasInActiveGame&&!inActiveGame) _mPrev={};
+    _wasInActiveGame=inActiveGame;
     if(!inActiveGame){
       const pads=navigator.getGamepads?navigator.getGamepads():[];
       let gp=null;
