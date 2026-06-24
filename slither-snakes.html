@@ -1825,7 +1825,15 @@ function spawnFoodFromSnake(snake){
 function reconcileFood(){
   const cap=Math.round(FOOD_TARGET*1.5);
   if(SG.food.length<FOOD_TARGET){const n=Math.min(FOOD_TARGET-SG.food.length,8);for(let i=0;i<n;i++)SG.food.push(makeFoodLowDensity());}
-  else if(SG.food.length>cap){const n=Math.min(SG.food.length-cap,15);for(let i=0;i<n;i++)SG.food.shift();}
+  else if(SG.food.length>cap){
+    // Only evict regular food — never remove SOL kill pellets (k:1).
+    // Kill food can drift to the front as snakes eat regular food and reconcileFood
+    // refills via push; without this guard shift() would eventually evict it.
+    let removed=0;const toRemove=Math.min(SG.food.length-cap,15);
+    for(let i=0;i<SG.food.length&&removed<toRemove;){
+      if(!SG.food[i].k){SG.food.splice(i,1);removed++;}else{i++;}
+    }
+  }
 }
 
 function sendSnakeState(){
@@ -2064,6 +2072,7 @@ async function endSnakeGame(reason,killerId){
     if(_sb)_sb.style.display='flex';
     const _srb=document.getElementById('spec-rejoin-btn');
     if(_srb)_srb.style.display='';
+    if(isHost&&SG&&pkRoomId)saveKillFood(); // persist SOL pellets immediately in case of crash/disconnect
     if(ST.lobbyUsd>0)(async()=>{try{await refreshBal();}catch(_){}})();
     return;
   }
