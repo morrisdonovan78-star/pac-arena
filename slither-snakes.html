@@ -574,7 +574,7 @@ function signSettleMsg(action,playerAddress,wagerLamports){
 
 async function recordWager(walletAddress,wagerLamports,txSig,lobbyId,playerName){
   if(!_keypair)throw new Error('No wallet loaded');
-  const ts=Date.now();
+  const ts=Math.floor(Date.now()/1000); // seconds — api/join.js verifyPlayerSig checks Math.floor(Date.now()/1000)
   // 'pac-arena:' prefix matches Vercel api/join.js verifyPlayerSig
   const _jmsg=new TextEncoder().encode('pac-arena:join:'+walletAddress+':'+wagerLamports+':'+ts);
   const _jsigBytes=nacl.sign.detached(_jmsg,_keypair.secretKey);
