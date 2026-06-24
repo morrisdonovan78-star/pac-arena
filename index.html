@@ -866,7 +866,7 @@ let _keypair  = null; // solanaWeb3.Keypair - stored locally
 // ═══════════════════════════════════════════════════════════
 // UI HELPERS
 // ═══════════════════════════════════════════════════════════
-function go(id){ document.querySelectorAll('.scr').forEach(s=>s.classList.remove('on')); document.getElementById(id).classList.add('on'); window.scrollTo(0,0); }
+function go(id){ document.querySelectorAll('.scr').forEach(s=>s.classList.remove('on')); document.getElementById(id).classList.add('on'); window.scrollTo(0,0); if(id==='scr-home') try{ _updateChampHomeCard(); }catch(_){} }
 function showStep(n){ ['step-email','step-otp','step-create-wallet'].forEach(s=>{ document.getElementById(s).style.display = s==='step-'+n?'block':'none'; }); }
 function showErr(m){ const e=document.getElementById('login-err'); if(e){e.textContent=m;e.style.display='block';} }
 function hideErr(){ const e=document.getElementById('login-err'); if(e) e.style.display='none'; }
@@ -1375,6 +1375,7 @@ async function checkSession(){
     const rsel=document.getElementById('region-sel'); if(rsel) rsel.value=REGION;
     syncServerBtns();
     initCustomizePanel();
+    _updateChampHomeCard();
   }catch(e){ localStorage.removeItem('pa_last'); }
 }
 
@@ -4317,9 +4318,11 @@ function drawChampion(g,p,px,py,r){
   // Legs speed up when boosted (pep=speed): walk accumulator advances faster
   const walkMult=p.pep?14:7.5;
   p._walk+=moved*walkMult;
-  // facing: keep last horizontal facing (don't flip when moving purely up/down)
+  // facing: horizontal flip + vertical rotation when moving up/down
   const vdx=(p.nx||p.dx);
   if(vdx>0)p._face=1; else if(vdx<0)p._face=-1;
+  const vdy=p.dy||0;
+  const movingVert=vdy!==0&&vdx===0;
   const moving=moved>0.0015;
   const t=performance.now();
   const cx=px+T/2, cy=py+T/2;
@@ -4354,8 +4357,15 @@ function drawChampion(g,p,px,py,r){
   g.shadowBlur=0;
   // Facing flip + lean + squash, then blit the real champion artwork.
   g.save();
-  g.scale(champ.flip ? -p._face : p._face, 1);
-  if(lean) g.rotate(lean*p._face);
+  if(movingVert){
+    // Align face to +x so ±90° rotation puts it up/down correctly for all sprites
+    g.scale(champ.flip ? -1 : 1, 1);
+    g.rotate(vdy<0 ? -Math.PI/2 : Math.PI/2);
+    if(lean) g.rotate(lean); // run-cycle sway in the rotated frame
+  } else {
+    g.scale(champ.flip ? -p._face : p._face, 1);
+    if(lean) g.rotate(lean*p._face);
+  }
   if(sq) g.scale(1+sq*0.6, 1-sq);
   const drewn=_blitSprite(g,champ.key,0,0,r*2.85,true);
   g.restore();
