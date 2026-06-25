@@ -2374,33 +2374,37 @@ function rafDraw(ts){
   if(SG&&SG.food)drawFood();
   if(SG)SG.snakes.forEach(s=>{if(s.alive&&s.path.length>1)drawSnake(s);});
 
-  // H key: debug hitbox overlay — yellow=body, orange=head BACK-half, cyan=hurtbox FRONT-half
+  // H key: debug hitbox overlay — yellow=body circles, orange=head back-arc, cyan=hurtbox front wedge
   if(_showHitboxes&&SG){
     SG.snakes.forEach(s=>{
       if(!s.alive||!s.path.length)return;
       const bPts=getBodyPoints(s);
       const r=sectionRadius(s);
-      const vr=r*1.08; // visual radius — slightly larger so consecutive circles close any gap
+      const fwd=r*0.5;          // hurtbox centre offset from head (pupil position)
+      const hbR=r*0.52;         // hurtbox radius; tip lands at r*1.02 (just kisses the nose)
+      // Angle from head centre to either endpoint of the hurtbox flat edge:
+      //   endpoint = (fwd, ±hbR) in rotated coords → angle = atan2(hbR, fwd) from forward
+      const hbAng=Math.atan2(hbR,fwd); // ≈ 46°
+      // Radius of a circle centred at head that passes through those same endpoints:
+      const headArcR=Math.sqrt(fwd*fwd+hbR*hbR); // ≈ r*0.721
+      const vr=r*1.08; // body circles — slightly inflated so consecutive segments close visual gaps
       ctx.lineWidth=2/_camZoom;
       bPts.forEach((p,i)=>{
         if(i===0){
-          // Head: back-half arc only (hurtbox covers the front half).
-          // Clockwise from angle+PI/2 → angle-PI/2 traces the back 180°.
+          // Head: arc that sweeps from one hurtbox-edge endpoint clockwise around the back
+          // to the other endpoint — no overlap with hurtbox zone, meets it exactly at the sides.
           ctx.strokeStyle='rgba(255,140,0,0.95)';
           ctx.beginPath();
-          ctx.arc(p.x,p.y,vr,s.angle+Math.PI/2,s.angle-Math.PI/2,false);
+          ctx.arc(p.x,p.y,headArcR,s.angle+hbAng,s.angle-hbAng,false);
           ctx.stroke();
         } else {
           ctx.strokeStyle='rgba(255,255,0,0.7)';
           ctx.beginPath();ctx.arc(p.x,p.y,vr,0,Math.PI*2);ctx.stroke();
         }
       });
-      // Hurtbox: front-half arc centred on pupil; tip flush with head hitbox front edge (vr from head centre).
-      // fwd=r*0.5 puts centre at pupil; hbR = vr - fwd so tip = fwd+hbR = vr exactly.
+      // Hurtbox: filled forward wedge centred at pupil
       const h=bPts[0];
       if(h){
-        const fwd=r*0.5;
-        const hbR=r*0.52; // tip at r*0.5+r*0.52=r*1.02 — just barely kissing the nose, not past it
         const px=h.x+Math.cos(s.angle)*fwd;
         const py=h.y+Math.sin(s.angle)*fwd;
         ctx.save();
