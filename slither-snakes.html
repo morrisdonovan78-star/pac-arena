@@ -468,7 +468,7 @@ const FOOD_GROW    = 2;     // sections added per food orb
 const MIN_SECTIONS = 8;     // die below this
 const BOOST_MIN    = 12;    // boost stops draining below this length
 const INIT_SECTIONS= 24;    // starting section count
-const MAX_SECTIONS = 90;    // hard cap on snake length
+const MAX_SECTIONS = 300;   // absolute hard cap; effective cap = floor(usd*70) per paid lobby
 const MAX_TURN     = 0.274; // rad/tick
 const BOOST_DRAIN  = 8;     // ticks between boost drain events
 const BOOST_DRAIN_AMT = 3.75; // drain accumulator per tick = AMT/DRAIN = 0.469 sections/tick (25% less size loss while boosting)
@@ -1810,8 +1810,13 @@ function snakeTick(){
     // can't boost at or below starting length
     if(snake.boost&&snake.numSections<=BOOST_MIN)snake.boost=false;
 
-    // Grow: increment section count from queue, cap at MAX_SECTIONS
-    if(snake.growQueue>0){snake.growQueue--;snake.numSections=Math.min(MAX_SECTIONS,snake.numSections+1);}
+    // Grow: increment section count from queue; cap = floor(usd*70) for paid lobbies, 90 for free
+    if(snake.growQueue>0){
+      const _uv=snake.id===myPid?_myUsd:(snake.usd||0);
+      const _cap=_uv>0?Math.min(MAX_SECTIONS,Math.floor(_uv*70)):90;
+      snake.growQueue--;
+      snake.numSections=Math.min(_cap,snake.numSections+1);
+    }
 
     // Boost drains sections; shed mass returns to the map as pebbles in your TRAIL only
     // (1 pebble per FOOD_GROW sections, so map+carried food stays conserved — no scatter).
