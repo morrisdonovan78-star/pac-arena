@@ -443,7 +443,8 @@ const GPAD_DEADZONE=0.2,GPAD_NAV_MS=180;
 let _guestInputs=new Map();
 let _killFeed=[];
 let _pendingKills=[];
-let _elimPairTick=-1,_elimPairSet=new Set(); // per-tick pair guard: never both die from same h2h
+let _elimPairTick=-1,_elimPairSet=new Set(); // per-tick guard (same-tick)
+const _recentKillPairs=new Map(); // time-based 2s guard — survives across ticks and host migrations
 let _playerMeta=new Map();
 let _ping=0,_pingIv=null;
 let _fps=0,_fpsFrames=0,_fpsLast=0;
@@ -1799,14 +1800,18 @@ function snakeTick(){
 function eliminateSnake(id,killerId){
   const snake=SG.snakes.get(id);
   if(!snake||!snake.alive)return;
-  // Absolute pair guard: first call wins, second call for same pair same tick is silently dropped.
-  // This is the final safety net — works regardless of which code path caused the call.
-  const tick=SG?SG.tick:-1;
-  if(tick!==_elimPairTick){_elimPairTick=tick;_elimPairSet.clear();}
   if(killerId!=null){
     const pk=id<killerId?id+':'+killerId:killerId+':'+id;
+    // Per-tick guard (same-tick duplicate calls)
+    const tick=SG?SG.tick:-1;
+    if(tick!==_elimPairTick){_elimPairTick=tick;_elimPairSet.clear();}
     if(_elimPairSet.has(pk))return;
     _elimPairSet.add(pk);
+    // Time-based 2s guard — survives tick boundaries and dual-host races
+    const now=Date.now();
+    for(const [k,v] of _recentKillPairs)if(now>v)_recentKillPairs.delete(k);
+    if(_recentKillPairs.has(pk))return;
+    _recentKillPairs.set(pk,now+2000);
   }
   snake.alive=false;
   spawnFoodFromSnake(snake);
