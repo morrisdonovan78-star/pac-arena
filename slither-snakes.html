@@ -387,8 +387,8 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
 
 // ══ CONSTANTS ════════════════════════════════════════════════
 const ARENA_R      = 3000;  // world radius
-const SNAKE_SPD    = 21.55; // px/tick normal (+5%)
-const BOOST_SPD    = 43.09; // px/tick boost (+5%)
+const SNAKE_SPD    = 19.83; // px/tick normal (-8%)
+const BOOST_SPD    = 39.64; // px/tick boost (-8%)
 const TICK_MS      = 33;    // 30 TPS
 // damnbruh.com exact physics constants (extracted from page-d38402305f41a2e6.js)
 const SIZE_PER_SEGMENT   = 5;    // segments = floor(size / 5)
@@ -2380,7 +2380,7 @@ function rafDraw(ts){
       if(!s.alive||!s.path.length)return;
       const bPts=getBodyPoints(s);
       const r=sectionRadius(s);
-      const vr=r*1.12; // visual radius — slightly larger so consecutive circles close any gap
+      const vr=r*1.08; // visual radius — slightly larger so consecutive circles close any gap
       ctx.lineWidth=2/_camZoom;
       bPts.forEach((p,i)=>{
         if(i===0){
@@ -2400,7 +2400,7 @@ function rafDraw(ts){
       const h=bPts[0];
       if(h){
         const fwd=r*0.5;
-        const hbR=vr-fwd; // = r*0.62 — tip lands exactly at vr from head centre
+        const hbR=r*0.52; // tip at r*0.5+r*0.52=r*1.02 — just barely kissing the nose, not past it
         const px=h.x+Math.cos(s.angle)*fwd;
         const py=h.y+Math.sin(s.angle)*fwd;
         ctx.save();
