@@ -271,6 +271,12 @@ function tick(room, io) {
 // ── Server setup ──────────────────────────────────────────────────────────────
 const app = express();
 app.get('/health', (_, res) => res.json({ ok: true, rooms: rooms.size }));
+app.get('/counts', (_, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const out = {};
+  rooms.forEach((room, id) => { out[id] = room.players.size; });
+  res.json(out);
+});
 
 const httpServer = http.createServer(app);
 const io = new Server(httpServer, {

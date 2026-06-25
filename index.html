@@ -786,14 +786,22 @@ const ESCROW_PUBKEY = '2SYFfCsSmKr8qwK1AfWd36JtAc1BCaRaSSxyECKUJjBb';
 // hits api.mainnet-beta.solana.com directly from the browser, so no 403.
 class ProxyConnection {
   async _post(method, params=[]){
-    const r = await fetch('/api/rpc',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({jsonrpc:'2.0',id:Date.now(),method,params})
-    });
-    const d = await r.json();
-    if(d.error) throw new Error('RPC '+method+': '+(d.error.message||JSON.stringify(d.error)));
-    return d.result;
+    const ac=new AbortController();
+    const tid=setTimeout(()=>ac.abort(),25000); // 25s hard cap — prevents silent infinite hangs
+    try{
+      const r=await fetch('/api/rpc',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({jsonrpc:'2.0',id:Date.now(),method,params}),
+        signal:ac.signal
+      });
+      const d=await r.json();
+      if(d.error) throw new Error('RPC '+method+': '+(d.error.message||JSON.stringify(d.error)));
+      return d.result;
+    }catch(e){
+      if(e.name==='AbortError') throw new Error('RPC '+method+' timed out — Solana network may be slow, please retry');
+      throw e;
+    }finally{ clearTimeout(tid); }
   }
   async getBalance(pubkey){
     const r=await this._post('getBalance',[pubkey.toString(),{commitment:'confirmed'}]);
@@ -1441,7 +1449,7 @@ function populateLobby(){
     document.getElementById('l5-n').textContent='fetching…';
     fetchLobbyCounts();
     if(_lobbyCountTimer) clearInterval(_lobbyCountTimer);
-    _lobbyCountTimer=setInterval(fetchLobbyCounts,8000);
+    _lobbyCountTimer=setInterval(fetchLobbyCounts,2000);
     updateUI();
     // Sync region selector
     const rsel=document.getElementById('region-sel'); if(rsel) rsel.value=REGION;
@@ -1959,19 +1967,28 @@ async function joinLobby(usd){
     tx.recentBlockhash=lb.blockhash;
     tx.feePayer=from;
 
-    lg('mm-log','Signing…','lwarn');
+    lg('mm-log','Signing transaction…','lwarn');
     await signLocalTx(tx);
+    lg('mm-log','Broadcasting to Solana…','lhi');
     const sig=await ST.conn.sendRawTransaction(tx.serialize());
+    lg('mm-log','Confirming on-chain…','lhi');
     await ST.conn.confirmTransaction({signature:sig,blockhash:lb.blockhash,lastValidBlockHeight:lb.lastValidBlockHeight},'confirmed');
     ST.hasEscrow=true;
     lg('mm-log','Deposit confirmed ✓','lok');
-    // Record wager server-side — MUST succeed before entering lobby.
-    // join.js also returns a lobby-specific Ably token; without it pkConnect
-    // cannot enter presence on the paid channel and game entry is blocked.
     lg('mm-log','Recording wager…','lhi');
     const roomId=usd===1?'paid-lobby-1':'paid-lobby-25';
     const _pName=localStorage.getItem('pa_name_'+ST.address)||'';
-    const joinResult=await recordWager(ST.address, lamps, sig, roomId, _pName);
+    // Retry recordWager up to 3× — TX is already on-chain at this point so money is safe;
+    // a transient server hiccup should not cost the player their wager.
+    let joinResult=null;
+    for(let _ri=0;_ri<3;_ri++){
+      try{ joinResult=await recordWager(ST.address, lamps, sig, roomId, _pName); break; }
+      catch(e2){
+        if(_ri===2) throw new Error('Deposit confirmed on-chain but server record failed. TX: '+sig+' — contact support with this TX ID.');
+        lg('mm-log','Server busy, retrying ('+(2+_ri)+'/3)…','lwarn');
+        await new Promise(r=>setTimeout(r,2000));
+      }
+    }
     const gameToken=joinResult.gameToken||null;
     ST.entryToken=gameToken;
     document.getElementById('mm-sub').textContent='Wager locked · Joining live lobby…';
@@ -1979,9 +1996,9 @@ async function joinLobby(usd){
     pkConnect(roomId, gameToken);
   }catch(e){
     _joiningLobby=false;
-    lg('mm-log','Error: '+e.message,'lerr');
-    await new Promise(r=>setTimeout(r,3000));
-    go('scr-lobby');
+    lg('mm-log','❌ '+e.message,'lerr');
+    await new Promise(r=>setTimeout(r,4000));
+    populateLobby(); go('scr-lobby');
   }
 }
 
