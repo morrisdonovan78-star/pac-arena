@@ -244,6 +244,22 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
         onkeydown="if(event.key==='Enter')saveDisplayName()"/>
       <button class="copy-btn" onclick="saveDisplayName()">SAVE</button>
     </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:1rem;">
+      <span style="font-family:'Press Start 2P',monospace;font-size:7px;color:var(--muted);white-space:nowrap;">SNAKE COLOR</span>
+      <input type="color" id="snake-color-pick" value="#39FF14"
+        oninput="_onSnakeColorPick(this.value)"
+        style="width:36px;height:28px;border:none;padding:0;background:none;cursor:pointer;border-radius:4px;flex-shrink:0;">
+      <div id="snake-color-swatches" style="display:flex;gap:5px;flex-wrap:wrap;">
+        <div onclick="_onSnakeColorPick('#39FF14')" style="width:18px;height:18px;border-radius:50%;background:#39FF14;cursor:pointer;border:2px solid rgba(255,255,255,0.2);"></div>
+        <div onclick="_onSnakeColorPick('#FF4444')" style="width:18px;height:18px;border-radius:50%;background:#FF4444;cursor:pointer;border:2px solid rgba(255,255,255,0.2);"></div>
+        <div onclick="_onSnakeColorPick('#00CFFF')" style="width:18px;height:18px;border-radius:50%;background:#00CFFF;cursor:pointer;border:2px solid rgba(255,255,255,0.2);"></div>
+        <div onclick="_onSnakeColorPick('#FF6600')" style="width:18px;height:18px;border-radius:50%;background:#FF6600;cursor:pointer;border:2px solid rgba(255,255,255,0.2);"></div>
+        <div onclick="_onSnakeColorPick('#CC00FF')" style="width:18px;height:18px;border-radius:50%;background:#CC00FF;cursor:pointer;border:2px solid rgba(255,255,255,0.2);"></div>
+        <div onclick="_onSnakeColorPick('#FFD700')" style="width:18px;height:18px;border-radius:50%;background:#FFD700;cursor:pointer;border:2px solid rgba(255,255,255,0.2);"></div>
+        <div onclick="_onSnakeColorPick('#FF69B4')" style="width:18px;height:18px;border-radius:50%;background:#FF69B4;cursor:pointer;border:2px solid rgba(255,255,255,0.2);"></div>
+        <div onclick="_onSnakeColorPick('#FFFFFF')" style="width:18px;height:18px;border-radius:50%;background:#FFFFFF;cursor:pointer;border:2px solid rgba(255,255,255,0.2);"></div>
+      </div>
+    </div>
     <div style="display:flex;gap:8px;margin-bottom:1rem;">
       <button id="srv-na" class="btn btn-c btn-sm" onclick="setGameServer('NA')" style="flex:1;">🇺🇸 NA</button>
       <button id="srv-eu" class="btn btn-c btn-sm" onclick="setGameServer('EU')" style="flex:1;">🇩🇪 EU</button>
@@ -482,7 +498,7 @@ let canvas=null,ctx=null,mmCanvas=null,mmCtx=null;
 let rafHandle=null,_hostRaf=null,_lastTickTs=0,_hostGraceTicks=0;
 let _bgPump=null,_bgLastTs=0,_bgSuppressSend=false;
 let _camX=0,_camY=0,_camZoom=0.6,_zoomOffset=0;
-let _mouseX=0,_mouseY=0,_mouseBoost=false,_padBoost=false,_cashoutTimer=null,_showHitboxes=false;
+let _mouseX=0,_mouseY=0,_mouseBoost=false,_padBoost=false,_cashoutTimer=null,_showHitboxes=false,_myEyeAngle=null;
 let _pendingState=null;
 let _gpadLastBtn=[],_gpadNavTs=0;
 const GPAD_DEADZONE=0.2,GPAD_NAV_MS=180;
@@ -560,6 +576,18 @@ function saveDisplayName(){
   if(!v){addToast('Enter a name first','#FF4444');return;}
   localStorage.setItem('ss_name_'+(ST.address||''),v);
   addToast('Name saved: '+v,'#39FF14');
+}
+function _onSnakeColorPick(col){
+  localStorage.setItem('ss_snake_color',col);
+  _playerMeta.set(myPid,{...(_playerMeta.get(myPid)||{}),color:col});
+  const my=SG&&SG.snakes.get(myPid);if(my)my.color=col;
+  const pick=document.getElementById('snake-color-pick');if(pick)pick.value=col;
+  addToast('Snake color updated','#FFD700');
+}
+function _loadSnakeColorPick(){
+  const saved=localStorage.getItem('ss_snake_color');
+  const pick=document.getElementById('snake-color-pick');
+  if(pick&&saved)pick.value=saved;
 }
 function syncServerBtns(){
   document.querySelectorAll('[id^="srv-"]').forEach(b=>b.classList.remove('btn-g'));
@@ -1103,14 +1131,15 @@ async function pkConnect(roomId,gameToken){
   isHost=false;
   _playerMeta.clear();
   const myName=getMyName();
-  _playerMeta.set(myPid,{color:colorFromId(myPid),name:myName});
+  const _myCol=localStorage.getItem('ss_snake_color')||colorFromId(myPid);
+  _playerMeta.set(myPid,{color:_myCol,name:myName});
 
   document.getElementById('mm-sub').textContent='Connecting to server…';
   lg('mm-log','Connecting…','lhi');
 
   try{
     _sio=io(getSioUrl(),{
-      auth:{pid:myPid,lobbyId:roomId,gameToken:gameToken||null,name:myName,color:colorFromId(myPid),wagerSol:ST.wagerSol||0},
+      auth:{pid:myPid,lobbyId:roomId,gameToken:gameToken||null,name:myName,color:_myCol,wagerSol:ST.wagerSol||0},
       transports:['websocket','polling'],
       reconnectionAttempts:Infinity,
       reconnectionDelay:1000,
@@ -1540,7 +1569,7 @@ function addSnakePlayer(id,color,name){
   if(existing&&existing.alive)return; // live snake — don't overwrite
   const pos=isHost?findSafeSpawn():[null,null];
   const s=makeSnake(id,color,name,pos[0],pos[1]);
-  s.usd=ST.lobbyUsd||0; // guest starts carrying their entry wager so kill food has correct SOL value
+  // s.usd left null — seeded from first ssin so host uses guest's actual wallet value
   SG.snakes.set(id,s);
 }
 
@@ -1694,14 +1723,14 @@ function snakeTick(){
   if(!SG||SG.over)return;
   SG.tick++;
 
-  // Bot AI — host-side only; botMode 'circle'=autocircle, 'fight'=chase nearest snake
+  // Bot AI — angle-only; position/movement comes from rafDraw dead-reckoning (same as all remote snakes)
   SG.snakes.forEach((s,id)=>{
     if(!id.startsWith('bot-')||!s.alive)return;
     const h=s.path[0];
     if(s.botMode==='fight'){
       let nearest=null,nearestD=Infinity,nearestSnake=null;
       SG.snakes.forEach((t,tid)=>{
-        if(!t.alive||tid===id)return;
+        if(!t.alive||tid===id||tid.startsWith('bot-'))return; // bots never target each other
         const th=t.path[0];if(!th)return;
         const d=(th.x-h.x)*(th.x-h.x)+(th.y-h.y)*(th.y-h.y);
         if(d<nearestD){nearestD=d;nearest=th;nearestSnake=t;}
@@ -1711,7 +1740,7 @@ function snakeTick(){
         const r=sectionRadius(s);
         const dist=Math.sqrt(nearestD);
         if(dist<r*8){
-          s.angle+=MAX_TURN; // too close — orbit instead of charging
+          s.angle+=MAX_TURN;
         } else {
           const tx=nearest.x+Math.cos(nearestSnake.angle)*SNAKE_SPD*3;
           const ty=nearest.y+Math.sin(nearestSnake.angle)*SNAKE_SPD*3;
@@ -1720,13 +1749,8 @@ function snakeTick(){
       } else {
         s.angle+=MAX_TURN;
       }
-    } else {
-      s.angle+=MAX_TURN;
     }
-    s.path.unshift({x:h.x+Math.cos(s.angle)*SNAKE_SPD,y:h.y+Math.sin(s.angle)*SNAKE_SPD});
-    trimPath(s);
-    const nh=s.path[0];
-    if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R)eliminateSnake(id,null);
+    // circle mode: angle updated per-frame in rafDraw (s.botCircle=true) — same smoothness as player
   });
 
   // Apply guest inputs
@@ -1961,6 +1985,7 @@ function eliminateSnake(id,killerId){
   }
   snake.alive=false;
   spawnFoodFromSnake(snake);
+  snake.path=[]; // vanish immediately — draw code checks alive but clearing path is belt-and-suspenders
   const km=_playerMeta.get(killerId)||{};
   const vm=_playerMeta.get(id)||{};
   _killFeed.push({kName:(km.name||'ARENA').slice(0,10),kColor:km.color||'#FFD700',vName:(vm.name||'SNAKE').slice(0,10),vColor:vm.color||'#FF69B4',ts:Date.now()});
@@ -2043,14 +2068,14 @@ function applyRemoteState(d){
       // Don't spawn food on guest — host food packet (sent same tick, _forceFoodSend=true)
       // is authoritative. Spawning locally creates duplicate trails at dead-reckoned positions.
       _snakesSpawnedFood.add(k.id); // prevent new host from re-spawning food if it migrates
-      if(dead&&dead.alive)dead.alive=false;
+      if(dead&&dead.alive){dead.alive=false;dead.path=[];} // instant vanish on guest
       if(k.id===myPid&&!_localDead)endSnakeGame('eliminated',k.killerId);
     });
   }
   if(d.snakes){
     // Track which IDs the host sent — any alive remote snake absent from packet has died (ghost fix)
     const _seenIds=new Set(d.snakes.map(sd=>sd.id));
-    SG.snakes.forEach((s,id)=>{if(id!==myPid&&s.alive&&!_seenIds.has(id))s.alive=false;});
+    SG.snakes.forEach((s,id)=>{if(id!==myPid&&s.alive&&!_seenIds.has(id)){s.alive=false;s.path=[];}});
     d.snakes.forEach(sd=>{
       // Own snake: sync size from host; on first sync snap to host-assigned spawn so camera lands near other players
       if(sd.id===myPid){
@@ -2122,7 +2147,11 @@ function applyRemoteState(d){
               (serverHead.x-p1.x)*(s.path[0].x-p1.x)+
               (serverHead.y-p1.y)*(s.path[0].y-p1.y)<0
             );
-            if(!wouldReverse)s.path[0]=serverHead;
+            if(!wouldReverse){
+              const _dx=serverHead.x-s.path[0].x,_dy=serverHead.y-s.path[0].y;
+              if(_dx*_dx+_dy*_dy>SNAKE_SPD*SNAKE_SPD*64){s.path[0]=serverHead;} // large gap: snap
+              else{s.path[0]={x:s.path[0].x+_dx*0.35,y:s.path[0].y+_dy*0.35};} // small gap: lerp
+            }
           }
         }
       }
@@ -2305,7 +2334,7 @@ function launchPractice(){
   ablyChannel=null; pkRoomId=null; _isPractice=true;
   if(!myPid)myPid='practice-'+Math.random().toString(36).slice(2,8);
   const nm=getMyName();
-  _playerMeta.set(myPid,{color:colorFromId(myPid),name:nm});
+  _playerMeta.set(myPid,{color:localStorage.getItem('ss_snake_color')||colorFromId(myPid),name:nm});
   isHost=true;
   initSnakeGame([]);
   launchSnakeGame();
@@ -2330,7 +2359,16 @@ function spawnBotSnake(){
   const mode=_botCount%2===0?'circle':'fight';
   _playerMeta.set(botId,{color:col,name:(mode==='fight'?'BOT FIGHTER':'BOT CIRCLE')+' '+_botCount});
   addSnakePlayer(botId,col,(mode==='fight'?'BOT FIGHTER':'BOT CIRCLE')+' '+_botCount);
-  const bs=SG&&SG.snakes.get(botId);if(bs)bs.botMode=mode;
+  const bs=SG&&SG.snakes.get(botId);
+  if(bs){
+    bs.botMode=mode;
+    bs.botCircle=(mode==='circle');
+    bs.numSections=INIT_SECTIONS+10;
+    const _br=sectionRadius(bs);
+    const _bpLen=Math.ceil(bs.numSections*_br*SEGMENT_SPACING*2/SNAKE_SPD)+10;
+    const _bh=bs.path[0]||{x:0,y:0};
+    bs.path=Array.from({length:_bpLen},(_,i)=>({x:_bh.x-Math.cos(bs.angle)*i*SNAKE_SPD,y:_bh.y-Math.sin(bs.angle)*i*SNAKE_SPD}));
+  }
   addToast('Bot '+_botCount+' ('+mode+') spawned','#FF6600');
 }
 function clearBotSnakes(){
@@ -2641,6 +2679,7 @@ function rafDraw(ts){
       s._predTs=ts;
       if(dt<=1)return;
       const frac=dt/TICK_MS;
+      if(s.botCircle)s.angle+=MAX_TURN*frac; // smooth auto-circle same cadence as player
       const spd=(s.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=s.path[0];
       s.path.unshift({x:h.x+Math.cos(s.angle)*spd,y:h.y+Math.sin(s.angle)*spd});
@@ -2695,7 +2734,25 @@ function rafDraw(ts){
 
   drawArena();
   if(SG&&SG.food)drawFood();
+  // Update pupil-tracking angle for own snake each frame
+  {const _pS=SG&&SG.snakes.get(myPid);
+  if(_pS&&_pS.alive&&_pS.path.length&&canvas){
+    const _ph=_pS.path[0];
+    const _mwx=(_mouseX-canvas.width/2)/_camZoom+_camX;
+    const _mwy=(_mouseY-canvas.height/2)/_camZoom+_camY;
+    _myEyeAngle=Math.atan2(_mwy-_ph.y,_mwx-_ph.x)-_pS.angle;
+  }else{_myEyeAngle=null;}}
   if(SG)SG.snakes.forEach(s=>{if(s.alive&&s.path.length>1)drawSnake(s);});
+  // Always draw H2H kill zone on own snake so player can see their range
+  {const _mS=SG&&SG.snakes.get(myPid);
+  if(_mS&&_mS.alive&&_mS.path.length){
+    const _mh=_mS.path[0],_mr=sectionRadius(_mS),_mH=_mr*2*_tuning.h2hScale;
+    ctx.save();
+    ctx.strokeStyle='rgba(255,210,0,0.55)';ctx.lineWidth=1.8/_camZoom;
+    ctx.setLineDash([5/_camZoom,4/_camZoom]);
+    ctx.beginPath();ctx.arc(_mh.x,_mh.y,_mH,_mS.angle+0.87,_mS.angle-0.87,false);ctx.stroke();
+    ctx.setLineDash([]);ctx.restore();
+  }}
 
   // H key: debug hitbox overlay
   // Head hitbox (h2h):  full circle r at path[0]  — red back arc
@@ -2947,14 +3004,18 @@ function _drawHeadCircle(snake,r){
   ctx.fillStyle='#fff';
   ctx.beginPath();ctx.arc(eFwd,-eSide,eR,0,Math.PI*2);ctx.fill();
   ctx.beginPath();ctx.arc(eFwd, eSide,eR,0,Math.PI*2);ctx.fill();
-  // Pupil
+  // Pupil — tracks mouse for own snake (damnbruh.com style)
+  const _isOwn=snake.id===myPid&&_myEyeAngle!=null;
+  const _pOff=eR*0.35;
+  const _pDx=_isOwn?Math.cos(_myEyeAngle)*_pOff:eR*0.3;
+  const _pDy=_isOwn?Math.sin(_myEyeAngle)*_pOff:0;
   ctx.fillStyle='#111';
-  ctx.beginPath();ctx.arc(eFwd+eR*0.3,-eSide,eR*0.55,0,Math.PI*2);ctx.fill();
-  ctx.beginPath();ctx.arc(eFwd+eR*0.3, eSide,eR*0.55,0,Math.PI*2);ctx.fill();
-  // Shine
+  ctx.beginPath();ctx.arc(eFwd+_pDx,-eSide+_pDy,eR*0.55,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(eFwd+_pDx, eSide+_pDy,eR*0.55,0,Math.PI*2);ctx.fill();
+  // Shine follows pupil
   ctx.fillStyle='rgba(255,255,255,0.75)';
-  ctx.beginPath();ctx.arc(eFwd+eR*0.05,-eSide-eR*0.18,eR*0.22,0,Math.PI*2);ctx.fill();
-  ctx.beginPath();ctx.arc(eFwd+eR*0.05, eSide-eR*0.18,eR*0.22,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(eFwd+_pDx-eR*0.08,-eSide+_pDy-eR*0.15,eR*0.22,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(eFwd+_pDx-eR*0.08, eSide+_pDy-eR*0.15,eR*0.22,0,Math.PI*2);ctx.fill();
 
   // Boost flame — only behind head (backward-facing half-disk so it never extends past the head tip)
   if(snake.boost){
@@ -3183,6 +3244,7 @@ document.addEventListener('DOMContentLoaded',async ()=>{
   setupOtp();
   syncServerBtns();
   _showPracticeBtn();
+  _loadSnakeColorPick();
   await checkSession();
 });
 </script>
