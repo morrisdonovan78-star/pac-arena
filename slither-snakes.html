@@ -364,7 +364,7 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
     <div class="gi"><span class="gl">FPS</span><span class="gv" id="hud-fps" style="color:var(--g)">--</span></div>
   </div>
   <div id="leaderboard" style="position:fixed;top:8px;right:10px;min-width:190px;background:rgba(7,7,15,0.88);border:1px solid rgba(255,215,0,0.35);border-radius:10px;padding:8px 12px;z-index:100;font-family:'Exo 2',sans-serif;pointer-events:none;display:none;"></div>
-  <button id="voice-btn" onclick="voiceToggle()" title="Voice chat — X (controller) / M (keyboard) to mute" style="position:fixed;bottom:16px;right:16px;z-index:200;display:none;width:46px;height:46px;border-radius:50%;background:rgba(7,7,15,0.85);border:1px solid rgba(255,215,0,0.3);color:#fff;font-size:20px;cursor:pointer;">🎙️</button>
+  <button id="voice-btn" onclick="voiceToggle()" title="Voice chat — X (controller) / M (keyboard) to mute" style="position:fixed;bottom:148px;right:14px;z-index:200;display:none;width:46px;height:46px;border-radius:50%;background:rgba(7,7,15,0.85);border:1px solid rgba(255,215,0,0.3);color:#fff;font-size:20px;cursor:pointer;">🎙️</button>
   <div id="voice-speakers" style="position:fixed;bottom:16px;left:12px;z-index:200;display:none;flex-direction:column;gap:4px;pointer-events:none;"></div>
   <div id="join-sync" style="display:none;position:fixed;inset:0;z-index:300;background:rgba(6,6,18,0.82);align-items:center;justify-content:center;flex-direction:column;gap:10px;pointer-events:none;">
     <div style="font-family:'Press Start 2P',monospace;font-size:13px;color:#39ff14;letter-spacing:3px;">JOINING…</div>
@@ -2390,8 +2390,8 @@ function spawnBotSnake(mode){
   const circleColors=['#00AAFF','#00CFFF','#44DDFF','#0088CC'];
   const fightColors= ['#FF4400','#FF6600','#FF2200','#FF8800'];
   const col=(mode==='fight'?fightColors:circleColors)[_botCount%4];
-  _playerMeta.set(botId,{color:col,name:(mode==='fight'?'FIGHTER':'CIRCLER')+' '+_botCount});
-  addSnakePlayer(botId,col,(mode==='fight'?'FIGHTER':'CIRCLER')+' '+_botCount);
+  _playerMeta.set(botId,{color:col,name:mode==='fight'?'FIGHTER':'CIRCLE'});
+  addSnakePlayer(botId,col,mode==='fight'?'FIGHTER':'CIRCLE');
   const bs=SG&&SG.snakes.get(botId);
   if(bs){
     bs.botMode=mode;
@@ -2558,9 +2558,12 @@ function enterSpectate(){
 async function rejoinGame(){
   const wasPractice=_isPractice; // capture before goHome() clears it
   const roomId=_lastRoomId;
+  // Snapshot active bot modes before goHome() destroys SG
+  const botsSnapshot=wasPractice&&SG?[...SG.snakes.entries()].filter(([id])=>id.startsWith('bot-')).map(([,s])=>s.botMode||'circle'):[];
   goHome();
   if(wasPractice){
     launchPractice(); // practice lobby: re-launch locally, no network needed
+    if(botsSnapshot.length)setTimeout(()=>botsSnapshot.forEach(mode=>spawnBotSnake(mode)),100);
   } else if(roomId){
     await new Promise(r=>setTimeout(r,200));
     go('scr-mm');
