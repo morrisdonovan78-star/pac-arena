@@ -249,6 +249,7 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
       <button id="srv-eu" class="btn btn-c btn-sm" onclick="setGameServer('EU')" style="flex:1;">🇩🇪 EU</button>
     </div>
     <button class="btn btn-g" onclick="go('scr-lobby');populateLobby();" style="margin-bottom:10px;font-size:11px;letter-spacing:2px;">▶ PLAY NOW</button>
+    <button id="practice-btn" class="btn btn-c btn-sm" onclick="launchPractice()" style="display:none;margin-bottom:10px;">⚙ PRACTICE (PRIVATE)</button>
     <button class="btn btn-c btn-sm" onclick="showWithdraw()" style="margin-bottom:10px;">💸 WITHDRAW SOL</button>
     <button class="btn btn-r btn-sm" onclick="doLogout()" style="margin:0 auto;width:auto;">LOGOUT</button>
   </div>
@@ -349,6 +350,10 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
   <div id="leaderboard" style="position:fixed;top:8px;right:10px;min-width:190px;background:rgba(7,7,15,0.88);border:1px solid rgba(255,215,0,0.35);border-radius:10px;padding:8px 12px;z-index:100;font-family:'Exo 2',sans-serif;pointer-events:none;display:none;"></div>
   <button id="voice-btn" onclick="voiceToggle()" title="Voice chat — X (controller) / M (keyboard) to mute" style="position:fixed;bottom:16px;right:16px;z-index:200;display:none;width:46px;height:46px;border-radius:50%;background:rgba(7,7,15,0.85);border:1px solid rgba(255,215,0,0.3);color:#fff;font-size:20px;cursor:pointer;">🎙️</button>
   <div id="voice-speakers" style="position:fixed;bottom:16px;left:12px;z-index:200;display:none;flex-direction:column;gap:4px;pointer-events:none;"></div>
+  <div id="join-sync" style="display:none;position:fixed;inset:0;z-index:300;background:rgba(6,6,18,0.82);align-items:center;justify-content:center;flex-direction:column;gap:10px;pointer-events:none;">
+    <div style="font-family:'Press Start 2P',monospace;font-size:13px;color:#39ff14;letter-spacing:3px;">JOINING…</div>
+    <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:rgba(255,255,255,0.35);letter-spacing:2px;">SYNCING WITH HOST</div>
+  </div>
   <div id="boost-hint">HOLD CLICK TO BOOST 🔥</div>
   <div id="bot-bar" style="display:none;position:fixed;bottom:72px;left:12px;z-index:200;flex-direction:column;gap:6px;">
     <button onclick="spawnBotSnake()" style="padding:8px 12px;background:#FF6600;border:none;color:#fff;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:6px;letter-spacing:1px;opacity:0.9;">+ BOT</button>
@@ -504,7 +509,7 @@ let _lastRoomId=null;
 let _tuning={hbFwd:0.75,hbR:0.25,h2hScale:1.0}; // live combat physics — synced via ss packets
 try{const _sv=localStorage.getItem('ss_tuning_v1');if(_sv&&localStorage.getItem('ss_owner')==='1')Object.assign(_tuning,JSON.parse(_sv));}catch(_){}
 let _showTuning=false;
-let _botCount=0;
+let _botCount=0,_isPractice=false;
 
 function getRpc(){return '/api/rpc';} // proxy through Vercel to avoid 403 from public RPCs
 function getSioUrl(){return GAME_SERVERS[GAME_SERVER].url;}
@@ -720,6 +725,7 @@ async function finishLogin(kp){
   if(nameInput&&savedName) nameInput.value=savedName;
   document.getElementById('home-off').style.display='none';
   document.getElementById('home-on').style.display='block';
+  _showPracticeBtn();
   syncServerBtns();
 }
 
@@ -743,6 +749,7 @@ async function checkSession(){
     if(nameInput&&savedName) nameInput.value=savedName;
     document.getElementById('home-off').style.display='none';
     document.getElementById('home-on').style.display='block';
+    _showPracticeBtn();
     syncServerBtns();
   }catch(e){localStorage.removeItem('ss_last');}
 }
@@ -1133,7 +1140,7 @@ async function pkConnect(roomId,gameToken){
         document.getElementById('mm-sub').textContent='Connected!';
         lg('mm-log','Joined! Role: '+(isHost?'HOST':'GUEST'),'lok');
         initSnakeGame(allPlayers);
-        setTimeout(()=>launchSnakeGame(),50);
+        launchSnakeGame();
       }catch(e){lg('mm-log','❌ Game init error: '+e.message,'lerr');console.error('[init]',e);}
     });
 
@@ -1477,7 +1484,7 @@ function saveKillFood(){
   const kf=SG.food.filter(f=>f.k); // save ALL kill food regardless of SOL value (w=0 is still gold/valid)
   if(!kf.length){localStorage.removeItem('kf:'+pkRoomId);return;}
   try{
-    localStorage.setItem('kf:'+pkRoomId,JSON.stringify({ts:Date.now(),food:kf.map(f=>({x:Math.round(f.x),y:Math.round(f.y),w:f.w||0,s:Math.round(f.size)}))}));
+    localStorage.setItem('kf:'+pkRoomId,JSON.stringify({ts:Date.now(),food:kf.map(f=>({x:Math.round(f.x),y:Math.round(f.y),w:f.w||0,s:Math.round(f.size),ts:f.ts||Date.now()}))}));
     console.log('[saveKillFood] saved',kf.length,'items');
   }catch(e){console.warn('[saveKillFood]',e);}
 }
@@ -1494,7 +1501,7 @@ function loadKillFood(){
       let fx=f.x,fy=f.y;
       const dist=Math.sqrt(fx*fx+fy*fy);
       if(dist>maxR){const sc=maxR/dist;fx*=sc;fy*=sc;}
-      SG.food.push({x:fx,y:fy,ci:3,size:f.s||10,k:1,w:f.w||0});
+      SG.food.push({x:fx,y:fy,ci:3,size:f.s||10,k:1,w:f.w||0,ts:f.ts||ts});
     });
     if(food.length){addToast('⚡ '+food.length+' SOL pellets restored!','#FFD700');_forceFoodSend=true;}
     localStorage.removeItem('kf:'+pkRoomId); // clear — re-saved on next leave if still uneaten
@@ -1508,16 +1515,20 @@ function initSnakeGame(players){
   _snakesSpawnedFood.clear();
   SG={snakes:new Map(),food:[],tick:0,over:false};
   const myColor=_playerMeta.get(myPid)?.color||colorFromId(myPid);
-  SG.snakes.set(myPid,makeSnake(myPid,myColor,getMyName()));
-  players.forEach(p=>{
-    if(p.id!==myPid)
-      SG.snakes.set(p.id,makeSnake(p.id,p.color||colorFromId(p.id),p.name||'SNAKE'));
-  });
-  if(isHost){SG.food=seedFoodLayout();loadKillFood();} // restore uneaten SOL pellets when rejoining
-  else{
+  if(isHost){
+    SG.snakes.set(myPid,makeSnake(myPid,myColor,getMyName()));
+    players.forEach(p=>{
+      if(p.id!==myPid)
+        SG.snakes.set(p.id,makeSnake(p.id,p.color||colorFromId(p.id),p.name||'SNAKE'));
+    });
+    SG.food=seedFoodLayout();loadKillFood();
+  } else {
+    // Guest joining active game: spawn at center (0,0); host will snap to real position on first ss.
+    // Don't pre-create other players' snakes at random positions — applyRemoteState populates them at
+    // correct positions on first ss packet, avoiding the confusing "snakes everywhere" initial state.
+    SG.snakes.set(myPid,makeSnake(myPid,myColor,getMyName(),0,0));
     _firstRemoteSync=true;
-    // Safety: if first SS packet never arrives (server lag), unblock camera after 3 s
-    setTimeout(()=>{if(_firstRemoteSync){_firstRemoteSync=false;}},3000);
+    setTimeout(()=>{if(_firstRemoteSync){_firstRemoteSync=false;_hideSyncOverlay();}},600);
   }
   _hostPid=isHost?myPid:null; _lastSsTs=Date.now(); // host-migration tracking
   _myUsd=ST.lobbyUsd||0; // start at entry wager value
@@ -1688,17 +1699,29 @@ function snakeTick(){
     if(!id.startsWith('bot-')||!s.alive)return;
     const h=s.path[0];
     if(s.botMode==='fight'){
-      let nearest=null,nearestD=Infinity;
+      let nearest=null,nearestD=Infinity,nearestSnake=null;
       SG.snakes.forEach((t,tid)=>{
         if(!t.alive||tid===id)return;
         const th=t.path[0];if(!th)return;
         const d=(th.x-h.x)*(th.x-h.x)+(th.y-h.y)*(th.y-h.y);
-        if(d<nearestD){nearestD=d;nearest=th;}
+        if(d<nearestD){nearestD=d;nearest=th;nearestSnake=t;}
       });
-      if(nearest)applyTurn(s,Math.atan2(nearest.y-h.y,nearest.x-h.x));
-      else s.angle+=MAX_TURN*0.72;
+      s.boost=false;
+      if(nearest){
+        const r=sectionRadius(s);
+        const dist=Math.sqrt(nearestD);
+        if(dist<r*8){
+          s.angle+=MAX_TURN; // too close — orbit instead of charging
+        } else {
+          const tx=nearest.x+Math.cos(nearestSnake.angle)*SNAKE_SPD*3;
+          const ty=nearest.y+Math.sin(nearestSnake.angle)*SNAKE_SPD*3;
+          applyTurn(s,Math.atan2(ty-h.y,tx-h.x));
+        }
+      } else {
+        s.angle+=MAX_TURN;
+      }
     } else {
-      s.angle+=MAX_TURN*0.72;
+      s.angle+=MAX_TURN;
     }
     s.path.unshift({x:h.x+Math.cos(s.angle)*SNAKE_SPD,y:h.y+Math.sin(s.angle)*SNAKE_SPD});
     trimPath(s);
@@ -1782,7 +1805,7 @@ function snakeTick(){
   // Hurtbox-nose-vs-H2H-ring: if your hurtbox center enters the opponent's H2H
   // ring BUT only from the rear 60% arc (front ±72° is a dead zone), you die.
   // Exactly ONE death per pair per tick — first condition checked (i<j) wins.
-  // Front dead-zone math: cos²(72°)≈0.0955; skip if dot>0 AND dot²>0.0955*dist²
+  // Front dead-zone math: cos²(72°)≈0.25; skip if dot>0 AND dot²>0.25*dist²
   for(let i=0;i<alive.length;i++){
     const a=alive[i]; if(!a.alive)continue;
     const ah=a.path[0]; if(!ah)continue;
@@ -1799,13 +1822,13 @@ function snakeTick(){
       // A's hurtbox in B's rear H2H zone?
       const dAxB=aHbX-bh.x,dAyB=aHbY-bh.y,d2AB=dAxB*dAxB+dAyB*dAyB;
       const dotAB=dAxB*Math.cos(b.angle)+dAyB*Math.sin(b.angle);
-      const aInB=d2AB<h2hR*h2hR&&!(dotAB>0&&dotAB*dotAB>0.0955*d2AB);
+      const aInB=d2AB<h2hR*h2hR&&!(dotAB>0&&dotAB*dotAB>0.25*d2AB);
       // B's hurtbox in A's rear H2H zone?
       const bHbX=bh.x+Math.cos(b.angle)*(bR*_tuning.hbFwd);
       const bHbY=bh.y+Math.sin(b.angle)*(bR*_tuning.hbFwd);
       const dBxA=bHbX-ah.x,dByA=bHbY-ah.y,d2BA=dBxA*dBxA+dByA*dByA;
       const dotBA=dBxA*Math.cos(a.angle)+dByA*Math.sin(a.angle);
-      const bInA=d2BA<h2hR*h2hR&&!(dotBA>0&&dotBA*dotBA>0.0955*d2BA);
+      const bInA=d2BA<h2hR*h2hR&&!(dotBA>0&&dotBA*dotBA>0.25*d2BA);
       if(aInB||bInA){
         _h2hDone.add(cpk);
         if(aInB&&bInA){
@@ -1840,19 +1863,19 @@ function snakeTick(){
             _h2hDone.add(pk);
             const bh=b.path[0];
             // Rear-arc rule (same as pre-loop): nose in opponent's rear 60% → nose-owner dies.
-            // Front ±72° is dead zone (cos²72°≈0.0955). One outcome only — A checked first.
+            // Front ±72° is dead zone (cos²72°≈0.25). One outcome only — A checked first.
             const aHbX2=ah.x+Math.cos(a.angle)*(aR*_tuning.hbFwd);
             const aHbY2=ah.y+Math.sin(a.angle)*(aR*_tuning.hbFwd);
             const dAx2=aHbX2-bh.x,dAy2=aHbY2-bh.y;
             const dotA2=dAx2*Math.cos(b.angle)+dAy2*Math.sin(b.angle);
             const d2A2=dAx2*dAx2+dAy2*dAy2;
-            const aInRear2=!(dotA2>0&&dotA2*dotA2>0.0955*d2A2);
+            const aInRear2=!(dotA2>0&&dotA2*dotA2>0.25*d2A2);
             const bHbX2=bh.x+Math.cos(b.angle)*(bR*_tuning.hbFwd);
             const bHbY2=bh.y+Math.sin(b.angle)*(bR*_tuning.hbFwd);
             const dBx2=bHbX2-ah.x,dBy2=bHbY2-ah.y;
             const dotB2=dBx2*Math.cos(a.angle)+dBy2*Math.sin(a.angle);
             const d2B2=dBx2*dBx2+dBy2*dBy2;
-            const bInRear2=!(dotB2>0&&dotB2*dotB2>0.0955*d2B2);
+            const bInRear2=!(dotB2>0&&dotB2*dotB2>0.25*d2B2);
             if(aInRear2&&bInRear2){
               const aWins=a.numSections>b.numSections||(a.numSections===b.numSections&&a.id>b.id);
               if(aWins)eliminateSnake(b.id,a.id);else eliminateSnake(a.id,b.id);
@@ -1962,7 +1985,7 @@ function spawnFoodFromSnake(snake){
     let fx=p.x,fy=p.y;
     const dist=Math.sqrt(fx*fx+fy*fy);
     if(dist>maxR){const sc=maxR/dist;fx*=sc;fy*=sc;}
-    SG.food.push({x:fx,y:fy,ci:3,size:9+Math.random()*5,k:1,w:w});
+    SG.food.push({x:fx,y:fy,ci:3,size:9+Math.random()*5,k:1,w:w,ts:Date.now()});
   });
   _forceFoodSend=true; // push kill food to guests on the very next ss packet
 }
@@ -1971,6 +1994,9 @@ function spawnFoodFromSnake(snake){
 // Regular pebbles always refill to FOOD_TARGET. Kill food (f.k=1) is never counted
 // against the cap and is never evicted — it stays until a snake eats it.
 function reconcileFood(){
+  // Evict kill food older than 8 minutes that nobody collected
+  const _now=Date.now(),_KF_MAX=480000;
+  SG.food=SG.food.filter(f=>!f.k||!f.ts||(_now-f.ts)<_KF_MAX);
   // Count only regular food — kill pellets are invisible to the refill/cap logic
   let regCount=0;
   for(let i=0;i<SG.food.length;i++){if(!SG.food[i].k)regCount++;}
@@ -2041,7 +2067,7 @@ function applyRemoteState(d){
             own.path=Array.from({length:pn},(_,i)=>({x:head.x-Math.cos(ang)*i*SNAKE_SPD,y:head.y-Math.sin(ang)*i*SNAKE_SPD}));
             own.angle=ang;
           }
-          _firstRemoteSync=false; // always unblock on first SS regardless of segs presence
+          _firstRemoteSync=false; _hideSyncOverlay(); // always unblock on first SS regardless of segs presence
         }
         return;
       }
@@ -2108,8 +2134,17 @@ function applyRemoteState(d){
 }
 
 // ── Guest input sending ──────────────────────────────────────
+function _hideSyncOverlay(){const _jo=document.getElementById('join-sync');if(_jo)_jo.style.display='none';}
 function startGuestLoop(){
   if(_guestInputLoop){clearInterval(_guestInputLoop);_guestInputLoop=null;}
+  // Send one ssin immediately so host registers us on their very next tick (don't wait up to 40ms)
+  if(SG&&!SG.over&&_sio){
+    const _my0=SG.snakes.get(myPid);
+    if(_my0&&_my0.alive&&_my0.path.length){
+      const _h0=_my0.path[0];
+      _sio.emit('ssin',{id:myPid,angle:_my0.angle,circle:false,boost:false,x:Math.round(_h0.x),y:Math.round(_h0.y),usd:_myUsd});
+    }
+  }
   _guestInputLoop=setInterval(()=>{
     if(!SG||SG.over||!ablyChannel||isSpectating||_localDead)return;
     const my=SG.snakes.get(myPid);
@@ -2162,7 +2197,8 @@ function launchSnakeGame(){
   if(_hostWatch)clearInterval(_hostWatch);
   _hostWatch=setInterval(_checkHost,700); // watch for host departure → migrate
   const _vb=document.getElementById('voice-btn');if(_vb)_vb.style.display='flex';
-  const _bb=document.getElementById('bot-bar');if(_bb)_bb.style.display=localStorage.getItem('ss_owner')==='1'?'flex':'none';
+  const _bb=document.getElementById('bot-bar');if(_bb)_bb.style.display=(_isPractice&&localStorage.getItem('ss_owner')==='1')?'flex':'none';
+  if(_firstRemoteSync){const _jo=document.getElementById('join-sync');if(_jo)_jo.style.display='flex';}
 }
 
 // ── Combat Tuning Suite ──────────────────────────────────────
@@ -2251,7 +2287,7 @@ function _drawTuningPreview(){
   const h2hR=r*2*_tuning.h2hScale;
   cx.save();
   cx.strokeStyle='rgba(255,200,0,0.85)';cx.lineWidth=2;cx.setLineDash([5,4]);
-  cx.beginPath();cx.arc(hx,hy,h2hR,angle+1.257,angle-1.257,false);cx.stroke();
+  cx.beginPath();cx.arc(hx,hy,h2hR,angle+1.047,angle-1.047,false);cx.stroke();
   cx.setLineDash([]);cx.restore();
 
   // Labels
@@ -2263,9 +2299,22 @@ function _drawTuningPreview(){
   cx.fillStyle='rgba(255,200,0,0.9)';
   cx.fillText('H2H r='+h2hR.toFixed(0),hx+h2hR+2,hy+3);
 }
+function launchPractice(){
+  if(localStorage.getItem('ss_owner')!=='1')return;
+  if(SG){addToast('Already in a game','#FF4444');return;}
+  ablyChannel=null; pkRoomId=null; _isPractice=true;
+  if(!myPid)myPid='practice-'+Math.random().toString(36).slice(2,8);
+  const nm=getMyName();
+  _playerMeta.set(myPid,{color:colorFromId(myPid),name:nm});
+  isHost=true;
+  initSnakeGame([]);
+  launchSnakeGame();
+  addToast('PRACTICE — private lobby','#FFD700');
+}
 function spawnBotSnake(){
   // Auto-start a solo practice game when not already in one
   if(!SG){
+    ablyChannel=null; pkRoomId=null; _isPractice=true;
     if(!myPid)myPid='practice-'+Math.random().toString(36).slice(2,8);
     const nm=getMyName();
     _playerMeta.set(myPid,{color:colorFromId(myPid),name:nm});
@@ -2456,6 +2505,7 @@ async function rejoinGame(){
 }
 
 function goHome(){
+  _isPractice=false; _hideSyncOverlay();
   isSpectating=false; _localDead=false; _firstRemoteSync=false; _autoCircle=false;
   _showTuning=false; const _tp=document.getElementById('tuning-panel');if(_tp)_tp.style.display='none';
   // Blur any focused input so the gamepad doesn't get trapped in a text field
@@ -3125,9 +3175,14 @@ function voiceCleanup(){
 }
 
 // ══ INIT ════════════════════════════════════════════════════
+function _showPracticeBtn(){
+  const _pb=document.getElementById('practice-btn');
+  if(_pb)_pb.style.display=localStorage.getItem('ss_owner')==='1'?'flex':'none';
+}
 document.addEventListener('DOMContentLoaded',async ()=>{
   setupOtp();
   syncServerBtns();
+  _showPracticeBtn();
   await checkSession();
 });
 </script>
