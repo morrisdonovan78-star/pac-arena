@@ -2374,7 +2374,7 @@ function rafDraw(ts){
   if(SG&&SG.food)drawFood();
   if(SG)SG.snakes.forEach(s=>{if(s.alive&&s.path.length>1)drawSnake(s);});
 
-  // H key: debug hitbox overlay — yellow circles = body collision, orange = head
+  // H key: debug hitbox overlay — yellow=body, orange=head circle, cyan=hurtbox (forward hemisphere only)
   if(_showHitboxes&&SG){
     SG.snakes.forEach(s=>{
       if(!s.alive||!s.path.length)return;
@@ -2385,6 +2385,30 @@ function rafDraw(ts){
         ctx.strokeStyle=i===0?'rgba(255,140,0,0.95)':'rgba(255,255,0,0.7)';
         ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.stroke();
       });
+      // Hurtbox: cyan filled half-circle on head facing direction of travel.
+      // A body point must land inside this arc (fwdDot>0) to count as a kill hit.
+      // The back half of the head is a dead zone — side/rear clips never kill.
+      const h=bPts[0];
+      if(h){
+        ctx.save();
+        ctx.fillStyle='rgba(0,255,220,0.20)';
+        ctx.strokeStyle='rgba(0,255,220,0.90)';
+        ctx.lineWidth=2/_camZoom;
+        ctx.beginPath();
+        ctx.moveTo(h.x,h.y);
+        ctx.arc(h.x,h.y,r,s.angle-Math.PI/2,s.angle+Math.PI/2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        // Direction spike — shows exactly where the hurtbox is pointing
+        ctx.strokeStyle='rgba(0,255,220,1)';
+        ctx.lineWidth=3/_camZoom;
+        ctx.beginPath();
+        ctx.moveTo(h.x,h.y);
+        ctx.lineTo(h.x+Math.cos(s.angle)*r*1.5,h.y+Math.sin(s.angle)*r*1.5);
+        ctx.stroke();
+        ctx.restore();
+      }
     });
   }
 
