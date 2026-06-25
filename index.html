@@ -5259,7 +5259,7 @@ function _renderLeaderboard(d){
     const rankCol=i===0?'#FFD700':i===1?'#C0C0C0':i===2?'#CD7F32':'var(--muted)';
     const rank=medal?`<span style="font-size:16px;">${medal}</span>`:`<span style="font-family:'Press Start 2P',monospace;font-size:8px;color:${rankCol};">#${i+1}</span>`;
     const displayName=p.name?escHtml(p.name.slice(0,16)):'ANON';
-    const kd=((p.kills||0)/Math.max(p.losses||0,1)).toFixed(1);
+    const kd=((p.kills||0)/Math.max(p.deaths||0,1)).toFixed(1);
     const winRate=p.games>0?((+(p.wins||0)/p.games)*100).toFixed(0)+'%':'–';
     return `<div class="lb-row" data-idx="${i}" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:8px;padding:11px 13px;margin-bottom:7px;scroll-margin:8px;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;">
@@ -5296,10 +5296,11 @@ function openLbProfile(idx){
   const wins=p.wins||0;
   const losses=p.losses||0;
   const kills=p.kills||0;
+  const deaths=p.deaths||0;
   const games=p.games||0;
   const earned=(+(p.earned||0)/1e9).toFixed(4);
   const wagered=(+(p.wagered||0)/1e9).toFixed(4);
-  const kd=(kills/Math.max(losses,1)).toFixed(2);
+  const kd=(kills/Math.max(deaths,1)).toFixed(2);
   const winRate=games>0?((wins/games)*100).toFixed(1)+'%':'0.0%';
   const addr=p.address||'';
   const short=addr.length>12?addr.slice(0,6)+'…'+addr.slice(-4):addr;
@@ -5337,8 +5338,8 @@ function openLbProfile(idx){
         <div style="font-family:'Press Start 2P',monospace;font-size:12px;color:var(--g);">${wins}</div>
       </div>
       <div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:.7rem;text-align:center;">
-        <div style="font-size:8px;color:var(--muted);margin-bottom:.35rem;">LOSSES</div>
-        <div style="font-family:'Press Start 2P',monospace;font-size:12px;color:var(--muted);">${losses}</div>
+        <div style="font-size:8px;color:var(--muted);margin-bottom:.35rem;">DEATHS</div>
+        <div style="font-family:'Press Start 2P',monospace;font-size:12px;color:var(--muted);">${deaths}</div>
       </div>
     </div>
     <div style="background:rgba(255,215,0,.04);border:1px solid rgba(255,215,0,.18);border-radius:8px;padding:.85rem;margin-bottom:.9rem;">

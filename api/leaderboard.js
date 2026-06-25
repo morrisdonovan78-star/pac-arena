@@ -15,8 +15,8 @@ const CORS = {
 // This handles the common case where join.js wrote to the hash (games, wagered, name)
 // BEFORE the old blob migration could run, leaving kills/wins/losses absent from hash.
 async function readStats(address) {
-  const empty = { name:'', earned:0, wagered:0, games:0, kills:0, wins:0, losses:0 };
-  const INT_FIELDS = ['earned','wagered','games','kills','wins','losses'];
+  const empty = { name:'', earned:0, wagered:0, games:0, kills:0, deaths:0, wins:0, losses:0 };
+  const INT_FIELDS = ['earned','wagered','games','kills','deaths','wins','losses'];
 
   const [h, raw] = await Promise.all([
     kvHgetall('ph:' + address).catch(() => null),
@@ -56,6 +56,7 @@ async function readStats(address) {
     wagered: getField('wagered'),
     games:   getField('games'),
     kills:   getField('kills'),
+    deaths:  getField('deaths'),
     wins:    getField('wins'),
     losses:  getField('losses'),
   };
@@ -194,6 +195,7 @@ module.exports = async function handler(req, res) {
         wagered: stats.wagered || 0,
         games:   stats.games   || 0,
         kills:   stats.kills   || 0,
+        deaths:  stats.deaths  || 0,
         wins:    stats.wins    || 0,
         losses:  stats.losses  || 0,
       };

@@ -10,7 +10,7 @@
 //   ADMIN_SECRET   — secret used to sign tokens AND authenticate game-server calls
 //                    (set the SAME value in PM2 env on Vultr: ADMIN_SECRET=...)
 const crypto = require('crypto');
-const { kvGet, kvSet, kvSetPerm, kvDel, kvHgetall,
+const { kvGet, kvSet, kvSetPerm, kvDel, kvHgetall, kvHset,
         kvZadd, kvZrevrange, kvZrem,
         kvLpush, kvLtrim, kvLrange } = require('../lib/kv');
 
@@ -280,6 +280,20 @@ module.exports = async function handler(req, res) {
       const logs = (raw || []).map(s => { try { return JSON.parse(s); } catch (_) { return null; } }).filter(Boolean);
       return res.json({ logs });
     } catch (e) { return res.json({ logs: [], error: e.message }); }
+  }
+
+  if (action === 'resetLbStats') {
+    // Zero out gameplay stats for all players — preserves earned/wagered/name
+    const raw = await kvZrevrange('lb:earned', 0, -1);
+    const addrs = [];
+    for (let i = 0; i < (raw || []).length; i += 2) addrs.push(raw[i]);
+    const STAT_FIELDS = ['kills', 'deaths', 'wins', 'losses', 'games'];
+    await Promise.all(addrs.flatMap(addr =>
+      STAT_FIELDS.map(f => kvHset('ph:' + addr, f, '0').catch(() => {}))
+    ));
+    await kvHset('ph:global', 'gamesPlayed', '0').catch(() => {});
+    await logAction('resetLbStats', 'ALL', 'Zeroed kills/deaths/wins/losses/games for ' + addrs.length + ' players');
+    return res.json({ ok: true, playersReset: addrs.length });
   }
 
   return res.status(400).json({ error: 'Unknown action: ' + action });

@@ -490,6 +490,11 @@ module.exports = async function handler(req, res) {
               await kvHincrby(pk,'kills',1);
               const newEarned=await kvHincrby(pk,'earned',killerCut||0);
               await kvZadd('lb:earned',Number(newEarned)||0,playerAddress);
+              // Track death for victim — must happen regardless of wager since victim's
+              // wager was already deleted above, so their settle/lose won't count it.
+              if(vaBody && vaBody!==playerAddress) {
+                await kvHincrby('ph:'+vaBody,'deaths',1);
+              }
             }catch(_){}
           })();
           break;
@@ -533,7 +538,10 @@ module.exports = async function handler(req, res) {
         await kvDel('pw:' + playerAddress);
         (async()=>{ try{ await kvDel('krl:'+playerAddress); await kvDel('kc:'+playerAddress); }catch(_){} })();
         (async()=>{
-          try{ await kvHincrby('ph:'+playerAddress,'losses',1); }catch(_){}
+          try{
+            await kvHincrby('ph:'+playerAddress,'losses',1);
+            await kvHincrby('ph:'+playerAddress,'deaths',1);
+          }catch(_){}
         })();
         clearTimeout(guard); done = true;
         return res.status(200).json({ sig: loseSig, amount: finalAmt, confirmed: loseConfirmed });

@@ -166,6 +166,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0;}
       <div class="nav-item"        onclick="openTab('bans')"   id="nav-bans">  <span class="nav-icon">🚫</span>GAME BANS</div>
       <div class="nav-item"        onclick="openTab('voice')"  id="nav-voice"> <span class="nav-icon">🔇</span>VOICE BANS</div>
       <div class="nav-item"        onclick="openTab('log')"    id="nav-log">   <span class="nav-icon">📋</span>MOD LOG</div>
+      <div class="nav-item"        onclick="openTab('stats')"  id="nav-stats"> <span class="nav-icon">🔄</span>STATS</div>
     </div>
     <div id="content"></div>
   </div>
@@ -338,7 +339,7 @@ function closeModal() { document.getElementById('modal-bg').classList.remove('op
 function modalConfirm() { const cb = _modalCb; closeModal(); if (cb) cb(); }
 
 // ── Nav ───────────────────────────────────────────────────────────────────────
-const TABS = ['live','player','bans','voice','log'];
+const TABS = ['live','player','bans','voice','log','stats'];
 function openTab(t) {
   _tab = t;
   TABS.forEach(id => {
@@ -346,7 +347,7 @@ function openTab(t) {
     if (el) el.classList.toggle('active', id === t);
   });
   clearInterval(_liveTimer);
-  const renders = { live: renderLive, player: renderPlayer, bans: renderBans, voice: renderVoice, log: renderLog };
+  const renders = { live: renderLive, player: renderPlayer, bans: renderBans, voice: renderVoice, log: renderLog, stats: renderStats };
   if (renders[t]) renders[t]();
 }
 
@@ -576,9 +577,10 @@ function renderPlayerCard(p, gameBan, voiceBan, address) {
   const wins     = parseInt(p?.wins)   || 0;
   const losses   = parseInt(p?.losses) || 0;
   const kills    = parseInt(p?.kills)  || 0;
+  const deaths   = parseInt(p?.deaths) || 0;
   const earned   = (parseInt(p?.earned)  || 0) / 1e9;
   const wagered  = (parseInt(p?.wagered) || 0) / 1e9;
-  const kd       = losses > 0 ? (kills / losses).toFixed(1) : kills > 0 ? '∞' : '0.0';
+  const kd       = deaths > 0 ? (kills / deaths).toFixed(1) : kills > 0 ? '∞' : '0.0';
   const winRate  = games > 0 ? Math.round((wins / games) * 100) : 0;
   const short    = address.length > 16 ? address.slice(0,8)+'…'+address.slice(-6) : address;
 
@@ -607,6 +609,7 @@ function renderPlayerCard(p, gameBan, voiceBan, address) {
       <div class="stat-box"><div class="stat-val">${wins}</div><div class="stat-lbl">WINS</div></div>
       <div class="stat-box"><div class="stat-val">${losses}</div><div class="stat-lbl">LOSSES</div></div>
       <div class="stat-box"><div class="stat-val">${kills}</div><div class="stat-lbl">KILLS</div></div>
+      <div class="stat-box"><div class="stat-val">${deaths}</div><div class="stat-lbl">DEATHS</div></div>
       <div class="stat-box"><div class="stat-val">${kd}</div><div class="stat-lbl">K/D</div></div>
       <div class="stat-box"><div class="stat-val">${winRate}%</div><div class="stat-lbl">WIN RATE</div></div>
       <div class="stat-box"><div class="stat-val" style="font-size:9px;">${earned.toFixed(3)}</div><div class="stat-lbl">SOL EARNED</div></div>
@@ -841,6 +844,37 @@ async function loadLog() {
   } catch (e) {
     body.innerHTML = `<div style="color:var(--r);">Error: ${esc(e.message)}</div>`;
   }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// STATS TAB
+// ══════════════════════════════════════════════════════════════════════════════
+function renderStats() {
+  document.getElementById('content').innerHTML = `
+    <div class="section-title">📊 LEADERBOARD STATS</div>
+    <div class="card" style="border-color:rgba(255,68,68,.35);">
+      <div class="card-title" style="color:var(--r);">⚠️ RESET ALL GAMEPLAY STATS</div>
+      <p style="font-size:11px;color:var(--muted);line-height:1.9;margin-bottom:16px;">
+        Zeroes out <b style="color:#fff;">kills · deaths · wins · losses · games</b> for every player on the leaderboard.<br>
+        <b style="color:var(--y);">SOL earned and wagered are NOT touched.</b><br>
+        Use this to wipe bad data (e.g. stats recorded before the paid-only fix).
+      </p>
+      <button class="btn btn-r" onclick="confirmResetStats()">🗑 RESET GAMEPLAY STATS FOR ALL PLAYERS</button>
+    </div>`;
+}
+
+function confirmResetStats() {
+  openModal(
+    'Reset ALL Gameplay Stats',
+    'Zero out kills, deaths, wins, losses, and games for EVERY player. SOL earned/wagered is preserved. This cannot be undone.',
+    'RESET NOW',
+    async () => {
+      try {
+        const d = await api({ action: 'resetLbStats' });
+        toast('✅ Reset ' + d.playersReset + ' players — stats are now clean', 'var(--g)', 7000);
+      } catch (e) { toast('Error: ' + e.message, 'var(--r)'); }
+    }
+  );
 }
 
 // ── Utils ─────────────────────────────────────────────────────────────────────
