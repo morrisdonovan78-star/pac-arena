@@ -350,6 +350,10 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
   <button id="voice-btn" onclick="voiceToggle()" title="Voice chat — X (controller) / M (keyboard) to mute" style="position:fixed;bottom:16px;right:16px;z-index:200;display:none;width:46px;height:46px;border-radius:50%;background:rgba(7,7,15,0.85);border:1px solid rgba(255,215,0,0.3);color:#fff;font-size:20px;cursor:pointer;">🎙️</button>
   <div id="voice-speakers" style="position:fixed;bottom:16px;left:12px;z-index:200;display:none;flex-direction:column;gap:4px;pointer-events:none;"></div>
   <div id="boost-hint">HOLD CLICK TO BOOST 🔥</div>
+  <div id="bot-bar" style="display:none;position:fixed;bottom:72px;left:12px;z-index:200;flex-direction:column;gap:6px;">
+    <button onclick="spawnBotSnake()" style="padding:8px 12px;background:#FF6600;border:none;color:#fff;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:6px;letter-spacing:1px;opacity:0.9;">+ BOT</button>
+    <button onclick="clearBotSnakes()" style="padding:8px 12px;background:#1a0000;border:1px solid #FF4444;color:#FF4444;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:6px;letter-spacing:1px;opacity:0.9;">✕ BOTS</button>
+  </div>
   <div id="spectate-bar" style="display:none;position:absolute;top:10px;left:50%;transform:translateX(-50%);display:none;align-items:center;gap:12px;background:rgba(0,0,0,0.7);border:1px solid rgba(255,215,0,0.4);border-radius:8px;padding:6px 14px;z-index:100;">
     <span style="color:#FFD700;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:2px;">👁 SPECTATING</span>
     <button id="spec-rejoin-btn" class="btn btn-g btn-sm" style="display:none;padding:4px 10px;font-size:10px;" onclick="rejoinGame()">↩ REJOIN</button>
@@ -1306,6 +1310,7 @@ async function pkConnect(roomId,gameToken){
 function pkSend(data){if(ablyChannel)ablyChannel.publish(data.t,data,()=>{});}
 
 function pkDisconnect(){
+  const _bb3=document.getElementById('bot-bar');if(_bb3)_bb3.style.display='none';
   stopHostLoop();
   clearInterval(_guestInputLoop);_guestInputLoop=null;
   clearInterval(_pingInterval);_pingInterval=null;_ping=0;
@@ -1677,14 +1682,25 @@ function snakeTick(){
   if(!SG||SG.over)return;
   SG.tick++;
 
-  // Bot AI — simple circle movement, host-side only
+  // Bot AI — host-side only; botMode 'circle'=autocircle, 'fight'=chase nearest snake
   SG.snakes.forEach((s,id)=>{
     if(!id.startsWith('bot-')||!s.alive)return;
-    s.angle+=MAX_TURN*0.72; // gentle arc gives a wide circle
     const h=s.path[0];
+    if(s.botMode==='fight'){
+      let nearest=null,nearestD=Infinity;
+      SG.snakes.forEach((t,tid)=>{
+        if(!t.alive||tid===id)return;
+        const th=t.path[0];if(!th)return;
+        const d=(th.x-h.x)*(th.x-h.x)+(th.y-h.y)*(th.y-h.y);
+        if(d<nearestD){nearestD=d;nearest=th;}
+      });
+      if(nearest)applyTurn(s,Math.atan2(nearest.y-h.y,nearest.x-h.x));
+      else s.angle+=MAX_TURN*0.72;
+    } else {
+      s.angle+=MAX_TURN*0.72;
+    }
     s.path.unshift({x:h.x+Math.cos(s.angle)*SNAKE_SPD,y:h.y+Math.sin(s.angle)*SNAKE_SPD});
     trimPath(s);
-    // Wall kill
     const nh=s.path[0];
     if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R)eliminateSnake(id,null);
   });
@@ -2100,6 +2116,7 @@ function launchSnakeGame(){
   if(_hostWatch)clearInterval(_hostWatch);
   _hostWatch=setInterval(_checkHost,700); // watch for host departure → migrate
   const _vb=document.getElementById('voice-btn');if(_vb)_vb.style.display='flex';
+  const _bb=document.getElementById('bot-bar');if(_bb)_bb.style.display=localStorage.getItem('ss_owner')==='1'?'flex':'none';
 }
 
 // ── Combat Tuning Suite ──────────────────────────────────────
@@ -2211,9 +2228,11 @@ function spawnBotSnake(){
   const botId='bot-'+(++_botCount);
   const colors=['#FF6600','#FF00AA','#00FF88','#AA00FF','#FFAA00'];
   const col=colors[_botCount%colors.length];
-  _playerMeta.set(botId,{color:col,name:'BOT '+_botCount});
-  addSnakePlayer(botId,col,'BOT '+_botCount);
-  addToast('Bot '+_botCount+' spawned','#FF6600');
+  const mode=_botCount%2===0?'circle':'fight';
+  _playerMeta.set(botId,{color:col,name:(mode==='fight'?'BOT FIGHTER':'BOT CIRCLE')+' '+_botCount});
+  addSnakePlayer(botId,col,(mode==='fight'?'BOT FIGHTER':'BOT CIRCLE')+' '+_botCount);
+  const bs=SG&&SG.snakes.get(botId);if(bs)bs.botMode=mode;
+  addToast('Bot '+_botCount+' ('+mode+') spawned','#FF6600');
 }
 function clearBotSnakes(){
   if(!SG||!isHost){addToast(!SG?'No game active':'Only host can clear bots','#FF4444');return;}
@@ -2347,7 +2366,8 @@ async function endSnakeGame(reason,killerId){
   }
 
   _gpadLastBtn=[]; _gpadNavTs=0;
-  const _vb=document.getElementById('voice-btn');if(_vb)_vb.style.display='none'; // hide voice btn on death so controller A can't accidentally trigger it
+  const _vb=document.getElementById('voice-btn');if(_vb)_vb.style.display='none';
+  const _bb2=document.getElementById('bot-bar');if(_bb2)_bb2.style.display='none';
   go('scr-result');
   setTimeout(()=>gpadFocus(0),80); // ensure first result-screen button gets controller focus
   if(cashed&&ST.lobbyUsd>0)await settle(); // only Cash Out triggers payout (90% player / 10% creator)
