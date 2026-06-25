@@ -2390,7 +2390,7 @@ function rafDraw(ts){
       // "A little above" = slightly more forward, so offset = r*0.5.
       const h=bPts[0];
       if(h){
-        const hbR=r*0.32; // small radius so it sits neatly over the pupil
+        const hbR=r*0.5;  // radius: centre at r*0.5 + hbR = r, so arc tip touches the snake's nose
         const fwd=r*0.5;  // forward offset along s.angle to reach pupil area
         const px=h.x+Math.cos(s.angle)*fwd;
         const py=h.y+Math.sin(s.angle)*fwd;
