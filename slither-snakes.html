@@ -2380,15 +2380,22 @@ function rafDraw(ts){
       if(!s.alive||!s.path.length)return;
       const bPts=getBodyPoints(s);
       const r=sectionRadius(s);
-      const vr=r*1.08;   // hitbox radius — same for body and head
       const fwd=r*0.5;   // hurtbox centre at pupil
-      const hbR=r*0.62;  // hurtbox tip = fwd+hbR = r*1.12, just past nose
+      const hbR=r*0.62;  // hurtbox tip = fwd+hbR = r*1.12
+      // headR: the only radius where the red circle edge lands exactly on the
+      // hurtbox flat-edge endpoints — no overlap, no gap, just touching.
+      const headR=Math.sqrt(fwd*fwd+hbR*hbR); // ≈ r*0.797
       ctx.lineWidth=2/_camZoom;
 
-      // All body/head circles — same radius, different colour for head
+      // Body circles at actual collision radius r (yellow), head at headR (red)
       bPts.forEach((p,i)=>{
-        ctx.strokeStyle=i===0?'rgba(255,40,40,0.95)':'rgba(255,255,0,0.7)';
-        ctx.beginPath();ctx.arc(p.x,p.y,vr,0,Math.PI*2);ctx.stroke();
+        if(i===0){
+          ctx.strokeStyle='rgba(255,40,40,0.95)';
+          ctx.beginPath();ctx.arc(p.x,p.y,headR,0,Math.PI*2);ctx.stroke();
+        } else {
+          ctx.strokeStyle='rgba(255,255,0,0.7)';
+          ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.stroke();
+        }
       });
 
       // Cyan hurtbox half-disk on top of head circle
