@@ -272,10 +272,14 @@ function tick(room, io) {
 const app = express();
 app.get('/health', (_, res) => res.json({ ok: true, rooms: rooms.size }));
 app.get('/counts', (_, res) => {
+  const LOBBY_IDS = ['free-lobby', 'paid-lobby-1', 'paid-lobby-25'];
+  const counts = {};
+  for (const id of LOBBY_IDS) {
+    const r = io.sockets.adapter.rooms.get(id);
+    counts[id] = r ? r.size : 0;
+  }
   res.setHeader('Access-Control-Allow-Origin', '*');
-  const out = {'free-lobby':0,'paid-lobby-1':0,'paid-lobby-25':0};
-  rooms.forEach((room, id) => { out[id] = room.players.size; });
-  res.json(out);
+  res.json(counts);
 });
 
 const httpServer = http.createServer(app);
