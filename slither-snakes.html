@@ -2374,40 +2374,42 @@ function rafDraw(ts){
   if(SG&&SG.food)drawFood();
   if(SG)SG.snakes.forEach(s=>{if(s.alive&&s.path.length>1)drawSnake(s);});
 
-  // H key: debug hitbox overlay — yellow=body circles, orange=head full circle, cyan=hurtbox wedge
+  // H key: debug hitbox overlay — yellow=body circles, orange=hitbox, cyan=hurtbox
   if(_showHitboxes&&SG){
     SG.snakes.forEach(s=>{
       if(!s.alive||!s.path.length)return;
       const bPts=getBodyPoints(s);
       const r=sectionRadius(s);
-      // Head visual: drawn at radius r, so nose is at r from head centre.
-      // hbR = r - fwd so the hurtbox tip lands exactly at the nose.
-      const fwd=r*0.5;    // hurtbox centre (pupil)
-      const hbR=r*0.5;    // tip = fwd+hbR = r = nose
-      // Head hitbox: full circle whose edge passes through the hurtbox flat-edge endpoints.
-      // sqrt(fwd²+hbR²) is the only radius that satisfies "contact sides, don't enter hurtbox".
-      const headR=Math.sqrt(fwd*fwd+hbR*hbR); // ≈ r*0.707
+      const fwd=r*0.5;   // hurtbox centre at pupil
+      const hbR=r*0.65;  // hurtbox radius — tip at r*1.15, clearly wide
       const vr=r*1.08;
       ctx.lineWidth=2/_camZoom;
-      // Body circles first
+
+      // Body circles (yellow)
       bPts.forEach((p,i)=>{
-        if(i===0){
-          // Head: full orange circle drawn BEFORE hurtbox. Front portion covered by cyan.
-          // Sides stay visible and land exactly on the hurtbox flat-edge endpoints.
-          ctx.strokeStyle='rgba(255,140,0,0.95)';
-          ctx.beginPath();ctx.arc(p.x,p.y,headR,0,Math.PI*2);ctx.stroke();
-        } else {
+        if(i>0){
           ctx.strokeStyle='rgba(255,255,0,0.7)';
           ctx.beginPath();ctx.arc(p.x,p.y,vr,0,Math.PI*2);ctx.stroke();
         }
       });
-      // Hurtbox drawn last — covers the front of the orange head circle so no bleed-through
+
+      // Head hitbox + hurtbox
       const h=bPts[0];
       if(h){
         const px=h.x+Math.cos(s.angle)*fwd;
         const py=h.y+Math.sin(s.angle)*fwd;
+
+        // Orange hitbox: full circle centred at hurtbox centre, radius = hbR.
+        // This is the exact same circle as the hurtbox boundary — so the orange outline
+        // lands precisely on the hurtbox flat-edge endpoints (sides) and wraps around the back.
+        // The cyan fill drawn on top covers the front half so no bleed-through.
+        ctx.strokeStyle='rgba(255,100,0,0.95)';
+        ctx.lineWidth=2.5/_camZoom;
+        ctx.beginPath();ctx.arc(px,py,hbR,0,Math.PI*2);ctx.stroke();
+
+        // Cyan hurtbox half-disk on top — covers the front portion of the orange circle
         ctx.save();
-        ctx.fillStyle='rgba(0,255,220,0.28)';
+        ctx.fillStyle='rgba(0,255,220,0.35)';
         ctx.strokeStyle='rgba(0,255,220,1)';
         ctx.lineWidth=1.5/_camZoom;
         ctx.beginPath();
