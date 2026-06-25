@@ -2374,33 +2374,34 @@ function rafDraw(ts){
   if(SG&&SG.food)drawFood();
   if(SG)SG.snakes.forEach(s=>{if(s.alive&&s.path.length>1)drawSnake(s);});
 
-  // H key: debug hitbox overlay — yellow=body circles, orange=head back-arc, cyan=hurtbox wedge
+  // H key: debug hitbox overlay — yellow=body circles, orange=head full circle, cyan=hurtbox wedge
   if(_showHitboxes&&SG){
     SG.snakes.forEach(s=>{
       if(!s.alive||!s.path.length)return;
       const bPts=getBodyPoints(s);
       const r=sectionRadius(s);
-      const fwd=r*0.5;                          // hurtbox centre offset (pupil)
-      const hbR=r*0.72;                         // hurtbox radius — wider left/right to match reference
-      const headArcR=Math.sqrt(fwd*fwd+hbR*hbR); // radius so arc endpoints land on hurtbox side tips
-      const hbAng=Math.atan2(hbR,fwd);           // sweep angle to those side tips (≈49°)
+      // Head visual: drawn at radius r, so nose is at r from head centre.
+      // hbR = r - fwd so the hurtbox tip lands exactly at the nose.
+      const fwd=r*0.5;    // hurtbox centre (pupil)
+      const hbR=r*0.5;    // tip = fwd+hbR = r = nose
+      // Head hitbox: full circle whose edge passes through the hurtbox flat-edge endpoints.
+      // sqrt(fwd²+hbR²) is the only radius that satisfies "contact sides, don't enter hurtbox".
+      const headR=Math.sqrt(fwd*fwd+hbR*hbR); // ≈ r*0.707
       const vr=r*1.08;
       ctx.lineWidth=2/_camZoom;
+      // Body circles first
       bPts.forEach((p,i)=>{
         if(i===0){
-          // Head: back arc only — sweeps clockwise from one hurtbox-edge tip around the back to
-          // the other tip. Arc endpoints land exactly on the hurtbox flat-edge endpoints so there
-          // is zero gap and zero overlap — no orange line enters the hurtbox zone.
+          // Head: full orange circle drawn BEFORE hurtbox. Front portion covered by cyan.
+          // Sides stay visible and land exactly on the hurtbox flat-edge endpoints.
           ctx.strokeStyle='rgba(255,140,0,0.95)';
-          ctx.beginPath();
-          ctx.arc(p.x,p.y,headArcR,s.angle+hbAng,s.angle-hbAng,false);
-          ctx.stroke();
+          ctx.beginPath();ctx.arc(p.x,p.y,headR,0,Math.PI*2);ctx.stroke();
         } else {
           ctx.strokeStyle='rgba(255,255,0,0.7)';
           ctx.beginPath();ctx.arc(p.x,p.y,vr,0,Math.PI*2);ctx.stroke();
         }
       });
-      // Hurtbox drawn last so cyan is always on top
+      // Hurtbox drawn last — covers the front of the orange head circle so no bleed-through
       const h=bPts[0];
       if(h){
         const px=h.x+Math.cos(s.angle)*fwd;
