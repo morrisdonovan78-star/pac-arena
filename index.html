@@ -1427,15 +1427,23 @@ async function signLocalTx(tx){
 // ═══════════════════════════════════════════════════════════
 let _lobbyCountTimer=null;
 function fetchLobbyCounts(){
-  fetch(getSioUrl()+'/counts',{signal:AbortSignal.timeout(4000)})
-    .then(r=>r.json())
+  const _ac=new AbortController(), _tid=setTimeout(()=>_ac.abort(),5000);
+  fetch(getSioUrl()+'/counts',{signal:_ac.signal})
+    .then(r=>{ clearTimeout(_tid); if(!r.ok) throw 0; return r.json(); })
     .then(d=>{
-      const fmt=(n)=>n===1?'1 player online':n+' players online';
-      document.getElementById('l0-n').textContent=fmt(d['free-lobby']||0);
-      document.getElementById('l1-n').textContent=fmt(d['paid-lobby-1']||0);
-      document.getElementById('l5-n').textContent=fmt(d['paid-lobby-25']||0);
+      const fmt=(n)=>n===1?'1 player':(n||0)+' players';
+      document.getElementById('l0-n').textContent=fmt(d['free-lobby']);
+      document.getElementById('l1-n').textContent=fmt(d['paid-lobby-1']);
+      document.getElementById('l5-n').textContent=fmt(d['paid-lobby-25']);
     })
-    .catch(()=>{});
+    .catch(()=>{
+      clearTimeout(_tid);
+      // Show 0 on error so counters never stay stuck at "fetching"
+      ['l0-n','l1-n','l5-n'].forEach(id=>{
+        const el=document.getElementById(id);
+        if(el) el.textContent='0 players';
+      });
+    });
 }
 function populateLobby(){
   fetchPrice().then(()=>{

@@ -273,7 +273,7 @@ const app = express();
 app.get('/health', (_, res) => res.json({ ok: true, rooms: rooms.size }));
 app.get('/counts', (_, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  const out = {};
+  const out = {'free-lobby':0,'paid-lobby-1':0,'paid-lobby-25':0};
   rooms.forEach((room, id) => { out[id] = room.players.size; });
   res.json(out);
 });
