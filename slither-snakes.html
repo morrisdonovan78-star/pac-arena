@@ -2374,47 +2374,48 @@ function rafDraw(ts){
   if(SG&&SG.food)drawFood();
   if(SG)SG.snakes.forEach(s=>{if(s.alive&&s.path.length>1)drawSnake(s);});
 
-  // H key: debug hitbox overlay — yellow=body, red=head hitbox, cyan=hurtbox
+  // H key: debug hitbox overlay
+  // Actual game collision (snakeTick line ~1723): dist(ah, bs) < aR+bR
+  // Actual hurtbox     (snakeTick line ~1748): fwdDot from ah > 0  (forward hemisphere, NO offset)
+  // → Both the hitbox and hurtbox are centred at path[0], radius r.
+  //   Hitbox = full circle.  Hurtbox = forward half of that same circle.
+  //   Visual: red back-arc + cyan front half-disk = one clean circle at radius r.
   if(_showHitboxes&&SG){
     SG.snakes.forEach(s=>{
       if(!s.alive||!s.path.length)return;
       const bPts=getBodyPoints(s);
       const r=sectionRadius(s);
-      const fwd=r*0.5;   // hurtbox centre at pupil
-      const hbR=r*0.62;  // hurtbox tip = fwd+hbR = r*1.12
-      // headR: the only radius where the red circle edge lands exactly on the
-      // hurtbox flat-edge endpoints — no overlap, no gap, just touching.
-      const headR=Math.sqrt(fwd*fwd+hbR*hbR); // ≈ r*0.797
       ctx.lineWidth=2/_camZoom;
 
-      // Body circles at actual collision radius r (yellow), head at headR (red)
-      bPts.forEach((p,i)=>{
-        if(i===0){
-          ctx.strokeStyle='rgba(255,40,40,0.95)';
-          ctx.beginPath();ctx.arc(p.x,p.y,headR,0,Math.PI*2);ctx.stroke();
-        } else {
-          ctx.strokeStyle='rgba(255,255,0,0.7)';
-          ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.stroke();
-        }
-      });
+      // Body sections — yellow full circles at r (actual collision radius)
+      bPts.forEach((p,i)=>{ if(i>0){
+        ctx.strokeStyle='rgba(255,255,0,0.7)';
+        ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.stroke();
+      }});
 
-      // Cyan hurtbox half-disk on top of head circle
-      const h=bPts[0];
-      if(h){
-        const px=h.x+Math.cos(s.angle)*fwd;
-        const py=h.y+Math.sin(s.angle)*fwd;
-        ctx.save();
-        ctx.fillStyle='rgba(0,255,220,0.35)';
-        ctx.strokeStyle='rgba(0,255,220,1)';
-        ctx.lineWidth=1.5/_camZoom;
-        ctx.beginPath();
-        ctx.moveTo(px,py);
-        ctx.arc(px,py,hbR,s.angle-Math.PI/2,s.angle+Math.PI/2);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-        ctx.restore();
-      }
+      const h=bPts[0]; if(!h)return;
+
+      // Red BACK arc — from (angle+90°) clockwise around the back to (angle-90°).
+      // Covers exactly the rear hemisphere. No red enters the hurtbox zone.
+      ctx.strokeStyle='rgba(255,40,40,0.95)';
+      ctx.lineWidth=2/_camZoom;
+      ctx.beginPath();
+      ctx.arc(h.x,h.y,r,s.angle+Math.PI/2,s.angle-Math.PI/2,false);
+      ctx.stroke();
+
+      // Cyan forward half-disk (hurtbox) — same centre, same radius.
+      // Together with the red arc they form the complete hitbox circle.
+      ctx.save();
+      ctx.fillStyle='rgba(0,255,220,0.35)';
+      ctx.strokeStyle='rgba(0,255,220,1)';
+      ctx.lineWidth=1.5/_camZoom;
+      ctx.beginPath();
+      ctx.moveTo(h.x,h.y);
+      ctx.arc(h.x,h.y,r,s.angle-Math.PI/2,s.angle+Math.PI/2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
     });
   }
 
