@@ -2381,7 +2381,7 @@ function rafDraw(ts){
       const bPts=getBodyPoints(s);
       const r=sectionRadius(s);
       const fwd=r*0.5;                          // hurtbox centre offset (pupil)
-      const hbR=r*0.58;                         // hurtbox radius — slightly wider left/right contact
+      const hbR=r*0.72;                         // hurtbox radius — wider left/right to match reference
       const headArcR=Math.sqrt(fwd*fwd+hbR*hbR); // radius so arc endpoints land on hurtbox side tips
       const hbAng=Math.atan2(hbR,fwd);           // sweep angle to those side tips (≈49°)
       const vr=r*1.08;
