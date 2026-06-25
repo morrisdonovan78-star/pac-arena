@@ -2385,27 +2385,24 @@ function rafDraw(ts){
         ctx.strokeStyle=i===0?'rgba(255,140,0,0.95)':'rgba(255,255,0,0.7)';
         ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.stroke();
       });
-      // Hurtbox: cyan filled half-circle on head facing direction of travel.
-      // A body point must land inside this arc (fwdDot>0) to count as a kill hit.
-      // The back half of the head is a dead zone — side/rear clips never kill.
+      // Hurtbox: small cyan half-circle centred on the pupil midpoint.
+      // Pupil sits at eFwd+eR*0.3 ≈ r*0.45 forward from head centre (matches _drawHeadCircle ratios).
+      // "A little above" = slightly more forward, so offset = r*0.5.
       const h=bPts[0];
       if(h){
+        const hbR=r*0.32; // small radius so it sits neatly over the pupil
+        const fwd=r*0.5;  // forward offset along s.angle to reach pupil area
+        const px=h.x+Math.cos(s.angle)*fwd;
+        const py=h.y+Math.sin(s.angle)*fwd;
         ctx.save();
-        ctx.fillStyle='rgba(0,255,220,0.20)';
-        ctx.strokeStyle='rgba(0,255,220,0.90)';
-        ctx.lineWidth=2/_camZoom;
+        ctx.fillStyle='rgba(0,255,220,0.30)';
+        ctx.strokeStyle='rgba(0,255,220,1)';
+        ctx.lineWidth=1.5/_camZoom;
         ctx.beginPath();
-        ctx.moveTo(h.x,h.y);
-        ctx.arc(h.x,h.y,r,s.angle-Math.PI/2,s.angle+Math.PI/2);
+        ctx.moveTo(px,py);
+        ctx.arc(px,py,hbR,s.angle-Math.PI/2,s.angle+Math.PI/2);
         ctx.closePath();
         ctx.fill();
-        ctx.stroke();
-        // Direction spike — shows exactly where the hurtbox is pointing
-        ctx.strokeStyle='rgba(0,255,220,1)';
-        ctx.lineWidth=3/_camZoom;
-        ctx.beginPath();
-        ctx.moveTo(h.x,h.y);
-        ctx.lineTo(h.x+Math.cos(s.angle)*r*1.5,h.y+Math.sin(s.angle)*r*1.5);
         ctx.stroke();
         ctx.restore();
       }
