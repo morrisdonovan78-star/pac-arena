@@ -2240,7 +2240,7 @@ function _drawTuningPreview(){
   const h2hR=r*2*_tuning.h2hScale;
   cx.save();
   cx.strokeStyle='rgba(255,200,0,0.85)';cx.lineWidth=2;cx.setLineDash([5,4]);
-  cx.beginPath();cx.arc(hx,hy,h2hR,angle+1.257,angle-1.257,true);cx.stroke();
+  cx.beginPath();cx.arc(hx,hy,h2hR,angle+1.257,angle-1.257,false);cx.stroke();
   cx.setLineDash([]);cx.restore();
 
   // Labels
@@ -2685,7 +2685,7 @@ function rafDraw(ts){
       ctx.strokeStyle='rgba(255,200,0,0.85)';
       ctx.lineWidth=2/_camZoom;
       ctx.setLineDash([6/_camZoom,4/_camZoom]);
-      ctx.beginPath();ctx.arc(h.x,h.y,h2hRing,s.angle+1.257,s.angle-1.257,true);ctx.stroke();
+      ctx.beginPath();ctx.arc(h.x,h.y,h2hRing,s.angle+1.257,s.angle-1.257,false);ctx.stroke();
       ctx.setLineDash([]);
       ctx.restore();
     });
