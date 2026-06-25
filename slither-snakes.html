@@ -2556,9 +2556,12 @@ function enterSpectate(){
 }
 
 async function rejoinGame(){
+  const wasPractice=_isPractice; // capture before goHome() clears it
   const roomId=_lastRoomId;
   goHome();
-  if(roomId){
+  if(wasPractice){
+    launchPractice(); // practice lobby: re-launch locally, no network needed
+  } else if(roomId){
     await new Promise(r=>setTimeout(r,200));
     go('scr-mm');
     document.getElementById('mm-sub').textContent='Reconnecting…';
