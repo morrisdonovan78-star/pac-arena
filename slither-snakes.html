@@ -371,9 +371,10 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
     <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:rgba(255,255,255,0.35);letter-spacing:2px;">SYNCING WITH HOST</div>
   </div>
   <div id="boost-hint">HOLD CLICK TO BOOST 🔥</div>
-  <div id="bot-bar" style="display:none;position:fixed;bottom:72px;left:12px;z-index:200;flex-direction:column;gap:6px;">
-    <button onclick="spawnBotSnake()" style="padding:8px 12px;background:#FF6600;border:none;color:#fff;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:6px;letter-spacing:1px;opacity:0.9;">+ BOT</button>
-    <button onclick="clearBotSnakes()" style="padding:8px 12px;background:#1a0000;border:1px solid #FF4444;color:#FF4444;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:6px;letter-spacing:1px;opacity:0.9;">✕ BOTS</button>
+  <div id="bot-bar" style="display:none;position:fixed;bottom:72px;left:12px;z-index:200;flex-direction:column;gap:5px;">
+    <button onclick="spawnBotSnake('circle')" style="padding:7px 10px;background:#0055AA;border:none;color:#fff;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:6px;letter-spacing:1px;opacity:0.9;">⭕ CIRCLE</button>
+    <button onclick="spawnBotSnake('fight')" style="padding:7px 10px;background:#AA3300;border:none;color:#fff;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:6px;letter-spacing:1px;opacity:0.9;">⚔ FIGHTER</button>
+    <button onclick="clearBotSnakes()" style="padding:7px 10px;background:#1a0000;border:1px solid #FF4444;color:#FF4444;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:6px;letter-spacing:1px;opacity:0.9;">✕ BOTS</button>
   </div>
   <div id="spectate-bar" style="display:none;position:absolute;top:10px;left:50%;transform:translateX(-50%);display:none;align-items:center;gap:12px;background:rgba(0,0,0,0.7);border:1px solid rgba(255,215,0,0.4);border-radius:8px;padding:6px 14px;z-index:100;">
     <span style="color:#FFD700;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:2px;">👁 SPECTATING</span>
@@ -411,8 +412,11 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
     <div style="display:flex;justify-content:space-between;font-size:9px;color:#333;"><span>tighter</span><span>looser</span></div>
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-bottom:9px;">
-    <button onclick="spawnBotSnake()" style="padding:7px 4px;background:#FF6600;border:none;color:#fff;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:5px;letter-spacing:1px;">+ BOT</button>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:5px;">
+    <button onclick="spawnBotSnake('circle')" style="padding:7px 4px;background:#0055AA;border:none;color:#fff;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:5px;letter-spacing:1px;">⭕ CIRCLE</button>
+    <button onclick="spawnBotSnake('fight')" style="padding:7px 4px;background:#AA3300;border:none;color:#fff;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:5px;letter-spacing:1px;">⚔ FIGHTER</button>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:9px;">
     <button onclick="clearBotSnakes()" style="padding:7px 4px;background:#1a0000;border:1px solid #FF4444;color:#FF4444;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:5px;letter-spacing:1px;">✕ BOTS</button>
     <button onclick="_resetTuning()" style="padding:7px 4px;background:#111;border:1px solid #555;color:#888;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:5px;letter-spacing:1px;">RESET</button>
   </div>
@@ -1728,26 +1732,54 @@ function snakeTick(){
     if(!id.startsWith('bot-')||!s.alive)return;
     const h=s.path[0];
     if(s.botMode==='fight'){
+      // ── Find nearest human target ──
       let nearest=null,nearestD=Infinity,nearestSnake=null;
       SG.snakes.forEach((t,tid)=>{
-        if(!t.alive||tid===id||tid.startsWith('bot-'))return; // bots never target each other
+        if(!t.alive||tid===id||tid.startsWith('bot-'))return;
         const th=t.path[0];if(!th)return;
         const d=(th.x-h.x)*(th.x-h.x)+(th.y-h.y)*(th.y-h.y);
         if(d<nearestD){nearestD=d;nearest=th;nearestSnake=t;}
       });
       s.boost=false;
-      if(nearest){
-        const r=sectionRadius(s);
-        const dist=Math.sqrt(nearestD);
-        if(dist<r*8){
-          s.angle+=MAX_TURN;
-        } else {
-          const tx=nearest.x+Math.cos(nearestSnake.angle)*SNAKE_SPD*3;
-          const ty=nearest.y+Math.sin(nearestSnake.angle)*SNAKE_SPD*3;
-          applyTurn(s,Math.atan2(ty-h.y,tx-h.x));
+
+      // ── Body/tail avoidance — scan path segments of all snakes within danger radius ──
+      const bR=sectionRadius(s);
+      const dangerR=bR*6; // react when a body segment is within this distance
+      let avoidX=0,avoidY=0;
+      SG.snakes.forEach(t=>{
+        if(!t.alive)return;
+        const tR=sectionRadius(t);
+        const skipHead=(t.id===id)?1:0; // don't avoid own head; avoid own body from idx 1
+        // Sample every 2nd path point to keep cost low
+        for(let i=skipHead;i<t.path.length;i+=2){
+          const p=t.path[i];
+          const dx=h.x-p.x,dy=h.y-p.y;
+          const d2=dx*dx+dy*dy;
+          if(d2>dangerR*dangerR*4)break; // path is ordered head→tail; once far enough, stop
+          if(d2<0.01)continue;
+          // Only care about segments that are ahead of the bot (in forward half-plane)
+          const fwdDot=(-dx)*Math.cos(s.angle)+(-dy)*Math.sin(s.angle);
+          if(fwdDot<0)continue; // segment is behind us
+          const d=Math.sqrt(d2);
+          const weight=Math.max(0,dangerR-d)/dangerR; // stronger the closer it is
+          avoidX+=dx/d*weight;
+          avoidY+=dy/d*weight;
         }
+      });
+
+      const avoidMag=Math.sqrt(avoidX*avoidX+avoidY*avoidY);
+      if(avoidMag>0.15){
+        // Strong avoidance: steer directly away from danger
+        applyTurn(s,Math.atan2(avoidY,avoidX));
+      } else if(nearest){
+        // ── Intercept: aim at where the target head will be in ~5 ticks ──
+        const dist=Math.sqrt(nearestD);
+        const leadTicks=Math.max(4,Math.min(18,dist/SNAKE_SPD));
+        const tx=nearest.x+Math.cos(nearestSnake.angle)*SNAKE_SPD*leadTicks;
+        const ty=nearest.y+Math.sin(nearestSnake.angle)*SNAKE_SPD*leadTicks;
+        applyTurn(s,Math.atan2(ty-h.y,tx-h.x));
       } else {
-        s.angle+=MAX_TURN;
+        s.angle+=MAX_TURN; // no target: orbit
       }
     }
     // circle mode: angle updated per-frame in rafDraw (s.botCircle=true) — same smoothness as player
@@ -2340,7 +2372,8 @@ function launchPractice(){
   launchSnakeGame();
   addToast('PRACTICE — private lobby','#FFD700');
 }
-function spawnBotSnake(){
+function spawnBotSnake(mode){
+  mode=mode||'circle';
   // Auto-start a solo practice game when not already in one
   if(!SG){
     ablyChannel=null; pkRoomId=null; _isPractice=true;
@@ -2354,11 +2387,11 @@ function spawnBotSnake(){
   }
   if(!isHost){addToast('Only host can spawn bots','#FF4444');return;}
   const botId='bot-'+(++_botCount);
-  const colors=['#FF6600','#FF00AA','#00FF88','#AA00FF','#FFAA00'];
-  const col=colors[_botCount%colors.length];
-  const mode=_botCount%2===0?'circle':'fight';
-  _playerMeta.set(botId,{color:col,name:(mode==='fight'?'BOT FIGHTER':'BOT CIRCLE')+' '+_botCount});
-  addSnakePlayer(botId,col,(mode==='fight'?'BOT FIGHTER':'BOT CIRCLE')+' '+_botCount);
+  const circleColors=['#00AAFF','#00CFFF','#44DDFF','#0088CC'];
+  const fightColors= ['#FF4400','#FF6600','#FF2200','#FF8800'];
+  const col=(mode==='fight'?fightColors:circleColors)[_botCount%4];
+  _playerMeta.set(botId,{color:col,name:(mode==='fight'?'FIGHTER':'CIRCLER')+' '+_botCount});
+  addSnakePlayer(botId,col,(mode==='fight'?'FIGHTER':'CIRCLER')+' '+_botCount);
   const bs=SG&&SG.snakes.get(botId);
   if(bs){
     bs.botMode=mode;
