@@ -2374,40 +2374,28 @@ function rafDraw(ts){
   if(SG&&SG.food)drawFood();
   if(SG)SG.snakes.forEach(s=>{if(s.alive&&s.path.length>1)drawSnake(s);});
 
-  // H key: debug hitbox overlay — yellow=body circles, orange=hitbox, cyan=hurtbox
+  // H key: debug hitbox overlay — yellow=body, red=head hitbox, cyan=hurtbox
   if(_showHitboxes&&SG){
     SG.snakes.forEach(s=>{
       if(!s.alive||!s.path.length)return;
       const bPts=getBodyPoints(s);
       const r=sectionRadius(s);
+      const vr=r*1.08;   // hitbox radius — same for body and head
       const fwd=r*0.5;   // hurtbox centre at pupil
-      const hbR=r*0.65;  // hurtbox radius — tip at r*1.15, clearly wide
-      const vr=r*1.08;
+      const hbR=r*0.58;  // hurtbox tip = fwd+hbR = r*1.08 = exactly at hitbox front edge
       ctx.lineWidth=2/_camZoom;
 
-      // Body circles (yellow)
+      // All body/head circles — same radius, different colour for head
       bPts.forEach((p,i)=>{
-        if(i>0){
-          ctx.strokeStyle='rgba(255,255,0,0.7)';
-          ctx.beginPath();ctx.arc(p.x,p.y,vr,0,Math.PI*2);ctx.stroke();
-        }
+        ctx.strokeStyle=i===0?'rgba(255,40,40,0.95)':'rgba(255,255,0,0.7)';
+        ctx.beginPath();ctx.arc(p.x,p.y,vr,0,Math.PI*2);ctx.stroke();
       });
 
-      // Head hitbox + hurtbox
+      // Cyan hurtbox half-disk on top of head circle
       const h=bPts[0];
       if(h){
         const px=h.x+Math.cos(s.angle)*fwd;
         const py=h.y+Math.sin(s.angle)*fwd;
-
-        // Orange hitbox: full circle centred at hurtbox centre, radius = hbR.
-        // This is the exact same circle as the hurtbox boundary — so the orange outline
-        // lands precisely on the hurtbox flat-edge endpoints (sides) and wraps around the back.
-        // The cyan fill drawn on top covers the front half so no bleed-through.
-        ctx.strokeStyle='rgba(255,100,0,0.95)';
-        ctx.lineWidth=2.5/_camZoom;
-        ctx.beginPath();ctx.arc(px,py,hbR,0,Math.PI*2);ctx.stroke();
-
-        // Cyan hurtbox half-disk on top — covers the front portion of the orange circle
         ctx.save();
         ctx.fillStyle='rgba(0,255,220,0.35)';
         ctx.strokeStyle='rgba(0,255,220,1)';
