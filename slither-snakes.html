@@ -2382,7 +2382,7 @@ function rafDraw(ts){
       const r=sectionRadius(s);
       const vr=r*1.08;   // hitbox radius — same for body and head
       const fwd=r*0.5;   // hurtbox centre at pupil
-      const hbR=r*0.58;  // hurtbox tip = fwd+hbR = r*1.08 = exactly at hitbox front edge
+      const hbR=r*0.62;  // hurtbox tip = fwd+hbR = r*1.12, just past nose
       ctx.lineWidth=2/_camZoom;
 
       // All body/head circles — same radius, different colour for head
