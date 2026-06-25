@@ -2374,28 +2374,37 @@ function rafDraw(ts){
   if(SG&&SG.food)drawFood();
   if(SG)SG.snakes.forEach(s=>{if(s.alive&&s.path.length>1)drawSnake(s);});
 
-  // H key: debug hitbox overlay — yellow=body, orange=head circle, cyan=hurtbox (forward hemisphere only)
+  // H key: debug hitbox overlay — yellow=body, orange=head BACK-half, cyan=hurtbox FRONT-half
   if(_showHitboxes&&SG){
     SG.snakes.forEach(s=>{
       if(!s.alive||!s.path.length)return;
       const bPts=getBodyPoints(s);
       const r=sectionRadius(s);
-      // Draw hitbox circles at r*1.08 so consecutive circles visually close the gap to the hurtbox
-      const vr=r*1.08;
+      const vr=r*1.12; // visual radius — slightly larger so consecutive circles close any gap
       ctx.lineWidth=2/_camZoom;
       bPts.forEach((p,i)=>{
-        ctx.strokeStyle=i===0?'rgba(255,140,0,0.95)':'rgba(255,255,0,0.7)';
-        ctx.beginPath();ctx.arc(p.x,p.y,vr,0,Math.PI*2);ctx.stroke();
+        if(i===0){
+          // Head: back-half arc only (hurtbox covers the front half).
+          // Clockwise from angle+PI/2 → angle-PI/2 traces the back 180°.
+          ctx.strokeStyle='rgba(255,140,0,0.95)';
+          ctx.beginPath();
+          ctx.arc(p.x,p.y,vr,s.angle+Math.PI/2,s.angle-Math.PI/2,false);
+          ctx.stroke();
+        } else {
+          ctx.strokeStyle='rgba(255,255,0,0.7)';
+          ctx.beginPath();ctx.arc(p.x,p.y,vr,0,Math.PI*2);ctx.stroke();
+        }
       });
-      // Hurtbox: cyan half-circle centred on pupil, tip just past the snake's nose
+      // Hurtbox: front-half arc centred on pupil; tip flush with head hitbox front edge (vr from head centre).
+      // fwd=r*0.5 puts centre at pupil; hbR = vr - fwd so tip = fwd+hbR = vr exactly.
       const h=bPts[0];
       if(h){
-        const fwd=r*0.5;   // pupil offset from head centre
-        const hbR=r*0.58;  // tip lands at r*0.5+r*0.58=r*1.08 — flush with the visual hitbox front
+        const fwd=r*0.5;
+        const hbR=vr-fwd; // = r*0.62 — tip lands exactly at vr from head centre
         const px=h.x+Math.cos(s.angle)*fwd;
         const py=h.y+Math.sin(s.angle)*fwd;
         ctx.save();
-        ctx.fillStyle='rgba(0,255,220,0.30)';
+        ctx.fillStyle='rgba(0,255,220,0.28)';
         ctx.strokeStyle='rgba(0,255,220,1)';
         ctx.lineWidth=1.5/_camZoom;
         ctx.beginPath();
