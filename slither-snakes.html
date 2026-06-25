@@ -356,40 +356,43 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
     <button class="btn btn-c btn-sm" style="padding:4px 10px;font-size:10px;" onclick="goHome()">⌂ HOME</button>
   </div>
   <canvas id="minimap" width="120" height="120"></canvas>
+</div>
 
-  <!-- Combat Tuning Suite — owner-gated (T key, requires ss_owner flag in localStorage) -->
-  <div id="tuning-panel" style="display:none;position:fixed;top:56px;right:12px;width:268px;background:rgba(4,4,16,0.95);border:1px solid rgba(255,180,0,0.5);border-radius:10px;padding:16px 14px 12px;z-index:300;font-family:'Orbitron',sans-serif;color:#fff;font-size:11px;box-shadow:0 0 24px rgba(255,180,0,0.18);">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-      <span style="color:#FFD700;font-size:12px;letter-spacing:2px;">⚔ COMBAT TUNING</span>
-      <button onclick="_toggleTuning()" style="background:none;border:none;color:#888;font-size:14px;cursor:pointer;padding:0 2px;">✕</button>
-    </div>
-
-    <div style="margin-bottom:12px;">
-      <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="color:#aaa;">Hurtbox Forward</span><span id="tun-hbFwd-val" style="color:#00FFFF;min-width:34px;text-align:right;">0.75r</span></div>
-      <input type="range" id="tun-hbFwd" min="0.20" max="0.95" step="0.01" value="0.75" oninput="_onTuning()" style="width:100%;accent-color:#00FFFF;">
-      <div style="display:flex;justify-content:space-between;font-size:9px;color:#444;"><span>close</span><span>far (nose tip)</span></div>
-    </div>
-
-    <div style="margin-bottom:12px;">
-      <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="color:#aaa;">Hurtbox Radius</span><span id="tun-hbR-val" style="color:#00FFFF;min-width:34px;text-align:right;">0.25r</span></div>
-      <input type="range" id="tun-hbR" min="0.05" max="0.55" step="0.01" value="0.25" oninput="_onTuning()" style="width:100%;accent-color:#00FFFF;">
-      <div style="display:flex;justify-content:space-between;font-size:9px;color:#444;"><span>tiny</span><span>large</span></div>
-    </div>
-
-    <div style="margin-bottom:14px;">
-      <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="color:#aaa;">H2H Range</span><span id="tun-h2h-val" style="color:#FFD700;min-width:34px;text-align:right;">1.00×</span></div>
-      <input type="range" id="tun-h2h" min="0.50" max="1.50" step="0.05" value="1.00" oninput="_onTuning()" style="width:100%;accent-color:#FFD700;">
-      <div style="display:flex;justify-content:space-between;font-size:9px;color:#444;"><span>tighter</span><span>looser</span></div>
-    </div>
-
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-bottom:10px;">
-      <button onclick="spawnBotSnake()" style="padding:7px 4px;background:#FF6600;border:none;color:#fff;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:5px;letter-spacing:1px;">+ BOT</button>
-      <button onclick="clearBotSnakes()" style="padding:7px 4px;background:#1a0000;border:1px solid #FF4444;color:#FF4444;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:5px;letter-spacing:1px;">✕ BOTS</button>
-      <button onclick="_resetTuning()" style="padding:7px 4px;background:#111;border:1px solid #555;color:#888;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:5px;letter-spacing:1px;">RESET</button>
-    </div>
-
-    <div id="tun-host-note" style="font-size:9px;color:#555;text-align:center;">HOST: changes sync to all players • H = hitbox overlay</div>
+<!-- Combat Tuning Suite — global overlay, owner-gated (T key anywhere) -->
+<div id="tuning-panel" style="display:none;position:fixed;top:56px;right:12px;width:272px;background:rgba(4,4,16,0.96);border:1px solid rgba(255,180,0,0.55);border-radius:10px;padding:16px 14px 12px;z-index:9999;font-family:'Orbitron',sans-serif;color:#fff;font-size:11px;box-shadow:0 0 28px rgba(255,180,0,0.2);">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+    <span style="color:#FFD700;font-size:12px;letter-spacing:2px;">⚔ COMBAT TUNING</span>
+    <button onclick="_toggleTuning()" style="background:none;border:none;color:#888;font-size:14px;cursor:pointer;padding:0 2px;">✕</button>
   </div>
+
+  <!-- Live preview canvas -->
+  <canvas id="tun-preview" width="244" height="96" style="width:100%;border-radius:6px;background:#050510;border:1px solid #1a1a3a;margin-bottom:12px;display:block;"></canvas>
+
+  <div style="margin-bottom:11px;">
+    <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="color:#aaa;">Hurtbox Forward</span><span id="tun-hbFwd-val" style="color:#00FFFF;min-width:36px;text-align:right;">0.75r</span></div>
+    <input type="range" id="tun-hbFwd" min="0.20" max="0.95" step="0.01" value="0.75" oninput="_onTuning()" style="width:100%;accent-color:#00FFFF;">
+    <div style="display:flex;justify-content:space-between;font-size:9px;color:#333;"><span>mid-face</span><span>nose tip</span></div>
+  </div>
+
+  <div style="margin-bottom:11px;">
+    <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="color:#aaa;">Hurtbox Radius</span><span id="tun-hbR-val" style="color:#00FFFF;min-width:36px;text-align:right;">0.25r</span></div>
+    <input type="range" id="tun-hbR" min="0.05" max="0.55" step="0.01" value="0.25" oninput="_onTuning()" style="width:100%;accent-color:#00FFFF;">
+    <div style="display:flex;justify-content:space-between;font-size:9px;color:#333;"><span>tiny</span><span>large</span></div>
+  </div>
+
+  <div style="margin-bottom:13px;">
+    <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="color:#aaa;">H2H Range</span><span id="tun-h2h-val" style="color:#FFD700;min-width:36px;text-align:right;">1.00×</span></div>
+    <input type="range" id="tun-h2h" min="0.50" max="1.50" step="0.05" value="1.00" oninput="_onTuning()" style="width:100%;accent-color:#FFD700;">
+    <div style="display:flex;justify-content:space-between;font-size:9px;color:#333;"><span>tighter</span><span>looser</span></div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-bottom:9px;">
+    <button onclick="spawnBotSnake()" style="padding:7px 4px;background:#FF6600;border:none;color:#fff;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:5px;letter-spacing:1px;">+ BOT</button>
+    <button onclick="clearBotSnakes()" style="padding:7px 4px;background:#1a0000;border:1px solid #FF4444;color:#FF4444;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:5px;letter-spacing:1px;">✕ BOTS</button>
+    <button onclick="_resetTuning()" style="padding:7px 4px;background:#111;border:1px solid #555;color:#888;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:5px;letter-spacing:1px;">RESET</button>
+  </div>
+
+  <div id="tun-host-note" style="font-size:9px;color:#444;text-align:center;">T to close • H key = hitbox overlay in-game</div>
 </div>
 
 <!-- ══ RESULT ════════════════════════════════════════════════ -->
@@ -2104,8 +2107,7 @@ function _toggleTuning(){
   _showTuning=!_showTuning;
   const p=document.getElementById('tuning-panel');
   if(p)p.style.display=_showTuning?'block':'none';
-  const n=document.getElementById('tun-host-note');
-  if(n)n.textContent=isHost?'HOST: changes sync to all players • H = hitbox overlay':'GUEST: values set by host • H = hitbox overlay';
+  if(_showTuning){_syncTuningUI();_drawTuningPreview();}
 }
 function _onTuning(){
   _tuning.hbFwd=+document.getElementById('tun-hbFwd').value;
@@ -2114,17 +2116,85 @@ function _onTuning(){
   document.getElementById('tun-hbFwd-val').textContent=_tuning.hbFwd.toFixed(2)+'r';
   document.getElementById('tun-hbR-val').textContent  =_tuning.hbR.toFixed(2)+'r';
   document.getElementById('tun-h2h-val').textContent  =_tuning.h2hScale.toFixed(2)+'×';
+  _drawTuningPreview();
 }
 function _syncTuningUI(){
   const e=id=>document.getElementById(id);
+  if(!e('tun-hbFwd'))return;
   e('tun-hbFwd').value=_tuning.hbFwd;  e('tun-hbFwd-val').textContent=_tuning.hbFwd.toFixed(2)+'r';
   e('tun-hbR').value  =_tuning.hbR;    e('tun-hbR-val').textContent  =_tuning.hbR.toFixed(2)+'r';
   e('tun-h2h').value  =_tuning.h2hScale;e('tun-h2h-val').textContent =_tuning.h2hScale.toFixed(2)+'×';
+  _drawTuningPreview();
 }
 function _resetTuning(){
   _tuning={hbFwd:0.75,hbR:0.25,h2hScale:1.0};
   _syncTuningUI();
   addToast('Tuning reset to defaults','#888');
+}
+function _drawTuningPreview(){
+  const cv=document.getElementById('tun-preview');
+  if(!cv)return;
+  const cx=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  cx.clearRect(0,0,W,H);
+  cx.fillStyle='#050510';cx.fillRect(0,0,W,H);
+
+  // Layout: 3 body circles to the left, head in center-right area
+  const r=28;
+  const hx=W*0.48, hy=H/2;
+  const angle=0; // facing right
+
+  // Body circles (yellow outline)
+  cx.lineWidth=1.5;
+  for(let i=1;i<=3;i++){
+    cx.strokeStyle=i===1?'rgba(255,255,0,0.8)':'rgba(255,255,0,0.4)';
+    cx.beginPath();cx.arc(hx-i*r*1.45,hy,r,0,Math.PI*2);cx.stroke();
+  }
+
+  // H2H circle (gold dashed — shows head-to-head range)
+  const h2hR=r*_tuning.h2hScale;
+  cx.save();
+  cx.strokeStyle='rgba(255,200,0,0.55)';cx.lineWidth=1.5;cx.setLineDash([4,3]);
+  cx.beginPath();cx.arc(hx,hy,h2hR,0,Math.PI*2);cx.stroke();
+  cx.setLineDash([]);cx.restore();
+
+  // Head filled circle
+  cx.fillStyle='#2266CC';
+  cx.beginPath();cx.arc(hx,hy,r,0,Math.PI*2);cx.fill();
+  cx.fillStyle='rgba(0,0,0,0.22)';
+  cx.beginPath();cx.arc(hx+r*0.08,hy+r*0.1,r*0.65,0,Math.PI*2);cx.fill();
+
+  // Eyes
+  const eR=r*0.38,eFwd=r*0.34,eSide=r*0.42;
+  cx.fillStyle='#fff';
+  cx.beginPath();cx.arc(hx+eFwd,hy-eSide,eR,0,Math.PI*2);cx.fill();
+  cx.beginPath();cx.arc(hx+eFwd,hy+eSide,eR,0,Math.PI*2);cx.fill();
+  cx.fillStyle='#111';
+  cx.beginPath();cx.arc(hx+eFwd+eR*0.3,hy-eSide,eR*0.55,0,Math.PI*2);cx.fill();
+  cx.beginPath();cx.arc(hx+eFwd+eR*0.3,hy+eSide,eR*0.55,0,Math.PI*2);cx.fill();
+
+  // Red hitbox arc (rear, centred at head)
+  const fwd=r*_tuning.hbFwd, hbR=r*_tuning.hbR;
+  const headR=Math.sqrt(fwd*fwd+hbR*hbR);
+  cx.strokeStyle='rgba(255,50,50,0.95)';cx.lineWidth=2;
+  cx.beginPath();cx.arc(hx,hy,headR,angle+Math.PI/2,angle-Math.PI/2,false);cx.stroke();
+
+  // Cyan hurtbox half-disk (nose tip)
+  const px=hx+Math.cos(angle)*fwd, py=hy+Math.sin(angle)*fwd;
+  const lx=px+Math.cos(angle-Math.PI/2)*hbR, ly=py+Math.sin(angle-Math.PI/2)*hbR;
+  cx.save();
+  cx.fillStyle='rgba(0,255,220,0.38)';cx.strokeStyle='rgba(0,255,220,1)';cx.lineWidth=1.5;
+  cx.beginPath();cx.moveTo(lx,ly);cx.arc(px,py,hbR,angle-Math.PI/2,angle+Math.PI/2);
+  cx.closePath();cx.fill();cx.stroke();cx.restore();
+
+  // Labels
+  cx.font='bold 8px Orbitron,monospace';
+  cx.fillStyle='rgba(0,255,220,0.9)';
+  cx.fillText('HURTBOX',px+hbR+3,py+3);
+  cx.fillStyle='rgba(255,80,80,0.85)';
+  cx.fillText('HITBOX r='+headR.toFixed(0),hx-headR+2,hy-headR-4);
+  cx.fillStyle='rgba(255,200,0,0.6)';
+  cx.fillText('H2H r='+h2hR.toFixed(0),hx+h2hR+2,hy+3);
 }
 function spawnBotSnake(){
   if(!SG||!isHost){addToast('Only host can spawn bots','#FF4444');return;}
@@ -2156,7 +2226,6 @@ function onGameKey(e){
   if(e.repeat)return;
   if(e.key===' '||e.key==='Shift')_mouseBoost=true;
   if(e.key==='h'||e.key==='H'){_showHitboxes=!_showHitboxes;addToast(_showHitboxes?'Hitboxes ON':'Hitboxes OFF','#FFD700');}
-  if(e.key==='t'||e.key==='T'){if(localStorage.getItem('ss_owner')==='1')_toggleTuning();}
   if(e.key==='q'||e.key==='Q'){
     if(SG&&!SG.over&&!_localDead&&!_cashoutTimer){
       addToast('HOLD Q to cash out… release to cancel','#FFD700');
@@ -2398,6 +2467,11 @@ function gpadFocus(dir){
 }
 // Single persistent gamepad loop — runs every frame regardless of game state
 ;(function _gpadMenuLoop(){requestAnimationFrame(_gpadMenuLoop);pollGamepad();})();
+
+// Global T key — opens tuning panel from anywhere (lobby, result screen, in-game)
+document.addEventListener('keydown',function(e){
+  if((e.key==='t'||e.key==='T')&&!e.repeat&&localStorage.getItem('ss_owner')==='1')_toggleTuning();
+});
 
 // ══ RENDERING ════════════════════════════════════════════════
 
