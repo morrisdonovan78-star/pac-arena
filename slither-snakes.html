@@ -1217,11 +1217,11 @@ async function pkConnect(roomId,gameToken){
       _killFeed.push({kName,kColor:km.color||'#FFD700',vName,vColor:vm.color||'#FF69B4',ts:Date.now()});
       if(_killFeed.length>5)_killFeed.shift();
       if(data.id===myPid){
-        // I died
         endSnakeGame('eliminated',data.killerId);
       }else{
+        // Mark dead only — food comes from host SS packet (spawnFoodFromSnake here causes duplicate trails)
         const s=SG.snakes.get(data.id);
-        if(s){spawnFoodFromSnake(s);s.alive=false;}
+        if(s&&s.alive)s.alive=false;
       }
     });
 
@@ -1430,19 +1430,25 @@ function saveKillFood(){
   if(!kf.length){localStorage.removeItem('kf:'+pkRoomId);return;}
   try{
     localStorage.setItem('kf:'+pkRoomId,JSON.stringify({ts:Date.now(),food:kf.map(f=>({x:Math.round(f.x),y:Math.round(f.y),w:f.w||0,s:Math.round(f.size)}))}));
-    console.log('[saveKillFood] saved',kf.length,'items to','kf:'+pkRoomId);
-    addToast('💾 Saved '+kf.length+' gold pellets','#FFD700');
+    console.log('[saveKillFood] saved',kf.length,'items');
   }catch(e){console.warn('[saveKillFood]',e);}
 }
 function loadKillFood(){
   if(!pkRoomId||!SG)return;
   try{
     const raw=localStorage.getItem('kf:'+pkRoomId);
-    if(!raw){console.log('[loadKillFood] nothing saved for','kf:'+pkRoomId);return;}
+    if(!raw)return;
     const {ts,food}=JSON.parse(raw);
-    if(Date.now()-ts>_KF_TTL){localStorage.removeItem('kf:'+pkRoomId);console.log('[loadKillFood] expired');return;}
-    food.forEach(f=>{SG.food.push({x:f.x,y:f.y,ci:3,size:f.s||10,k:1,w:f.w});});
-    if(food.length){addToast('⚠ Loaded '+food.length+' unclaimed SOL pellets!','#FFD700');_forceFoodSend=true;}
+    if(Date.now()-ts>_KF_TTL){localStorage.removeItem('kf:'+pkRoomId);return;}
+    const maxR=ARENA_R*0.96;
+    food.forEach(f=>{
+      // Clamp positions inside arena — older saves may have out-of-bounds coords
+      let fx=f.x,fy=f.y;
+      const dist=Math.sqrt(fx*fx+fy*fy);
+      if(dist>maxR){const sc=maxR/dist;fx*=sc;fy*=sc;}
+      SG.food.push({x:fx,y:fy,ci:3,size:f.s||10,k:1,w:f.w||0});
+    });
+    if(food.length){addToast('⚡ '+food.length+' SOL pellets restored!','#FFD700');_forceFoodSend=true;}
     localStorage.removeItem('kf:'+pkRoomId); // clear — re-saved on next leave if still uneaten
   }catch(e){console.warn('[loadKillFood]',e);}
 }
@@ -1458,7 +1464,11 @@ function initSnakeGame(players){
       SG.snakes.set(p.id,makeSnake(p.id,p.color||colorFromId(p.id),p.name||'SNAKE'));
   });
   if(isHost){SG.food=seedFoodLayout();loadKillFood();} // restore uneaten SOL pellets when rejoining
-  else{_firstRemoteSync=true;} // guest: snap own position to host-assigned spot on first ss
+  else{
+    _firstRemoteSync=true;
+    // Safety: if first SS packet never arrives (server lag), unblock camera after 3 s
+    setTimeout(()=>{if(_firstRemoteSync){_firstRemoteSync=false;}},3000);
+  }
   _hostPid=isHost?myPid:null; _lastSsTs=Date.now(); // host-migration tracking
   _myUsd=ST.lobbyUsd||0; // start at entry wager value
 }
@@ -1519,7 +1529,7 @@ function stopHostLoop(){if(_hostRaf){cancelAnimationFrame(_hostRaf);_hostRaf=nul
 function _electHost(){
   if(isHost||!SG||SG.over)return;
   isHost=true; _hostPid=myPid;
-  _hostGraceTicks=6; // skip collision for ~200ms so dual-host ss packets can cross and demote
+  _hostGraceTicks=15; // skip collision for ~500ms so dual-host ss packets can cross and demote
   if(!SG.food||!SG.food.length)SG.food=seedFoodLayout(); // ensure dots exist if we never synced
   loadKillFood(); // restore SOL pellets on host migration
   if(_guestInputLoop){clearInterval(_guestInputLoop);_guestInputLoop=null;}
@@ -1722,9 +1732,11 @@ function snakeTick(){
             const bhdx=ah.x-bh.x,bhdy=ah.y-bh.y;
             const trueH2H=bhdx*bhdx+bhdy*bhdy<(aR+bR)*(aR+bR);
             if(trueH2H){
-              // Both head-fronts touching: larger snake (by numSections/width) ALWAYS wins — no angle, no SOL value
-              if(a.numSections<=b.numSections) eliminateSnake(a.id,b.id);
-              else eliminateSnake(b.id,a.id);
+              // Both head-fronts touching: larger snake wins. Tie → lower id wins.
+              // Canonical (id-based) tiebreaker ensures BOTH hosts make the SAME decision
+              // even when running simultaneously with slightly different positions.
+              const aWinsH2H=a.numSections>b.numSections||(a.numSections===b.numSections&&a.id>b.id);
+              if(!aWinsH2H) eliminateSnake(a.id,b.id); else eliminateSnake(b.id,a.id);
             } else {
               eliminateSnake(a.id,b.id); // A swept into B's head zone → A is the attacker, A dies
             }
@@ -1743,9 +1755,9 @@ function snakeTick(){
             const bh2=b.path[0];const aPts2=getBodyPoints(a);let _mutual2=false;
             for(let m=1;m<aPts2.length;m++){const ap2=aPts2[m];if(!ap2)continue;const mdx=bh2.x-ap2.x,mdy=bh2.y-ap2.y;if(mdx*mdx+mdy*mdy<(aR+bR)*(aR+bR)){_mutual2=true;break;}}
             if(_mutual2){
-              // Mutual body cut: larger snake (by numSections/width) wins
-              if(a.numSections<=b.numSections) eliminateSnake(a.id,b.id);
-              else eliminateSnake(b.id,a.id);
+              // Mutual body cut: larger snake wins. Tie → lower id wins (canonical, same result on both hosts)
+              const aWinsBody=a.numSections>b.numSections||(a.numSections===b.numSections&&a.id>b.id);
+              if(!aWinsBody) eliminateSnake(a.id,b.id); else eliminateSnake(b.id,a.id);
             } else {
               eliminateSnake(a.id,b.id); // clear body cut: A's head in B's body → A dies
             }
@@ -1814,32 +1826,26 @@ function spawnFoodFromSnake(snake){
   // Host snake tracks value in _myUsd; guest snakes track it in snake.usd
   const totalUsd=snake.id===myPid?_myUsd:(snake.usd||0);
   const w=totalUsd/bPts.length;
+  const maxR=ARENA_R*0.96; // clamp inside arena so gold pellets never spawn outside the wall
   bPts.forEach(p=>{
-    SG.food.push({x:p.x,y:p.y,ci:3,size:9+Math.random()*5,k:1,w:w});
+    let fx=p.x,fy=p.y;
+    const dist=Math.sqrt(fx*fx+fy*fy);
+    if(dist>maxR){const sc=maxR/dist;fx*=sc;fy*=sc;}
+    SG.food.push({x:fx,y:fy,ci:3,size:9+Math.random()*5,k:1,w:w});
   });
   _forceFoodSend=true; // push kill food to guests on the very next ss packet
-  const kCount=SG.food.filter(f=>f.k).length;
-  console.log('[spawnFoodFromSnake]',bPts.length,'pellets spawned, total kill food on map:',kCount);
-  if(snake.id===myPid)addToast('💀 '+bPts.length+' gold pellets dropped!','#FFD700');
 }
 
 // ── Food upkeep ──────────────────────────────────────────────────────────────
-// Keep a CONSISTENT carpet of regular pebbles: always refill the map back up to FOOD_TARGET
-// (eaten pebbles respawn fast, so the amount stays steady), and cap at 1.5x so that when lots
-// of fed snakes die at once the map can't get carpeted in pellets ("food everywhere"). Trim
-// oldest first so fresh death/boost piles survive. Boosting raises the count (adds shed
-// pebbles), so it never triggers the refill — no random top-ups mid-boost.
+// Regular pebbles always refill to FOOD_TARGET. Kill food (f.k=1) is never counted
+// against the cap and is never evicted — it stays until a snake eats it.
 function reconcileFood(){
-  const cap=Math.round(FOOD_TARGET*1.5);
-  if(SG.food.length<FOOD_TARGET){const n=Math.min(FOOD_TARGET-SG.food.length,8);for(let i=0;i<n;i++)SG.food.push(makeFoodLowDensity());}
-  else if(SG.food.length>cap){
-    // Only evict regular food — never remove SOL kill pellets (k:1).
-    // Kill food can drift to the front as snakes eat regular food and reconcileFood
-    // refills via push; without this guard shift() would eventually evict it.
-    let removed=0;const toRemove=Math.min(SG.food.length-cap,15);
-    for(let i=0;i<SG.food.length&&removed<toRemove;){
-      if(!SG.food[i].k){SG.food.splice(i,1);removed++;}else{i++;}
-    }
+  // Count only regular food — kill pellets are invisible to the refill/cap logic
+  let regCount=0;
+  for(let i=0;i<SG.food.length;i++){if(!SG.food[i].k)regCount++;}
+  if(regCount<FOOD_TARGET){
+    const n=Math.min(FOOD_TARGET-regCount,8);
+    for(let i=0;i<n;i++)SG.food.push(makeFoodLowDensity());
   }
 }
 
@@ -1873,7 +1879,9 @@ function applyRemoteState(d){
       _killFeed.push({kName:(km.name||'ARENA').slice(0,10),kColor:km.color||'#FFD700',vName:(vm.name||'SNAKE').slice(0,10),vColor:vm.color||'#FF69B4',ts:Date.now()});
       if(_killFeed.length>5)_killFeed.shift();
       const dead=SG.snakes.get(k.id);
-      if(dead&&dead.alive){spawnFoodFromSnake(dead);dead.alive=false;}
+      // Don't spawn food on guest — host food packet (sent same tick, _forceFoodSend=true)
+      // is authoritative. Spawning locally creates duplicate trails at dead-reckoned positions.
+      if(dead&&dead.alive)dead.alive=false;
       if(k.id===myPid&&!_localDead)endSnakeGame('eliminated',k.killerId);
     });
   }
