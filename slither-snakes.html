@@ -386,7 +386,7 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
 
   <div style="margin-bottom:13px;">
     <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="color:#aaa;">H2H Range</span><span id="tun-h2h-val" style="color:#FFD700;min-width:36px;text-align:right;">1.00×</span></div>
-    <input type="range" id="tun-h2h" min="0.50" max="1.50" step="0.05" value="1.00" oninput="_onTuning()" style="width:100%;accent-color:#FFD700;">
+    <input type="range" id="tun-h2h" min="0.50" max="3.00" step="0.05" value="1.00" oninput="_onTuning()" style="width:100%;accent-color:#FFD700;">
     <div style="display:flex;justify-content:space-between;font-size:9px;color:#333;"><span>tighter</span><span>looser</span></div>
   </div>
 
@@ -1779,30 +1779,36 @@ function snakeTick(){
   const alive=[...SG.snakes.values()].filter(s=>s.alive);
   const _h2hDone=new Set(); // "id1:id2" canonical key (id1<id2 lexicographically)
 
-  // Hurtbox-center enters H2H ring → hurtbox owner dies.
-  // Directional keys (a.id>b.id) so both can fire independently if mutual.
-  // Canonical key added to block the existing loop from re-resolving the same pair.
+  // Hurtbox-nose-vs-H2H-ring: if your hurtbox center enters the opponent's H2H
+  // ring BUT only from the rear 60% arc (front ±72° is a dead zone), you die.
+  // Exactly ONE death per pair per tick — first condition checked (i<j) wins.
+  // Front dead-zone math: cos²(72°)≈0.0955; skip if dot>0 AND dot²>0.0955*dist²
   for(let i=0;i<alive.length;i++){
     const a=alive[i]; if(!a.alive)continue;
     const ah=a.path[0]; if(!ah)continue;
     const aR=sectionRadius(a);
-    const hbCx=ah.x+Math.cos(a.angle)*(aR*_tuning.hbFwd);
-    const hbCy=ah.y+Math.sin(a.angle)*(aR*_tuning.hbFwd);
-    for(let j=0;j<alive.length;j++){
-      if(i===j)continue;
+    const aHbX=ah.x+Math.cos(a.angle)*(aR*_tuning.hbFwd);
+    const aHbY=ah.y+Math.sin(a.angle)*(aR*_tuning.hbFwd);
+    for(let j=i+1;j<alive.length;j++){
       const b=alive[j]; if(!b.alive)continue;
       const bh=b.path[0]; if(!bh)continue;
       const bR=sectionRadius(b);
+      const cpk=a.id<b.id?a.id+':'+b.id:b.id+':'+a.id;
+      if(_h2hDone.has(cpk))continue;
       const h2hR=(aR+bR)*_tuning.h2hScale;
-      const dx=hbCx-bh.x,dy=hbCy-bh.y;
-      if(dx*dx+dy*dy<h2hR*h2hR){
-        const dKey=a.id+'>'+b.id;
-        if(!_h2hDone.has(dKey)){
-          _h2hDone.add(dKey);
-          _h2hDone.add(a.id<b.id?a.id+':'+b.id:b.id+':'+a.id);
-          eliminateSnake(a.id,b.id);
-        }
-        break;
+      // A's hurtbox in B's rear H2H zone?
+      const dAxB=aHbX-bh.x,dAyB=aHbY-bh.y,d2AB=dAxB*dAxB+dAyB*dAyB;
+      const dotAB=dAxB*Math.cos(b.angle)+dAyB*Math.sin(b.angle);
+      const aInB=d2AB<h2hR*h2hR&&!(dotAB>0&&dotAB*dotAB>0.0955*d2AB);
+      // B's hurtbox in A's rear H2H zone?
+      const bHbX=bh.x+Math.cos(b.angle)*(bR*_tuning.hbFwd);
+      const bHbY=bh.y+Math.sin(b.angle)*(bR*_tuning.hbFwd);
+      const dBxA=bHbX-ah.x,dByA=bHbY-ah.y,d2BA=dBxA*dBxA+dByA*dByA;
+      const dotBA=dBxA*Math.cos(a.angle)+dByA*Math.sin(a.angle);
+      const bInA=d2BA<h2hR*h2hR&&!(dotBA>0&&dotBA*dotBA>0.0955*d2BA);
+      if(aInB||bInA){
+        _h2hDone.add(cpk);
+        if(aInB)eliminateSnake(a.id,b.id); else eliminateSnake(b.id,a.id);
       }
     }
   }
@@ -2230,11 +2236,11 @@ function _drawTuningPreview(){
   cx.beginPath();cx.moveTo(lx,ly);cx.arc(px,py,hbR,angle-Math.PI/2,angle+Math.PI/2);
   cx.closePath();cx.fill();cx.stroke();cx.restore();
 
-  // H2H circle drawn on top — actual trigger radius is (rA+rB)*scale = 2r*scale from head centre
+  // H2H arc — rear 60% only (front ±72° dead zone), drawn on top
   const h2hR=r*2*_tuning.h2hScale;
   cx.save();
   cx.strokeStyle='rgba(255,200,0,0.85)';cx.lineWidth=2;cx.setLineDash([5,4]);
-  cx.beginPath();cx.arc(hx,hy,h2hR,0,Math.PI*2);cx.stroke();
+  cx.beginPath();cx.arc(hx,hy,h2hR,angle+1.257,angle-1.257,true);cx.stroke();
   cx.setLineDash([]);cx.restore();
 
   // Labels
@@ -2679,7 +2685,7 @@ function rafDraw(ts){
       ctx.strokeStyle='rgba(255,200,0,0.85)';
       ctx.lineWidth=2/_camZoom;
       ctx.setLineDash([6/_camZoom,4/_camZoom]);
-      ctx.beginPath();ctx.arc(h.x,h.y,h2hRing,0,Math.PI*2);ctx.stroke();
+      ctx.beginPath();ctx.arc(h.x,h.y,h2hRing,s.angle+1.257,s.angle-1.257,true);ctx.stroke();
       ctx.setLineDash([]);
       ctx.restore();
     });
