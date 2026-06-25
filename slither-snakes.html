@@ -1822,13 +1822,13 @@ function snakeTick(){
       // A's hurtbox in B's rear H2H zone?
       const dAxB=aHbX-bh.x,dAyB=aHbY-bh.y,d2AB=dAxB*dAxB+dAyB*dAyB;
       const dotAB=dAxB*Math.cos(b.angle)+dAyB*Math.sin(b.angle);
-      const aInB=d2AB<h2hR*h2hR&&!(dotAB>0&&dotAB*dotAB>0.25*d2AB);
+      const aInB=d2AB<h2hR*h2hR&&!(dotAB>0&&dotAB*dotAB>0.41*d2AB);
       // B's hurtbox in A's rear H2H zone?
       const bHbX=bh.x+Math.cos(b.angle)*(bR*_tuning.hbFwd);
       const bHbY=bh.y+Math.sin(b.angle)*(bR*_tuning.hbFwd);
       const dBxA=bHbX-ah.x,dByA=bHbY-ah.y,d2BA=dBxA*dBxA+dByA*dByA;
       const dotBA=dBxA*Math.cos(a.angle)+dByA*Math.sin(a.angle);
-      const bInA=d2BA<h2hR*h2hR&&!(dotBA>0&&dotBA*dotBA>0.25*d2BA);
+      const bInA=d2BA<h2hR*h2hR&&!(dotBA>0&&dotBA*dotBA>0.41*d2BA);
       if(aInB||bInA){
         _h2hDone.add(cpk);
         if(aInB&&bInA){
@@ -1869,13 +1869,13 @@ function snakeTick(){
             const dAx2=aHbX2-bh.x,dAy2=aHbY2-bh.y;
             const dotA2=dAx2*Math.cos(b.angle)+dAy2*Math.sin(b.angle);
             const d2A2=dAx2*dAx2+dAy2*dAy2;
-            const aInRear2=!(dotA2>0&&dotA2*dotA2>0.25*d2A2);
+            const aInRear2=!(dotA2>0&&dotA2*dotA2>0.41*d2A2);
             const bHbX2=bh.x+Math.cos(b.angle)*(bR*_tuning.hbFwd);
             const bHbY2=bh.y+Math.sin(b.angle)*(bR*_tuning.hbFwd);
             const dBx2=bHbX2-ah.x,dBy2=bHbY2-ah.y;
             const dotB2=dBx2*Math.cos(a.angle)+dBy2*Math.sin(a.angle);
             const d2B2=dBx2*dBx2+dBy2*dBy2;
-            const bInRear2=!(dotB2>0&&dotB2*dotB2>0.25*d2B2);
+            const bInRear2=!(dotB2>0&&dotB2*dotB2>0.41*d2B2);
             if(aInRear2&&bInRear2){
               const aWins=a.numSections>b.numSections||(a.numSections===b.numSections&&a.id>b.id);
               if(aWins)eliminateSnake(b.id,a.id);else eliminateSnake(a.id,b.id);
@@ -2287,7 +2287,7 @@ function _drawTuningPreview(){
   const h2hR=r*2*_tuning.h2hScale;
   cx.save();
   cx.strokeStyle='rgba(255,200,0,0.85)';cx.lineWidth=2;cx.setLineDash([5,4]);
-  cx.beginPath();cx.arc(hx,hy,h2hR,angle+1.047,angle-1.047,false);cx.stroke();
+  cx.beginPath();cx.arc(hx,hy,h2hR,angle+0.87,angle-0.87,false);cx.stroke();
   cx.setLineDash([]);cx.restore();
 
   // Labels
@@ -2746,7 +2746,7 @@ function rafDraw(ts){
       ctx.strokeStyle='rgba(255,200,0,0.85)';
       ctx.lineWidth=2/_camZoom;
       ctx.setLineDash([6/_camZoom,4/_camZoom]);
-      ctx.beginPath();ctx.arc(h.x,h.y,h2hRing,s.angle+1.257,s.angle-1.257,false);ctx.stroke();
+      ctx.beginPath();ctx.arc(h.x,h.y,h2hRing,s.angle+0.87,s.angle-0.87,false);ctx.stroke();
       ctx.setLineDash([]);
       ctx.restore();
     });
