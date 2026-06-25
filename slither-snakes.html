@@ -1836,17 +1836,25 @@ function snakeTick(){
             if(_h2hDone.has(pk)){break;} // already resolved from the other direction this tick
             _h2hDone.add(pk);
             const bh=b.path[0];
-            const bhdx=ah.x-bh.x,bhdy=ah.y-bh.y;
-            const _h2hR=(aR+bR)*_tuning.h2hScale;
-            const trueH2H=bhdx*bhdx+bhdy*bhdy<_h2hR*_h2hR;
-            if(trueH2H){
-              // Both head-fronts touching: larger snake wins. Tie → lower id wins.
-              // Canonical (id-based) tiebreaker ensures BOTH hosts make the SAME decision
-              // even when running simultaneously with slightly different positions.
-              const aWinsH2H=a.numSections>b.numSections||(a.numSections===b.numSections&&a.id>b.id);
-              if(!aWinsH2H) eliminateSnake(a.id,b.id); else eliminateSnake(b.id,a.id);
+            // Rear-arc rule (same as pre-loop): nose in opponent's rear 60% → nose-owner dies.
+            // Front ±72° is dead zone (cos²72°≈0.0955). One outcome only — A checked first.
+            const aHbX2=ah.x+Math.cos(a.angle)*(aR*_tuning.hbFwd);
+            const aHbY2=ah.y+Math.sin(a.angle)*(aR*_tuning.hbFwd);
+            const dAx2=aHbX2-bh.x,dAy2=aHbY2-bh.y;
+            const dotA2=dAx2*Math.cos(b.angle)+dAy2*Math.sin(b.angle);
+            const d2A2=dAx2*dAx2+dAy2*dAy2;
+            if(!(dotA2>0&&dotA2*dotA2>0.0955*d2A2)){
+              eliminateSnake(a.id,b.id); // A's nose in B's rear arc → A dies
             } else {
-              eliminateSnake(a.id,b.id); // A swept into B's head zone → A is the attacker, A dies
+              const bHbX2=bh.x+Math.cos(b.angle)*(bR*_tuning.hbFwd);
+              const bHbY2=bh.y+Math.sin(b.angle)*(bR*_tuning.hbFwd);
+              const dBx2=bHbX2-ah.x,dBy2=bHbY2-ah.y;
+              const dotB2=dBx2*Math.cos(a.angle)+dBy2*Math.sin(a.angle);
+              const d2B2=dBx2*dBx2+dBy2*dBy2;
+              if(!(dotB2>0&&dotB2*dotB2>0.0955*d2B2)){
+                eliminateSnake(b.id,a.id); // B's nose in A's rear arc → B dies
+              }
+              // Both noses in each other's front dead zones — no H2H kill; body-cut handles it
             }
           } else if(a.id===b.id){
             eliminateSnake(a.id,null); // self-collision
