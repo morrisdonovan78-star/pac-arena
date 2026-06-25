@@ -444,6 +444,7 @@ let _guestInputs=new Map();
 let _killFeed=[];
 let _pendingKills=[];
 let _elimPairTick=-1,_elimPairSet=new Set(); // per-tick guard (same-tick)
+const _snakesSpawnedFood=new Set(); // tracks which snake IDs already had death food spawned
 const _recentKillPairs=new Map(); // time-based 2s guard — survives across ticks and host migrations
 let _playerMeta=new Map();
 let _ping=0,_pingIv=null;
@@ -1456,7 +1457,9 @@ function loadKillFood(){
 
 function initSnakeGame(players){
   _localDead=false;
+  _autoCircle=false;
   _foodSendCounter=2; // init so first sendSnakeState (→3) immediately includes food
+  _snakesSpawnedFood.clear();
   SG={snakes:new Map(),food:[],tick:0,over:false};
   const myColor=_playerMeta.get(myPid)?.color||colorFromId(myPid);
   SG.snakes.set(myPid,makeSnake(myPid,myColor,getMyName()));
@@ -1745,9 +1748,15 @@ function snakeTick(){
             eliminateSnake(a.id,null); // self-collision
           } else {
             // A's head hit B's body (k>0, cross-snake body cut)
-            // Hurtbox = front of A's head only: B's body point must be in A's forward hemisphere
+            // Hurtbox = pupil-centered half-disk: fwd=aR*0.5 from head, radius=aR*0.5 (tip at nose)
             const fwdDot=(bs.x-ah.x)*Math.cos(a.angle)+(bs.y-ah.y)*Math.sin(a.angle);
             if(fwdDot<=0)continue; // body point is beside/behind A's head — side-clip, check next point
+            // Nose-tip hurtbox: tiny zone right at the nose (fwd=r*0.75 from head, radius=r*0.25)
+            // This means only body segments very close to A's nose tip can kill A — no side-grazing
+            const _hbFwd=aR*0.75,_hbR=aR*0.25;
+            const _px=ah.x+Math.cos(a.angle)*_hbFwd,_py=ah.y+Math.sin(a.angle)*_hbFwd;
+            const _pdx=bs.x-_px,_pdy=bs.y-_py;
+            if(_pdx*_pdx+_pdy*_pdy>=(_hbR+bR)*(_hbR+bR))continue; // outside nose hurtbox
             // _h2hDone prevents both hosts from each killing the other's snake on same tick
             const pk=a.id<b.id?a.id+':'+b.id:b.id+':'+a.id;
             if(_h2hDone.has(pk)){break;}
@@ -1819,6 +1828,7 @@ function eliminateSnake(id,killerId){
   const vm=_playerMeta.get(id)||{};
   _killFeed.push({kName:(km.name||'ARENA').slice(0,10),kColor:km.color||'#FFD700',vName:(vm.name||'SNAKE').slice(0,10),vColor:vm.color||'#FF69B4',ts:Date.now()});
   if(_killFeed.length>5)_killFeed.shift();
+  _guestInputs.delete(id); // drop stale inputs so a dead snake never keeps circling on host
   // Queue kill event so it goes out in the next ss state packet
   _pendingKills.push({id,killerId:killerId||null});
   if(id===myPid)endSnakeGame('eliminated',killerId);
@@ -1826,6 +1836,8 @@ function eliminateSnake(id,killerId){
 
 function spawnFoodFromSnake(snake){
   if(!snake||!snake.path)return;
+  if(_snakesSpawnedFood.has(snake.id))return; // already spawned by this client or a remote host
+  _snakesSpawnedFood.add(snake.id);
   const bPts=getBodyPoints(snake);
   if(!bPts.length)return;
   // Host snake tracks value in _myUsd; guest snakes track it in snake.usd
@@ -1886,6 +1898,7 @@ function applyRemoteState(d){
       const dead=SG.snakes.get(k.id);
       // Don't spawn food on guest — host food packet (sent same tick, _forceFoodSend=true)
       // is authoritative. Spawning locally creates duplicate trails at dead-reckoned positions.
+      _snakesSpawnedFood.add(k.id); // prevent new host from re-spawning food if it migrates
       if(dead&&dead.alive)dead.alive=false;
       if(k.id===myPid&&!_localDead)endSnakeGame('eliminated',k.killerId);
     });
@@ -1901,14 +1914,16 @@ function applyRemoteState(d){
         if(own&&sd.ns)own.numSections=sd.ns;
         if(own&&sd.score!=null)own.score=sd.score; // keep hud-score in sync for guests
         if(sd.usd!=null){ if(sd.usd>_myUsd+0.0001){const _oh=own&&own.path&&own.path[0]; if(_oh)_spawnMoneyFx(_oh.x,_oh.y);} _myUsd=sd.usd; } // host is authoritative for my value
-        if(own&&_firstRemoteSync&&sd.segs&&sd.segs.length>0){
-          const head={x:sd.segs[0][0],y:sd.segs[0][1]};
-          const ang=sd.angle!=null?sd.angle:own.angle;
-          const r=sectionRadius(own);
-          const pn=Math.ceil(own.numSections*r*SEGMENT_SPACING*2/SNAKE_SPD)+10;
-          own.path=Array.from({length:pn},(_,i)=>({x:head.x-Math.cos(ang)*i*SNAKE_SPD,y:head.y-Math.sin(ang)*i*SNAKE_SPD}));
-          own.angle=ang;
-          _firstRemoteSync=false;
+        if(_firstRemoteSync){
+          if(own&&sd.segs&&sd.segs.length>0){
+            const head={x:sd.segs[0][0],y:sd.segs[0][1]};
+            const ang=sd.angle!=null?sd.angle:own.angle;
+            const r=sectionRadius(own);
+            const pn=Math.ceil(own.numSections*r*SEGMENT_SPACING*2/SNAKE_SPD)+10;
+            own.path=Array.from({length:pn},(_,i)=>({x:head.x-Math.cos(ang)*i*SNAKE_SPD,y:head.y-Math.sin(ang)*i*SNAKE_SPD}));
+            own.angle=ang;
+          }
+          _firstRemoteSync=false; // always unblock on first SS regardless of segs presence
         }
         return;
       }
@@ -1918,6 +1933,8 @@ function applyRemoteState(d){
         s=makeSnake(sd.id,sd.color||meta.color||colorFromId(sd.id),sd.name||meta.name||'SNAKE');
         SG.snakes.set(sd.id,s);
       }
+      // Never reanimate a snake that was confirmed killed — guards against stale SS from migrating host
+      if(_snakesSpawnedFood.has(sd.id)){s.alive=false;return;}
       s.alive=true; s.angle=sd.angle; s.score=sd.score||0; s.boost=sd.boost||false; s.usd=sd.usd||0;
       s.numSections=sd.ns||(sd.segs&&sd.segs.length)||s.numSections;
       s.color=sd.color||s.color; s.name=sd.name||s.name;
@@ -1974,6 +1991,7 @@ function applyRemoteState(d){
 
 // ── Guest input sending ──────────────────────────────────────
 function startGuestLoop(){
+  if(_guestInputLoop){clearInterval(_guestInputLoop);_guestInputLoop=null;}
   _guestInputLoop=setInterval(()=>{
     if(!SG||SG.over||!ablyChannel||isSpectating||_localDead)return;
     const my=SG.snakes.get(myPid);
@@ -1999,10 +2017,8 @@ function launchSnakeGame(){
   mmCtx=mmCanvas?mmCanvas.getContext('2d'):null;
 
   const my=SG&&SG.snakes.get(myPid);
-  // Host: start camera at own spawn. Guest: start at arena center (0,0) — food is everywhere
-  // there; _firstRemoteSync will snap to the real assigned spawn on first ss packet.
-  if(isHost&&my&&my.path.length){_camX=my.path[0].x;_camY=my.path[0].y;}
-  else if(!isHost){_camX=0;_camY=0;}
+  // Start camera at own snake's locally-guessed spawn; first SS will snap it to the real one.
+  if(my&&my.path.length){_camX=my.path[0].x;_camY=my.path[0].y;}
 
   document.getElementById('hud-pot').textContent=ST.lobbyUsd===0?'FREE':'$'+(ST.lobbyUsd*2);
 
@@ -2351,7 +2367,7 @@ function rafDraw(ts){
   // Camera — damnbruh.com exact: fixed zoom from screen resolution, instant follow
   // zoom = clamp(0.3, 2.0, min(w/1920, h/1080))  — same formula as damnbruh bundle
   const mySnake=SG&&SG.snakes.get(myPid);
-  if(mySnake&&mySnake.path.length&&mySnake.alive&&!_firstRemoteSync){
+  if(mySnake&&mySnake.path.length&&mySnake.alive){
     const h=mySnake.path[0];
     _camX=h.x;
     _camY=h.y;
@@ -2380,43 +2396,43 @@ function rafDraw(ts){
   if(SG)SG.snakes.forEach(s=>{if(s.alive&&s.path.length>1)drawSnake(s);});
 
   // H key: debug hitbox overlay
-  // Actual game collision (snakeTick line ~1723): dist(ah, bs) < aR+bR
-  // Actual hurtbox     (snakeTick line ~1748): fwdDot from ah > 0  (forward hemisphere, NO offset)
-  // → Both the hitbox and hurtbox are centred at path[0], radius r.
-  //   Hitbox = full circle.  Hurtbox = forward half of that same circle.
-  //   Visual: red back-arc + cyan front half-disk = one clean circle at radius r.
+  // Head hitbox (h2h):  full circle r at path[0]  — red back arc
+  // Hurtbox (body cut): half-disk at nose tip, centre fwd=r*0.75, radius hbR=r*0.25 — cyan
+  // Red arc radius = sqrt(fwd²+hbR²) ≈ r*0.79 so it's tangent to the hurtbox flat-edge sides.
   if(_showHitboxes&&SG){
     SG.snakes.forEach(s=>{
       if(!s.alive||!s.path.length)return;
       const bPts=getBodyPoints(s);
       const r=sectionRadius(s);
-      ctx.lineWidth=2/_camZoom;
 
-      // Body sections — yellow full circles at r (actual collision radius)
+      // Yellow body circles at actual collision radius
+      ctx.lineWidth=2/_camZoom;
       bPts.forEach((p,i)=>{ if(i>0){
         ctx.strokeStyle='rgba(255,255,0,0.7)';
         ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.stroke();
       }});
 
       const h=bPts[0]; if(!h)return;
+      const fwd=r*0.75, hbR=r*0.25;
+      const headR=Math.sqrt(fwd*fwd+hbR*hbR); // ≈ r*0.79 — tangent to hurtbox sides
+      const px=h.x+Math.cos(s.angle)*fwd, py=h.y+Math.sin(s.angle)*fwd; // hurtbox centre
 
-      // Red BACK arc — from (angle+90°) clockwise around the back to (angle-90°).
-      // Covers exactly the rear hemisphere. No red enters the hurtbox zone.
+      // Red back arc — centred at head, radius headR, rear hemisphere only
       ctx.strokeStyle='rgba(255,40,40,0.95)';
       ctx.lineWidth=2/_camZoom;
       ctx.beginPath();
-      ctx.arc(h.x,h.y,r,s.angle+Math.PI/2,s.angle-Math.PI/2,false);
+      ctx.arc(h.x,h.y,headR,s.angle+Math.PI/2,s.angle-Math.PI/2,false);
       ctx.stroke();
 
-      // Cyan forward half-disk (hurtbox) — same centre, same radius.
-      // Together with the red arc they form the complete hitbox circle.
+      // Cyan nose hurtbox — true half-disk: flat side at hurtbox centre, curved tip at nose
+      const lx=px+Math.cos(s.angle-Math.PI/2)*hbR, ly=py+Math.sin(s.angle-Math.PI/2)*hbR;
       ctx.save();
-      ctx.fillStyle='rgba(0,255,220,0.35)';
+      ctx.fillStyle='rgba(0,255,220,0.45)';
       ctx.strokeStyle='rgba(0,255,220,1)';
       ctx.lineWidth=1.5/_camZoom;
       ctx.beginPath();
-      ctx.moveTo(h.x,h.y);
-      ctx.arc(h.x,h.y,r,s.angle-Math.PI/2,s.angle+Math.PI/2);
+      ctx.moveTo(lx,ly);
+      ctx.arc(px,py,hbR,s.angle-Math.PI/2,s.angle+Math.PI/2);
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
@@ -2516,23 +2532,26 @@ function drawArena(){
 
 function drawFood(){
   const now=Date.now();
+  const vHW=canvas.width/(2*_camZoom)+30,vHH=canvas.height/(2*_camZoom)+30;
+  // Batch glow pass (alpha circle — no gradient creation per item)
+  ctx.globalAlpha=0.22;
   SG.food.forEach(f=>{
-    const col=foodColor(f);
+    if(Math.abs(f.x-_camX)>vHW||Math.abs(f.y-_camY)>vHH)return;
+    const pulse=1+0.18*Math.sin(now*0.004+f.x*0.01+f.y*0.01);
+    ctx.fillStyle=foodColor(f);
+    ctx.beginPath();ctx.arc(f.x,f.y,f.size*pulse*2,0,Math.PI*2);ctx.fill();
+  });
+  ctx.globalAlpha=1;
+  // Body pass
+  SG.food.forEach(f=>{
+    if(Math.abs(f.x-_camX)>vHW||Math.abs(f.y-_camY)>vHH)return;
     const pulse=1+0.18*Math.sin(now*0.004+f.x*0.01+f.y*0.01);
     const r=f.size*pulse;
-    ctx.save();
-    // Glow
-    ctx.beginPath();ctx.arc(f.x,f.y,r*2,0,Math.PI*2);
-    const g=ctx.createRadialGradient(f.x,f.y,0,f.x,f.y,r*2);
-    g.addColorStop(0,col+'88');g.addColorStop(1,'transparent');
-    ctx.fillStyle=g;ctx.fill();
-    // Body
-    ctx.beginPath();ctx.arc(f.x,f.y,r,0,Math.PI*2);
-    ctx.fillStyle=col;ctx.fill();
-    // Bright center
-    ctx.beginPath();ctx.arc(f.x-r*0.25,f.y-r*0.25,r*0.35,0,Math.PI*2);
-    ctx.fillStyle='rgba(255,255,255,0.75)';ctx.fill();
-    ctx.restore();
+    const col=foodColor(f);
+    ctx.fillStyle=col;
+    ctx.beginPath();ctx.arc(f.x,f.y,r,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,0.75)';
+    ctx.beginPath();ctx.arc(f.x-r*0.25,f.y-r*0.25,r*0.35,0,Math.PI*2);ctx.fill();
   });
 }
 
@@ -2547,26 +2566,28 @@ function drawSnake(snake){
   const n=bPts.length;
   const now=performance.now();
 
-  // Rainbow boost glow — draw a slightly-larger rainbow ring under each segment when boosting
+  // Rainbow boost glow — single batched stroke (one canvas call instead of n)
   if(snake.boost){
     ctx.save();
     ctx.lineWidth=r*0.55;
+    ctx.strokeStyle=`hsla(${(now*0.18)%360},100%,65%,0.60)`;
+    ctx.beginPath();
     for(let i=n-1;i>=0;i--){
-      const p=bPts[i]; if(!p)continue;
-      const hue=(i*14+now*0.18)%360; // cycle hue along body + over time
-      ctx.strokeStyle=`hsla(${hue},100%,65%,0.72)`;
-      ctx.beginPath();
-      ctx.arc(p.x,p.y,r*1.18,0,Math.PI*2);
-      ctx.stroke();
+      const p=bPts[i];if(!p)continue;
+      ctx.moveTo(p.x+r*1.18,p.y);ctx.arc(p.x,p.y,r*1.18,0,Math.PI*2);
     }
+    ctx.stroke();
     ctx.restore();
   }
 
-  // Draw tail → head (damnbruh: all segments same radius, no taper)
+  // Draw tail → head: batch all body circles in ONE fill call for performance
+  ctx.fillStyle=col;
+  ctx.beginPath();
   for(let i=n-1;i>=1;i--){
-    const p=bPts[i]; if(!p)continue;
-    _drawBodyCircle(p.x,p.y,r,col);
+    const p=bPts[i];if(!p)continue;
+    ctx.moveTo(p.x+r,p.y);ctx.arc(p.x,p.y,r,0,Math.PI*2);
   }
+  ctx.fill();
 
   // Head — same radius as body, with eyes/tongue/boost flame
   const h=bPts[0]; if(!h)return;
