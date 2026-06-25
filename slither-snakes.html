@@ -1777,7 +1777,35 @@ function snakeTick(){
   else{
   const alive=[...SG.snakes.values()].filter(s=>s.alive);
   const _h2hDone=new Set(); // "id1:id2" canonical key (id1<id2 lexicographically)
-  // Sub-pixel angle diff helper: returns absolute angular distance in [0,π]
+
+  // Hurtbox-center enters H2H ring → hurtbox owner dies.
+  // Directional keys (a.id>b.id) so both can fire independently if mutual.
+  // Canonical key added to block the existing loop from re-resolving the same pair.
+  for(let i=0;i<alive.length;i++){
+    const a=alive[i]; if(!a.alive)continue;
+    const ah=a.path[0]; if(!ah)continue;
+    const aR=sectionRadius(a);
+    const hbCx=ah.x+Math.cos(a.angle)*(aR*_tuning.hbFwd);
+    const hbCy=ah.y+Math.sin(a.angle)*(aR*_tuning.hbFwd);
+    for(let j=0;j<alive.length;j++){
+      if(i===j)continue;
+      const b=alive[j]; if(!b.alive)continue;
+      const bh=b.path[0]; if(!bh)continue;
+      const bR=sectionRadius(b);
+      const h2hR=(aR+bR)*_tuning.h2hScale;
+      const dx=hbCx-bh.x,dy=hbCy-bh.y;
+      if(dx*dx+dy*dy<h2hR*h2hR){
+        const dKey=a.id+'>'+b.id;
+        if(!_h2hDone.has(dKey)){
+          _h2hDone.add(dKey);
+          _h2hDone.add(a.id<b.id?a.id+':'+b.id:b.id+':'+a.id);
+          eliminateSnake(a.id,b.id);
+        }
+        break;
+      }
+    }
+  }
+
   for(let i=0;i<alive.length;i++){
     const a=alive[i]; if(!a.alive)continue;
     const ah=a.path[0];
