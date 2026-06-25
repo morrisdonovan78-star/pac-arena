@@ -2374,28 +2374,33 @@ function rafDraw(ts){
   if(SG&&SG.food)drawFood();
   if(SG)SG.snakes.forEach(s=>{if(s.alive&&s.path.length>1)drawSnake(s);});
 
-  // H key: debug hitbox overlay — yellow=body, orange=head, cyan=hurtbox (drawn on top)
+  // H key: debug hitbox overlay — yellow=body circles, orange=head back-arc, cyan=hurtbox wedge
   if(_showHitboxes&&SG){
     SG.snakes.forEach(s=>{
       if(!s.alive||!s.path.length)return;
       const bPts=getBodyPoints(s);
       const r=sectionRadius(s);
-      const fwd=r*0.5;   // hurtbox centre offset (pupil)
-      const hbR=r*0.55;  // hurtbox radius; tip = fwd+hbR = r*1.05 (just kisses nose)
-      const headR=fwd+hbR; // head circle front edge lands exactly at hurtbox tip — flush, no over/underlap
-      const vr=r*1.08;   // body circles slightly larger to close gaps between segments
+      const fwd=r*0.5;                          // hurtbox centre offset (pupil)
+      const hbR=r*0.58;                         // hurtbox radius — slightly wider left/right contact
+      const headArcR=Math.sqrt(fwd*fwd+hbR*hbR); // radius so arc endpoints land on hurtbox side tips
+      const hbAng=Math.atan2(hbR,fwd);           // sweep angle to those side tips (≈49°)
+      const vr=r*1.08;
       ctx.lineWidth=2/_camZoom;
       bPts.forEach((p,i)=>{
         if(i===0){
-          // Head: full circle whose front edge == hurtbox tip. Hurtbox drawn on top covers the front half.
+          // Head: back arc only — sweeps clockwise from one hurtbox-edge tip around the back to
+          // the other tip. Arc endpoints land exactly on the hurtbox flat-edge endpoints so there
+          // is zero gap and zero overlap — no orange line enters the hurtbox zone.
           ctx.strokeStyle='rgba(255,140,0,0.95)';
-          ctx.beginPath();ctx.arc(p.x,p.y,headR,0,Math.PI*2);ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(p.x,p.y,headArcR,s.angle+hbAng,s.angle-hbAng,false);
+          ctx.stroke();
         } else {
           ctx.strokeStyle='rgba(255,255,0,0.7)';
           ctx.beginPath();ctx.arc(p.x,p.y,vr,0,Math.PI*2);ctx.stroke();
         }
       });
-      // Hurtbox drawn last so it sits on top of the head circle
+      // Hurtbox drawn last so cyan is always on top
       const h=bPts[0];
       if(h){
         const px=h.x+Math.cos(s.angle)*fwd;
