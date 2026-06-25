@@ -466,6 +466,7 @@ const RADIUS_SCALE       = 0.8;  // multiplier for radius curve
 const FOOD_TARGET  = 135;   // 135 pebbles on map
 const FOOD_GROW    = 2;     // sections added per food orb
 const MIN_SECTIONS = 8;     // die below this
+const BOOST_MIN    = 12;    // boost stops draining below this length
 const INIT_SECTIONS= 24;    // starting section count
 const MAX_SECTIONS = 90;    // hard cap on snake length
 const MAX_TURN     = 0.274; // rad/tick
@@ -1664,7 +1665,7 @@ function _bgSimStep(){
     const my=SG.snakes.get(myPid);
     if(my&&my.alive&&my.path.length){
       if(_autoCircle){my.angle+=MAX_TURN;}else if(!document.hidden){const da=angleDiff(targetAngleToMouse(my),my.angle);my.angle+=Math.max(-MAX_TURN,Math.min(MAX_TURN,da));}
-      my.boost=(_mouseBoost||_padBoost)&&my.numSections>INIT_SECTIONS;
+      my.boost=(_mouseBoost||_padBoost)&&my.numSections>BOOST_MIN;
       const spd=my.boost?BOOST_SPD:SNAKE_SPD;
       const h=my.path[0];
       my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
@@ -1807,18 +1808,18 @@ function snakeTick(){
   SG.snakes.forEach(snake=>{
     if(!snake.alive)return;
     // can't boost at or below starting length
-    if(snake.boost&&snake.numSections<=INIT_SECTIONS)snake.boost=false;
+    if(snake.boost&&snake.numSections<=BOOST_MIN)snake.boost=false;
 
     // Grow: increment section count from queue, cap at MAX_SECTIONS
     if(snake.growQueue>0){snake.growQueue--;snake.numSections=Math.min(MAX_SECTIONS,snake.numSections+1);}
 
     // Boost drains sections; shed mass returns to the map as pebbles in your TRAIL only
     // (1 pebble per FOOD_GROW sections, so map+carried food stays conserved — no scatter).
-    if(snake.boost&&snake.numSections>INIT_SECTIONS){
+    if(snake.boost&&snake.numSections>BOOST_MIN){
       snake._drain=(snake._drain||0)+(BOOST_DRAIN_AMT/BOOST_DRAIN);
       if(snake._drain>=1){
         snake._drain-=1;
-        snake.numSections=Math.max(INIT_SECTIONS,snake.numSections-1);
+        snake.numSections=Math.max(BOOST_MIN,snake.numSections-1);
         snake._shed=(snake._shed||0)+1/FOOD_GROW;
         if(snake._shed>=1){
           snake._shed-=1;
@@ -2210,7 +2211,7 @@ function startGuestLoop(){
     if(!SG||SG.over||!ablyChannel||isSpectating||_localDead)return;
     const my=SG.snakes.get(myPid);
     if(!my||!my.alive)return;
-    const canBoost=(_mouseBoost||_padBoost)&&my.numSections>INIT_SECTIONS;
+    const canBoost=(_mouseBoost||_padBoost)&&my.numSections>BOOST_MIN;
     my.boost=canBoost;
     const h=my.path[0];
     // circle:true tells host to apply +MAX_TURN directly — avoids angleDiff(angle+π) float ambiguity
@@ -2708,7 +2709,7 @@ function rafDraw(ts){
       // Scale turn and speed proportionally to frame time
       if(_autoCircle){my.angle+=MAX_TURN*frac;}else{const da=angleDiff(targetAngleToMouse(my),my.angle);my.angle+=Math.max(-MAX_TURN*frac,Math.min(MAX_TURN*frac,da));}
       // damnbruh: no boost below minimum size
-      my.boost=(_mouseBoost||_padBoost)&&my.numSections>INIT_SECTIONS;
+      my.boost=(_mouseBoost||_padBoost)&&my.numSections>BOOST_MIN;
       const spd=(my.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=my.path[0];
       my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
@@ -2743,7 +2744,7 @@ function rafDraw(ts){
       _hostPredTs=ts;
       const frac=dt/TICK_MS;
       if(_autoCircle){my.angle+=MAX_TURN*frac;}else{const da=angleDiff(targetAngleToMouse(my),my.angle);my.angle+=Math.max(-MAX_TURN*frac,Math.min(MAX_TURN*frac,da));}
-      my.boost=(_mouseBoost||_padBoost)&&my.numSections>INIT_SECTIONS;
+      my.boost=(_mouseBoost||_padBoost)&&my.numSections>BOOST_MIN;
       const spd=(my.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=my.path[0];
       my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
