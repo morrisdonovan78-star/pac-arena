@@ -2380,18 +2380,18 @@ function rafDraw(ts){
       if(!s.alive||!s.path.length)return;
       const bPts=getBodyPoints(s);
       const r=sectionRadius(s);
+      // Draw hitbox circles at r*1.08 so consecutive circles visually close the gap to the hurtbox
+      const vr=r*1.08;
       ctx.lineWidth=2/_camZoom;
       bPts.forEach((p,i)=>{
         ctx.strokeStyle=i===0?'rgba(255,140,0,0.95)':'rgba(255,255,0,0.7)';
-        ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.stroke();
+        ctx.beginPath();ctx.arc(p.x,p.y,vr,0,Math.PI*2);ctx.stroke();
       });
-      // Hurtbox: small cyan half-circle centred on the pupil midpoint.
-      // Pupil sits at eFwd+eR*0.3 ≈ r*0.45 forward from head centre (matches _drawHeadCircle ratios).
-      // "A little above" = slightly more forward, so offset = r*0.5.
+      // Hurtbox: cyan half-circle centred on pupil, tip just past the snake's nose
       const h=bPts[0];
       if(h){
-        const hbR=r*0.5;  // radius: centre at r*0.5 + hbR = r, so arc tip touches the snake's nose
-        const fwd=r*0.5;  // forward offset along s.angle to reach pupil area
+        const fwd=r*0.5;   // pupil offset from head centre
+        const hbR=r*0.58;  // tip lands at r*0.5+r*0.58=r*1.08 — flush with the visual hitbox front
         const px=h.x+Math.cos(s.angle)*fwd;
         const py=h.y+Math.sin(s.angle)*fwd;
         ctx.save();
