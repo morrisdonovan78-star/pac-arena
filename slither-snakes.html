@@ -502,6 +502,7 @@ let _localDead=false;
 let _autoCircle=false; // toggle: snake auto-circles until toggled off (E key / L3 button)
 let _lastRoomId=null;
 let _tuning={hbFwd:0.75,hbR:0.25,h2hScale:1.0}; // live combat physics — synced via ss packets
+try{const _sv=localStorage.getItem('ss_tuning_v1');if(_sv&&localStorage.getItem('ss_owner')==='1')Object.assign(_tuning,JSON.parse(_sv));}catch(_){}
 let _showTuning=false;
 let _botCount=0;
 
@@ -2162,6 +2163,8 @@ function _onTuning(){
   document.getElementById('tun-hbR-val').textContent  =_tuning.hbR.toFixed(2)+'r';
   document.getElementById('tun-h2h-val').textContent  =_tuning.h2hScale.toFixed(2)+'×';
   _drawTuningPreview();
+  try{localStorage.setItem('ss_tuning_v1',JSON.stringify(_tuning));}catch(_){}
+  if(isHost&&SG)sendSnakeState();
 }
 function _syncTuningUI(){
   const e=id=>document.getElementById(id);
@@ -2173,7 +2176,9 @@ function _syncTuningUI(){
 }
 function _resetTuning(){
   _tuning={hbFwd:0.75,hbR:0.25,h2hScale:1.0};
+  try{localStorage.removeItem('ss_tuning_v1');}catch(_){}
   _syncTuningUI();
+  if(isHost&&SG)sendSnakeState();
   addToast('Tuning reset to defaults','#888');
 }
 function _drawTuningPreview(){
