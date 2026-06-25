@@ -356,6 +356,40 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
     <button class="btn btn-c btn-sm" style="padding:4px 10px;font-size:10px;" onclick="goHome()">⌂ HOME</button>
   </div>
   <canvas id="minimap" width="120" height="120"></canvas>
+
+  <!-- Combat Tuning Suite — owner-gated (T key, requires ss_owner flag in localStorage) -->
+  <div id="tuning-panel" style="display:none;position:fixed;top:56px;right:12px;width:268px;background:rgba(4,4,16,0.95);border:1px solid rgba(255,180,0,0.5);border-radius:10px;padding:16px 14px 12px;z-index:300;font-family:'Orbitron',sans-serif;color:#fff;font-size:11px;box-shadow:0 0 24px rgba(255,180,0,0.18);">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <span style="color:#FFD700;font-size:12px;letter-spacing:2px;">⚔ COMBAT TUNING</span>
+      <button onclick="_toggleTuning()" style="background:none;border:none;color:#888;font-size:14px;cursor:pointer;padding:0 2px;">✕</button>
+    </div>
+
+    <div style="margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="color:#aaa;">Hurtbox Forward</span><span id="tun-hbFwd-val" style="color:#00FFFF;min-width:34px;text-align:right;">0.75r</span></div>
+      <input type="range" id="tun-hbFwd" min="0.20" max="0.95" step="0.01" value="0.75" oninput="_onTuning()" style="width:100%;accent-color:#00FFFF;">
+      <div style="display:flex;justify-content:space-between;font-size:9px;color:#444;"><span>close</span><span>far (nose tip)</span></div>
+    </div>
+
+    <div style="margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="color:#aaa;">Hurtbox Radius</span><span id="tun-hbR-val" style="color:#00FFFF;min-width:34px;text-align:right;">0.25r</span></div>
+      <input type="range" id="tun-hbR" min="0.05" max="0.55" step="0.01" value="0.25" oninput="_onTuning()" style="width:100%;accent-color:#00FFFF;">
+      <div style="display:flex;justify-content:space-between;font-size:9px;color:#444;"><span>tiny</span><span>large</span></div>
+    </div>
+
+    <div style="margin-bottom:14px;">
+      <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="color:#aaa;">H2H Range</span><span id="tun-h2h-val" style="color:#FFD700;min-width:34px;text-align:right;">1.00×</span></div>
+      <input type="range" id="tun-h2h" min="0.50" max="1.50" step="0.05" value="1.00" oninput="_onTuning()" style="width:100%;accent-color:#FFD700;">
+      <div style="display:flex;justify-content:space-between;font-size:9px;color:#444;"><span>tighter</span><span>looser</span></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-bottom:10px;">
+      <button onclick="spawnBotSnake()" style="padding:7px 4px;background:#FF6600;border:none;color:#fff;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:5px;letter-spacing:1px;">+ BOT</button>
+      <button onclick="clearBotSnakes()" style="padding:7px 4px;background:#1a0000;border:1px solid #FF4444;color:#FF4444;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:5px;letter-spacing:1px;">✕ BOTS</button>
+      <button onclick="_resetTuning()" style="padding:7px 4px;background:#111;border:1px solid #555;color:#888;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:5px;letter-spacing:1px;">RESET</button>
+    </div>
+
+    <div id="tun-host-note" style="font-size:9px;color:#555;text-align:center;">HOST: changes sync to all players • H = hitbox overlay</div>
+  </div>
 </div>
 
 <!-- ══ RESULT ════════════════════════════════════════════════ -->
@@ -460,6 +494,9 @@ let _firstRemoteSync=false;
 let _localDead=false;
 let _autoCircle=false; // toggle: snake auto-circles until toggled off (E key / L3 button)
 let _lastRoomId=null;
+let _tuning={hbFwd:0.75,hbR:0.25,h2hScale:1.0}; // live combat physics — synced via ss packets
+let _showTuning=false;
+let _botCount=0;
 
 function getRpc(){return '/api/rpc';} // proxy through Vercel to avoid 403 from public RPCs
 function getSioUrl(){return GAME_SERVERS[GAME_SERVER].url;}
@@ -1637,6 +1674,18 @@ function snakeTick(){
   if(!SG||SG.over)return;
   SG.tick++;
 
+  // Bot AI — simple circle movement, host-side only
+  SG.snakes.forEach((s,id)=>{
+    if(!id.startsWith('bot-')||!s.alive)return;
+    s.angle+=MAX_TURN*0.72; // gentle arc gives a wide circle
+    const h=s.path[0];
+    s.path.unshift({x:h.x+Math.cos(s.angle)*SNAKE_SPD,y:h.y+Math.sin(s.angle)*SNAKE_SPD});
+    trimPath(s);
+    // Wall kill
+    const nh=s.path[0];
+    if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R)eliminateSnake(id,null);
+  });
+
   // Apply guest inputs
   const now=Date.now();
   _guestInputs.forEach((inp,pid)=>{
@@ -1734,7 +1783,8 @@ function snakeTick(){
             _h2hDone.add(pk);
             const bh=b.path[0];
             const bhdx=ah.x-bh.x,bhdy=ah.y-bh.y;
-            const trueH2H=bhdx*bhdx+bhdy*bhdy<(aR+bR)*(aR+bR);
+            const _h2hR=(aR+bR)*_tuning.h2hScale;
+            const trueH2H=bhdx*bhdx+bhdy*bhdy<_h2hR*_h2hR;
             if(trueH2H){
               // Both head-fronts touching: larger snake wins. Tie → lower id wins.
               // Canonical (id-based) tiebreaker ensures BOTH hosts make the SAME decision
@@ -1751,12 +1801,11 @@ function snakeTick(){
             // Hurtbox = pupil-centered half-disk: fwd=aR*0.5 from head, radius=aR*0.5 (tip at nose)
             const fwdDot=(bs.x-ah.x)*Math.cos(a.angle)+(bs.y-ah.y)*Math.sin(a.angle);
             if(fwdDot<=0)continue; // body point is beside/behind A's head — side-clip, check next point
-            // Nose-tip hurtbox: tiny zone right at the nose (fwd=r*0.75 from head, radius=r*0.25)
-            // This means only body segments very close to A's nose tip can kill A — no side-grazing
-            const _hbFwd=aR*0.75,_hbR=aR*0.25;
+            // Hurtbox: tunable zone at (hbFwd × aR) forward, radius (hbR × aR)
+            const _hbFwd=aR*_tuning.hbFwd,_hbR=aR*_tuning.hbR;
             const _px=ah.x+Math.cos(a.angle)*_hbFwd,_py=ah.y+Math.sin(a.angle)*_hbFwd;
             const _pdx=bs.x-_px,_pdy=bs.y-_py;
-            if(_pdx*_pdx+_pdy*_pdy>=(_hbR+bR)*(_hbR+bR))continue; // outside nose hurtbox
+            if(_pdx*_pdx+_pdy*_pdy>=(_hbR+bR)*(_hbR+bR))continue;
             // _h2hDone prevents both hosts from each killing the other's snake on same tick
             const pk=a.id<b.id?a.id+':'+b.id:b.id+':'+a.id;
             if(_h2hDone.has(pk)){break;}
@@ -1878,7 +1927,7 @@ function sendSnakeState(){
     snakeArr.push({id:s.id,segs,angle:s.angle,score:s.score,boost:s.boost,ns:s.numSections,color:s.color,name:s.name,usd:(s.id===myPid?_myUsd:(s.usd||0))});
   });
   _foodSendCounter++;
-  const msg={t:'ss',snakes:snakeArr,tick:SG.tick,host:myPid}; // host tag drives host-migration
+  const msg={t:'ss',snakes:snakeArr,tick:SG.tick,host:myPid,tuning:_tuning}; // tuning syncs to all guests
   if(_pendingKills.length){msg.kills=[..._pendingKills];_pendingKills.length=0;}
   if(_foodSendCounter%3===0||_forceFoodSend){
     msg.food=SG.food.map(f=>[Math.round(f.x),Math.round(f.y),f.ci,Math.round(f.size),f.k?1:0,f.w?Math.round(f.w*1e6):0]);
@@ -1889,6 +1938,10 @@ function sendSnakeState(){
 
 function applyRemoteState(d){
   if(!SG||!d)return;
+  if(d.tuning&&!isHost){
+    Object.assign(_tuning,d.tuning);
+    if(_showTuning)_syncTuningUI();
+  }
   if(d.kills){
     d.kills.forEach(k=>{
       const km=_playerMeta.get(k.killerId)||{};
@@ -2046,6 +2099,49 @@ function launchSnakeGame(){
   const _vb=document.getElementById('voice-btn');if(_vb)_vb.style.display='flex';
 }
 
+// ── Combat Tuning Suite ──────────────────────────────────────
+function _toggleTuning(){
+  _showTuning=!_showTuning;
+  const p=document.getElementById('tuning-panel');
+  if(p)p.style.display=_showTuning?'block':'none';
+  const n=document.getElementById('tun-host-note');
+  if(n)n.textContent=isHost?'HOST: changes sync to all players • H = hitbox overlay':'GUEST: values set by host • H = hitbox overlay';
+}
+function _onTuning(){
+  _tuning.hbFwd=+document.getElementById('tun-hbFwd').value;
+  _tuning.hbR  =+document.getElementById('tun-hbR').value;
+  _tuning.h2hScale=+document.getElementById('tun-h2h').value;
+  document.getElementById('tun-hbFwd-val').textContent=_tuning.hbFwd.toFixed(2)+'r';
+  document.getElementById('tun-hbR-val').textContent  =_tuning.hbR.toFixed(2)+'r';
+  document.getElementById('tun-h2h-val').textContent  =_tuning.h2hScale.toFixed(2)+'×';
+}
+function _syncTuningUI(){
+  const e=id=>document.getElementById(id);
+  e('tun-hbFwd').value=_tuning.hbFwd;  e('tun-hbFwd-val').textContent=_tuning.hbFwd.toFixed(2)+'r';
+  e('tun-hbR').value  =_tuning.hbR;    e('tun-hbR-val').textContent  =_tuning.hbR.toFixed(2)+'r';
+  e('tun-h2h').value  =_tuning.h2hScale;e('tun-h2h-val').textContent =_tuning.h2hScale.toFixed(2)+'×';
+}
+function _resetTuning(){
+  _tuning={hbFwd:0.75,hbR:0.25,h2hScale:1.0};
+  _syncTuningUI();
+  addToast('Tuning reset to defaults','#888');
+}
+function spawnBotSnake(){
+  if(!SG||!isHost){addToast('Only host can spawn bots','#FF4444');return;}
+  const botId='bot-'+(++_botCount);
+  const colors=['#FF6600','#FF00AA','#00FF88','#AA00FF','#FFAA00'];
+  const col=colors[_botCount%colors.length];
+  _playerMeta.set(botId,{color:col,name:'BOT '+_botCount});
+  addSnakePlayer(botId,col,'BOT '+_botCount);
+  addToast('🤖 Bot '+_botCount+' spawned','#FF6600');
+}
+function clearBotSnakes(){
+  if(!SG||!isHost){addToast('Only host can remove bots','#FF4444');return;}
+  let n=0;
+  SG.snakes.forEach((s,id)=>{if(id.startsWith('bot-')&&s.alive){eliminateSnake(id,null);n++;}});
+  addToast(n?'Removed '+n+' bot(s)':'No bots active','#888');
+}
+
 function onResize(){if(canvas){canvas.width=window.innerWidth;canvas.height=window.innerHeight;}}
 function onMouseMove(e){_mouseX=e.clientX;_mouseY=e.clientY;}
 // Scroll wheel / trackpad zoom — up = zoom in, down = zoom out. Per-event step is capped so
@@ -2060,6 +2156,7 @@ function onGameKey(e){
   if(e.repeat)return;
   if(e.key===' '||e.key==='Shift')_mouseBoost=true;
   if(e.key==='h'||e.key==='H'){_showHitboxes=!_showHitboxes;addToast(_showHitboxes?'Hitboxes ON':'Hitboxes OFF','#FFD700');}
+  if(e.key==='t'||e.key==='T'){if(localStorage.getItem('ss_owner')==='1')_toggleTuning();}
   if(e.key==='q'||e.key==='Q'){
     if(SG&&!SG.over&&!_localDead&&!_cashoutTimer){
       addToast('HOLD Q to cash out… release to cancel','#FFD700');
@@ -2211,6 +2308,7 @@ async function rejoinGame(){
 
 function goHome(){
   isSpectating=false; _localDead=false; _firstRemoteSync=false; _autoCircle=false;
+  _showTuning=false; const _tp=document.getElementById('tuning-panel');if(_tp)_tp.style.display='none';
   // Blur any focused input so the gamepad doesn't get trapped in a text field
   if(document.activeElement&&document.activeElement!==document.body)document.activeElement.blur();
   if(rafHandle){cancelAnimationFrame(rafHandle);rafHandle=null;}
@@ -2413,8 +2511,8 @@ function rafDraw(ts){
       }});
 
       const h=bPts[0]; if(!h)return;
-      const fwd=r*0.75, hbR=r*0.25;
-      const headR=Math.sqrt(fwd*fwd+hbR*hbR); // ≈ r*0.79 — tangent to hurtbox sides
+      const fwd=r*_tuning.hbFwd, hbR=r*_tuning.hbR;
+      const headR=Math.sqrt(fwd*fwd+hbR*hbR); // red arc — tangent to hurtbox flat-edge sides
       const px=h.x+Math.cos(s.angle)*fwd, py=h.y+Math.sin(s.angle)*fwd; // hurtbox centre
 
       // Red back arc — centred at head, radius headR, rear hemisphere only
