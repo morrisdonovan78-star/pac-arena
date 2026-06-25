@@ -2369,6 +2369,15 @@ function launchPractice(){
   _playerMeta.set(myPid,{color:localStorage.getItem('ss_snake_color')||colorFromId(myPid),name:nm});
   isHost=true;
   initSnakeGame([]);
+  // Give player same starting length as circle bots
+  const _ps=SG.snakes.get(myPid);
+  if(_ps){
+    _ps.numSections=INIT_SECTIONS+15;
+    const _pr=sectionRadius(_ps);
+    const _ppLen=Math.ceil(_ps.numSections*_pr*SEGMENT_SPACING*2/SNAKE_SPD)+10;
+    const _ph=_ps.path[0]||{x:0,y:0};
+    _ps.path=Array.from({length:_ppLen},(_,i)=>({x:_ph.x-Math.cos(_ps.angle)*i*SNAKE_SPD,y:_ph.y-Math.sin(_ps.angle)*i*SNAKE_SPD}));
+  }
   launchSnakeGame();
   addToast('PRACTICE — private lobby','#FFD700');
 }
