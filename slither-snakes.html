@@ -2151,13 +2151,6 @@ function _drawTuningPreview(){
     cx.beginPath();cx.arc(hx-i*r*1.45,hy,r,0,Math.PI*2);cx.stroke();
   }
 
-  // H2H circle (gold dashed — shows head-to-head range)
-  const h2hR=r*_tuning.h2hScale;
-  cx.save();
-  cx.strokeStyle='rgba(255,200,0,0.55)';cx.lineWidth=1.5;cx.setLineDash([4,3]);
-  cx.beginPath();cx.arc(hx,hy,h2hR,0,Math.PI*2);cx.stroke();
-  cx.setLineDash([]);cx.restore();
-
   // Head filled circle
   cx.fillStyle='#2266CC';
   cx.beginPath();cx.arc(hx,hy,r,0,Math.PI*2);cx.fill();
@@ -2187,13 +2180,20 @@ function _drawTuningPreview(){
   cx.beginPath();cx.moveTo(lx,ly);cx.arc(px,py,hbR,angle-Math.PI/2,angle+Math.PI/2);
   cx.closePath();cx.fill();cx.stroke();cx.restore();
 
+  // H2H circle drawn on top — actual trigger radius is (rA+rB)*scale = 2r*scale from head centre
+  const h2hR=r*2*_tuning.h2hScale;
+  cx.save();
+  cx.strokeStyle='rgba(255,200,0,0.85)';cx.lineWidth=2;cx.setLineDash([5,4]);
+  cx.beginPath();cx.arc(hx,hy,h2hR,0,Math.PI*2);cx.stroke();
+  cx.setLineDash([]);cx.restore();
+
   // Labels
   cx.font='bold 8px Orbitron,monospace';
   cx.fillStyle='rgba(0,255,220,0.9)';
   cx.fillText('HURTBOX',px+hbR+3,py+3);
   cx.fillStyle='rgba(255,80,80,0.85)';
   cx.fillText('HITBOX r='+headR.toFixed(0),hx-headR+2,hy-headR-4);
-  cx.fillStyle='rgba(255,200,0,0.6)';
+  cx.fillStyle='rgba(255,200,0,0.9)';
   cx.fillText('H2H r='+h2hR.toFixed(0),hx+h2hR+2,hy+3);
 }
 function spawnBotSnake(){
@@ -2608,6 +2608,16 @@ function rafDraw(ts){
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
+      ctx.restore();
+
+      // Gold dashed H2H ring — trigger radius = (rA+rB)*h2hScale = 2r*scale from head centre
+      const h2hRing=r*2*_tuning.h2hScale;
+      ctx.save();
+      ctx.strokeStyle='rgba(255,200,0,0.85)';
+      ctx.lineWidth=2/_camZoom;
+      ctx.setLineDash([6/_camZoom,4/_camZoom]);
+      ctx.beginPath();ctx.arc(h.x,h.y,h2hRing,0,Math.PI*2);ctx.stroke();
+      ctx.setLineDash([]);
       ctx.restore();
     });
   }
