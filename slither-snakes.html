@@ -2197,16 +2197,26 @@ function _drawTuningPreview(){
   cx.fillText('H2H r='+h2hR.toFixed(0),hx+h2hR+2,hy+3);
 }
 function spawnBotSnake(){
-  if(!SG||!isHost){addToast('Only host can spawn bots','#FF4444');return;}
+  // Auto-start a solo practice game when not already in one
+  if(!SG){
+    if(!myPid)myPid='practice-'+Math.random().toString(36).slice(2,8);
+    const nm=getMyName();
+    _playerMeta.set(myPid,{color:colorFromId(myPid),name:nm});
+    isHost=true;
+    initSnakeGame([]);
+    launchSnakeGame();
+    addToast('Practice mode started','#FFD700');
+  }
+  if(!isHost){addToast('Only host can spawn bots','#FF4444');return;}
   const botId='bot-'+(++_botCount);
   const colors=['#FF6600','#FF00AA','#00FF88','#AA00FF','#FFAA00'];
   const col=colors[_botCount%colors.length];
   _playerMeta.set(botId,{color:col,name:'BOT '+_botCount});
   addSnakePlayer(botId,col,'BOT '+_botCount);
-  addToast('🤖 Bot '+_botCount+' spawned','#FF6600');
+  addToast('Bot '+_botCount+' spawned','#FF6600');
 }
 function clearBotSnakes(){
-  if(!SG||!isHost){addToast('Only host can remove bots','#FF4444');return;}
+  if(!SG||!isHost){addToast(!SG?'No game active':'Only host can clear bots','#FF4444');return;}
   let n=0;
   SG.snakes.forEach((s,id)=>{if(id.startsWith('bot-')&&s.alive){eliminateSnake(id,null);n++;}});
   addToast(n?'Removed '+n+' bot(s)':'No bots active','#888');
