@@ -2026,7 +2026,23 @@ function eliminateSnake(id,killerId){
   }
   snake.alive=false;
   spawnFoodFromSnake(snake);
-  snake.path=[]; // vanish immediately — draw code checks alive but clearing path is belt-and-suspenders
+  snake.path=[]; // vanish immediately
+  // Immediately sweep kill food into killer's wallet — food is scattered along dead snake's
+  // body so killer can't physically walk over it all; magnetic grab at kill moment
+  if(killerId&&SG){
+    const _kS=SG.snakes.get(killerId);
+    if(_kS&&_kS.alive&&_kS.path.length){
+      const _kh=_kS.path[0];
+      for(let _fi=SG.food.length-1;_fi>=0;_fi--){
+        const _ff=SG.food[_fi];
+        if(!_ff.k)continue; // only kill food
+        if(_ff.w){if(killerId===myPid){_myUsd+=_ff.w;_spawnMoneyFx(_kh.x,_kh.y);}else _kS.usd=(_kS.usd||0)+_ff.w;}
+        _kS.growQueue+=FOOD_GROW;
+        SG.food.splice(_fi,1);
+      }
+      _forceFoodSend=true;
+    }
+  }
   const km=_playerMeta.get(killerId)||{};
   const vm=_playerMeta.get(id)||{};
   _killFeed.push({kName:(km.name||'ARENA').slice(0,10),kColor:km.color||'#FFD700',vName:(vm.name||'SNAKE').slice(0,10),vColor:vm.color||'#FF69B4',ts:Date.now()});
@@ -2145,13 +2161,15 @@ function applyRemoteState(d){
       }
       // Never reanimate a snake that was confirmed killed — guards against stale SS from migrating host
       if(_snakesSpawnedFood.has(sd.id)){s.alive=false;return;}
-      s.alive=true; s.angle=sd.angle; s.score=sd.score||0; s.boost=sd.boost||false; s.usd=sd.usd||0;
+      s._tAngle=sd.angle; s._lastSeen=Date.now(); // lerp toward server angle; timestamp for timeout
+      s.alive=true; s.score=sd.score||0; s.boost=sd.boost||false; s.usd=sd.usd||0;
       s.numSections=sd.ns||(sd.segs&&sd.segs.length)||s.numSections;
       s.color=sd.color||s.color; s.name=sd.name||s.name;
       if(sd.segs&&sd.segs.length>1){
         const serverHead={x:sd.segs[0][0],y:sd.segs[0][1]};
         if(!s.path.length){
-          // First packet or teleport — full path reconstruction
+          // First packet — full path reconstruction; snap angle directly (no lerp from random)
+          s.angle=sd.angle; s._tAngle=null;
           const _segR=BASE_RADIUS+Math.pow(s.numSections*SIZE_PER_SEGMENT,RADIUS_GROWTH)*RADIUS_SCALE;
           const steps=Math.max(1,Math.round(_segR*SEGMENT_SPACING*2/SNAKE_SPD));
           const path=[];
@@ -2732,11 +2750,19 @@ function rafDraw(ts){
   if(SG&&!SG.over){
     SG.snakes.forEach(s=>{
       if(s.id===myPid||!s.alive||!s.path.length)return;
+      // Kill ghost snakes not confirmed alive by host for > 500ms
+      if(!s.id.startsWith('bot-')&&s._lastSeen&&Date.now()-s._lastSeen>500){s.alive=false;s.path=[];return;}
       const dt=Math.min(s._predTs?ts-s._predTs:TICK_MS,80);
       s._predTs=ts;
       if(dt<=1)return;
       const frac=dt/TICK_MS;
-      if(s.botCircle)s.angle+=MAX_TURN*frac; // smooth auto-circle same cadence as player
+      // Smooth angle toward server target instead of snapping
+      if(s._tAngle!=null&&!s.botCircle){
+        const _da=angleDiff(s._tAngle,s.angle);
+        s.angle+=_da*Math.min(1,frac*0.5);
+        if(Math.abs(_da)<0.005){s.angle=s._tAngle;s._tAngle=null;}
+      }
+      if(s.botCircle)s.angle+=MAX_TURN*frac;
       const spd=(s.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=s.path[0];
       s.path.unshift({x:h.x+Math.cos(s.angle)*spd,y:h.y+Math.sin(s.angle)*spd});
