@@ -1870,16 +1870,13 @@ function snakeTick(){
   const alive=[...SG.snakes.values()].filter(s=>s.alive);
   const _h2hDone=new Set(); // "id1:id2" canonical key (id1<id2 lexicographically)
 
-  // Hurtbox-nose-vs-H2H-ring: if your hurtbox center enters the opponent's H2H
-  // ring BUT only from the rear 60% arc (front ±72° is a dead zone), you die.
-  // Exactly ONE death per pair per tick — first condition checked (i<j) wins.
-  // Front dead-zone math: cos²(72°)≈0.25; skip if dot>0 AND dot²>0.25*dist²
+  // Body-circle H2H: fires when two head circles physically meet (dist < aR+bR).
+  // Uses actual HEAD position — no forward hurtbox projection — so snake SIZE does
+  // not give extra reach. Rear-arc dead zone still applies (front ±50° is safe).
   for(let i=0;i<alive.length;i++){
     const a=alive[i]; if(!a.alive)continue;
     const ah=a.path[0]; if(!ah)continue;
     const aR=sectionRadius(a);
-    const aHbX=ah.x+Math.cos(a.angle)*(aR*_tuning.hbFwd);
-    const aHbY=ah.y+Math.sin(a.angle)*(aR*_tuning.hbFwd);
     for(let j=i+1;j<alive.length;j++){
       const b=alive[j]; if(!b.alive)continue;
       const bh=b.path[0]; if(!bh)continue;
@@ -1887,14 +1884,12 @@ function snakeTick(){
       const cpk=a.id<b.id?a.id+':'+b.id:b.id+':'+a.id;
       if(_h2hDone.has(cpk))continue;
       const h2hR=(aR+bR)*_tuning.h2hScale;
-      // A's hurtbox in B's rear H2H zone?
-      const dAxB=aHbX-bh.x,dAyB=aHbY-bh.y,d2AB=dAxB*dAxB+dAyB*dAyB;
+      // A's head in B's rear H2H zone?
+      const dAxB=ah.x-bh.x,dAyB=ah.y-bh.y,d2AB=dAxB*dAxB+dAyB*dAyB;
       const dotAB=dAxB*Math.cos(b.angle)+dAyB*Math.sin(b.angle);
       const aInB=d2AB<h2hR*h2hR&&!(dotAB>0&&dotAB*dotAB>0.41*d2AB);
-      // B's hurtbox in A's rear H2H zone?
-      const bHbX=bh.x+Math.cos(b.angle)*(bR*_tuning.hbFwd);
-      const bHbY=bh.y+Math.sin(b.angle)*(bR*_tuning.hbFwd);
-      const dBxA=bHbX-ah.x,dByA=bHbY-ah.y,d2BA=dBxA*dBxA+dByA*dByA;
+      // B's head in A's rear H2H zone?
+      const dBxA=bh.x-ah.x,dByA=bh.y-ah.y,d2BA=dBxA*dBxA+dByA*dByA;
       const dotBA=dBxA*Math.cos(a.angle)+dByA*Math.sin(a.angle);
       const bInA=d2BA<h2hR*h2hR&&!(dotBA>0&&dotBA*dotBA>0.41*d2BA);
       if(aInB||bInA){
@@ -1930,17 +1925,12 @@ function snakeTick(){
             if(_h2hDone.has(pk)){break;} // already resolved from the other direction this tick
             _h2hDone.add(pk);
             const bh=b.path[0];
-            // Rear-arc rule (same as pre-loop): nose in opponent's rear 60% → nose-owner dies.
-            // Front ±72° is dead zone (cos²72°≈0.25). One outcome only — A checked first.
-            const aHbX2=ah.x+Math.cos(a.angle)*(aR*_tuning.hbFwd);
-            const aHbY2=ah.y+Math.sin(a.angle)*(aR*_tuning.hbFwd);
-            const dAx2=aHbX2-bh.x,dAy2=aHbY2-bh.y;
+            // Rear-arc rule using actual head positions (no hurtbox projection).
+            const dAx2=ah.x-bh.x,dAy2=ah.y-bh.y;
             const dotA2=dAx2*Math.cos(b.angle)+dAy2*Math.sin(b.angle);
             const d2A2=dAx2*dAx2+dAy2*dAy2;
             const aInRear2=!(dotA2>0&&dotA2*dotA2>0.41*d2A2);
-            const bHbX2=bh.x+Math.cos(b.angle)*(bR*_tuning.hbFwd);
-            const bHbY2=bh.y+Math.sin(b.angle)*(bR*_tuning.hbFwd);
-            const dBx2=bHbX2-ah.x,dBy2=bHbY2-ah.y;
+            const dBx2=bh.x-ah.x,dBy2=bh.y-ah.y;
             const dotB2=dBx2*Math.cos(a.angle)+dBy2*Math.sin(a.angle);
             const d2B2=dBx2*dBx2+dBy2*dBy2;
             const bInRear2=!(dotB2>0&&dotB2*dotB2>0.41*d2B2);
