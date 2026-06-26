@@ -1276,10 +1276,10 @@ async function pkConnect(roomId,gameToken){
       _playerMeta.set(hid,{color:h.color||colorFromId(hid),name:h.name||'SNAKE'});
       if(SG&&!SG.over){
         const existing=SG.snakes.get(hid);
-        if(!existing||!existing.alive){
-          addSnakePlayer(hid,h.color||colorFromId(hid),h.name||'SNAKE');
-        }
-        _forceFoodSend=true; // send food immediately so rejoining player sees dots right away
+        // Kill any lingering ghost from a previous session before spawning fresh
+        if(existing&&existing.alive&&isHost)eliminateSnake(hid,null);
+        addSnakePlayer(hid,h.color||colorFromId(hid),h.name||'SNAKE');
+        _forceFoodSend=true;
       }
       addToast('🐍 '+(h.name||'Snake')+' joined!','#00FFFF');
     });
@@ -1789,18 +1789,21 @@ function snakeTick(){
     // circle mode: angle updated per-frame in rafDraw (s.botCircle=true) — same smoothness as player
   });
 
-  // Apply guest inputs
+  // Apply guest inputs + ghost-snake cleanup
   const now=Date.now();
   _guestInputs.forEach((inp,pid)=>{
+    // Kill ghost: no input for 4s = connection lost → eliminate so body doesn't float
+    if(now-inp.ts>4000){
+      const gs=SG.snakes.get(pid);
+      if(gs&&gs.alive){eliminateSnake(pid,null);}
+      _guestInputs.delete(pid);
+      return;
+    }
     if(now-inp.ts>1500)return;
     const s=SG.snakes.get(pid);
     if(!s||!s.alive)return;
     if(inp.circle) s.angle+=MAX_TURN; else applyTurn(s,inp.angle);
     s.boost=inp.boost;
-    // Snap head to guest's reported position ONCE per new ssin (fresh flag).
-    // Using snap (not unshift) prevents stale data from pushing an out-of-order point
-    // onto the path ahead of the dead-reckoned head, which caused the snake to appear
-    // twice as long during boost.
     if(inp.x!=null&&inp.y!=null&&inp.fresh){
       if(s.path.length>0)s.path[0]={x:inp.x,y:inp.y};
       inp.fresh=false;
@@ -2043,17 +2046,20 @@ function spawnFoodFromSnake(snake){
   _snakesSpawnedFood.add(snake.id);
   const bPts=getBodyPoints(snake);
   if(!bPts.length)return;
-  // Host snake tracks value in _myUsd; guest snakes track it in snake.usd
   const totalUsd=snake.id===myPid?_myUsd:(snake.usd||0);
-  const w=totalUsd/bPts.length;
-  const maxR=ARENA_R*0.96; // clamp inside arena so gold pellets never spawn outside the wall
-  bPts.forEach(p=>{
+  // Limit to 10 scattered orbs max — 1 orb per N segments so it looks like loot, not a body
+  const MAX_KILL_ORBS=10;
+  const stride=Math.max(1,Math.ceil(bPts.length/MAX_KILL_ORBS));
+  const spawnPts=bPts.filter((_,i)=>i%stride===0).slice(0,MAX_KILL_ORBS);
+  const w=spawnPts.length>0?totalUsd/spawnPts.length:0;
+  const maxR=ARENA_R*0.96;
+  spawnPts.forEach(p=>{
     let fx=p.x,fy=p.y;
     const dist=Math.sqrt(fx*fx+fy*fy);
     if(dist>maxR){const sc=maxR/dist;fx*=sc;fy*=sc;}
-    SG.food.push({x:fx,y:fy,ci:3,size:9+Math.random()*5,k:1,w:w,ts:Date.now()});
+    SG.food.push({x:fx,y:fy,ci:3,size:12+Math.random()*4,k:1,w:w,ts:Date.now()});
   });
-  _forceFoodSend=true; // push kill food to guests on the very next ss packet
+  _forceFoodSend=true;
 }
 
 // ── Food upkeep ──────────────────────────────────────────────────────────────
