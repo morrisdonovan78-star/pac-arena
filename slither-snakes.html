@@ -2025,24 +2025,8 @@ function eliminateSnake(id,killerId){
     _recentKillPairs.set(pk,now+2000);
   }
   snake.alive=false;
-  spawnFoodFromSnake(snake);
+  spawnFoodFromSnake(snake); // drops gold SOL pellets along the body; _forceFoodSend=true inside
   snake.path=[]; // vanish immediately
-  // Immediately sweep kill food into killer's wallet — food is scattered along dead snake's
-  // body so killer can't physically walk over it all; magnetic grab at kill moment
-  if(killerId&&SG){
-    const _kS=SG.snakes.get(killerId);
-    if(_kS&&_kS.alive&&_kS.path.length){
-      const _kh=_kS.path[0];
-      for(let _fi=SG.food.length-1;_fi>=0;_fi--){
-        const _ff=SG.food[_fi];
-        if(!_ff.k)continue; // only kill food
-        if(_ff.w){if(killerId===myPid){_myUsd+=_ff.w;_spawnMoneyFx(_kh.x,_kh.y);}else _kS.usd=(_kS.usd||0)+_ff.w;}
-        _kS.growQueue+=FOOD_GROW;
-        SG.food.splice(_fi,1);
-      }
-      _forceFoodSend=true;
-    }
-  }
   const km=_playerMeta.get(killerId)||{};
   const vm=_playerMeta.get(id)||{};
   _killFeed.push({kName:(km.name||'ARENA').slice(0,10),kColor:km.color||'#FFD700',vName:(vm.name||'SNAKE').slice(0,10),vColor:vm.color||'#FF69B4',ts:Date.now()});
@@ -2986,25 +2970,43 @@ function drawArena(){
 function drawFood(){
   const now=Date.now();
   const vHW=canvas.width/(2*_camZoom)+30,vHH=canvas.height/(2*_camZoom)+30;
-  // Batch glow pass (alpha circle — no gradient creation per item)
+  // Batch glow pass
   ctx.globalAlpha=0.22;
   SG.food.forEach(f=>{
     if(Math.abs(f.x-_camX)>vHW||Math.abs(f.y-_camY)>vHH)return;
-    const pulse=1+0.18*Math.sin(now*0.004+f.x*0.01+f.y*0.01);
+    const pulse=f.k?(1+0.35*Math.sin(now*0.008+f.x*0.01)):(1+0.18*Math.sin(now*0.004+f.x*0.01+f.y*0.01));
     ctx.fillStyle=foodColor(f);
-    ctx.beginPath();ctx.arc(f.x,f.y,f.size*pulse*2,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.arc(f.x,f.y,f.size*pulse*(f.k?3.5:2),0,Math.PI*2);ctx.fill();
   });
   ctx.globalAlpha=1;
-  // Body pass
+  // Body pass — kill food gets special treatment
   SG.food.forEach(f=>{
     if(Math.abs(f.x-_camX)>vHW||Math.abs(f.y-_camY)>vHH)return;
-    const pulse=1+0.18*Math.sin(now*0.004+f.x*0.01+f.y*0.01);
+    const pulse=f.k?(1+0.35*Math.sin(now*0.008+f.x*0.01)):(1+0.18*Math.sin(now*0.004+f.x*0.01+f.y*0.01));
     const r=f.size*pulse;
     const col=foodColor(f);
+    if(f.k){
+      // Outer ring
+      ctx.strokeStyle='rgba(255,215,0,0.9)';
+      ctx.lineWidth=2.5;
+      ctx.beginPath();ctx.arc(f.x,f.y,r*1.45,0,Math.PI*2);ctx.stroke();
+      // Inner glow ring
+      ctx.strokeStyle='rgba(255,255,255,0.5)';
+      ctx.lineWidth=1;
+      ctx.beginPath();ctx.arc(f.x,f.y,r*1.15,0,Math.PI*2);ctx.stroke();
+    }
     ctx.fillStyle=col;
     ctx.beginPath();ctx.arc(f.x,f.y,r,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle='rgba(255,255,255,0.75)';
-    ctx.beginPath();ctx.arc(f.x-r*0.25,f.y-r*0.25,r*0.35,0,Math.PI*2);ctx.fill();
+    // $ symbol on kill food
+    if(f.k&&r>5){
+      ctx.fillStyle='rgba(20,10,0,0.85)';
+      ctx.font=`bold ${Math.round(r*1.1)}px Arial`;
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText('$',f.x,f.y+r*0.05);
+    } else {
+      ctx.fillStyle='rgba(255,255,255,0.75)';
+      ctx.beginPath();ctx.arc(f.x-r*0.25,f.y-r*0.25,r*0.35,0,Math.PI*2);ctx.fill();
+    }
   });
 }
 
