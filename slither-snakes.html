@@ -2111,7 +2111,8 @@ function sendSnakeState(){
 
 function applyRemoteState(d){
   if(!SG||!d)return;
-  if(d.tuning&&!isHost){
+  // Owner's tuning is authoritative — never let incoming ss overwrite it
+  if(d.tuning&&!isHost&&localStorage.getItem('ss_owner')!=='1'){
     Object.assign(_tuning,d.tuning);
     if(_showTuning)_syncTuningUI();
   }
