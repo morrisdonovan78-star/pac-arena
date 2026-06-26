@@ -1575,6 +1575,7 @@ function addSnakePlayer(id,color,name){
   if(!SG)return;
   const existing=SG.snakes.get(id);
   if(existing&&existing.alive)return; // live snake — don't overwrite
+  _snakesSpawnedFood.delete(id); // fresh spawn — allow guests to see it regardless of prior death
   const pos=isHost?findSafeSpawn():[null,null];
   const s=makeSnake(id,color,name,pos[0],pos[1]);
   // s.usd left null — seeded from first ssin so host uses guest's actual wallet value
@@ -2027,6 +2028,8 @@ function eliminateSnake(id,killerId){
   _guestInputs.delete(id); // drop stale inputs so a dead snake never keeps circling on host
   // Queue kill event so it goes out in the next ss state packet
   _pendingKills.push({id,killerId:killerId||null});
+  // Broadcast kill immediately so guests see body vanish at once — don't wait for next snakeTick
+  if(isHost&&ablyChannel&&!_bgSuppressSend)sendSnakeState();
   if(id===myPid)endSnakeGame('eliminated',killerId);
 }
 
