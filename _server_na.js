@@ -189,7 +189,8 @@ function ssUpdateFromHostSS(lid, snakesData, io) {
       sn.boost = !!sd.boost;
       sn.x = sd.segs[0][0]; sn.y = sd.segs[0][1];
       sn.segs = sd.segs;
-      sn.alive = true;
+      // Only revive if server hasn't killed this snake within last 2s (HOST takes ~100ms to process elim)
+      if (!sn._killedAt || Date.now() - sn._killedAt > 2000) sn.alive = true;
       sn.lastTs = Date.now();
     }
   });
@@ -261,6 +262,7 @@ function ssCheckCollisions(sg, lid, io) {
   const faceCos = Math.cos(T.faceDeg * Math.PI / 180);
   // Only snakes with HOST-supplied segs are collision-ready (segs[0] = head, segs[1+] = body)
   const alive = [...sg.snakes.values()].filter(s => s.alive && s.segs && s.segs.length > 1);
+  if (alive.length > 1) console.log(`[${lid}] collision check: ${alive.length} snakes, heads: ${alive.map(s=>`${s.pid.slice(0,6)}@[${s.segs[0]}]`).join(' | ')}`);
   const died = new Set();
 
   // ── Head-to-head: both face within faceDeg; winner per T.rule ────────────────
@@ -331,7 +333,10 @@ function ssCheckCollisions(sg, lid, io) {
 
 function ssKill(victim, killer, lid, io) {
   if (!victim.alive) return;
-  victim.alive = false; victim.segs = [];
+  victim.alive = false;
+  victim._killedAt = Date.now(); // prevent ss packet revival during RTT window
+  victim.segs = [];
+  console.log(`[${lid}] KILL: ${victim.pid.slice(0,8)} by ${killer ? killer.pid.slice(0,8) : 'border'}`);
   io.to(lid).emit('elim', { id: victim.pid, killerId: killer ? killer.pid : null });
 }
 
