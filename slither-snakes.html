@@ -483,6 +483,10 @@ const MAX_TURN     = 0.274; // rad/tick
 const BOOST_DRAIN  = 8;     // ticks between boost drain events
 const BOOST_DRAIN_AMT = 3.0;  // drain accumulator per tick = AMT/DRAIN = 0.375 sections/tick (~20% slower than before)
 const SHED_NOEAT_MS = 4000;  // a snake can't re-eat its own boost-shed trail pebbles for this long (anti circle-farm)
+// moneyslither.com combat hitbox constants (mirrors server _server_na.js)
+const SS_HB   = 0.95;   // HITBOX_BASE
+const SS_HBS  = 1.07;   // combatHitboxScale
+const SS_HHBS = 1.18;   // combatHeadHitboxScale
 const HOST_TIMEOUT = 1500;  // ms of host silence before a guest promotes itself (host migration)
 const SELF_SKIP    = 9999;  // disable self-collision — damnbruh.com: own tail never kills you
 const ESCROW_PUBKEY = '2SYFfCsSmKr8qwK1AfWd36JtAc1BCaRaSSxyECKUJjBb';
@@ -2223,56 +2227,87 @@ function _drawTuningPreview(){
   const cv=document.getElementById('tun-preview');
   if(!cv)return;
   const cx=cv.getContext('2d');
-  const W=cv.width,H=cv.height;
+  const W=cv.width,H=cv.height; // 244×96
   cx.clearRect(0,0,W,H);
   cx.fillStyle='#050510';cx.fillRect(0,0,W,H);
 
-  const r=20, hx=W*0.40, hy=H/2, angle=0;
-
-  // Moneyslither-accurate radii relative to body visual radius r
-  const headR=Math.min(r*_tuning.hbs*_tuning.hhbs, W*0.38);
-  const h2hR =Math.min(headR*2*_tuning.hbs, W*0.48);
+  // Snake parameters matching a starting snake (ns=24) scaled to fit preview canvas
+  const ns=24;
+  const dR=BASE_RADIUS+Math.pow(ns*SIZE_PER_SEGMENT,RADIUS_GROWTH)*RADIUS_SCALE; // visual radius ~22px
+  const sp=dR*SEGMENT_SPACING; // visual body spacing ~11px
+  let tk=7.5+0.55*Math.sqrt(ns); tk=Math.max(10,tk*1.43); // msThick ~14.58
+  const bodyR_w=tk*SS_HB*_tuning.hbs;       // body hitbox radius
+  const headR_w=bodyR_w*_tuning.hhbs;       // head hitbox radius
+  const h2hR_w=(headR_w+headR_w)*_tuning.hbs; // H2H trigger vs equal opponent
   const faceRad=_tuning.faceDeg*Math.PI/180;
 
-  // Gold H2H ring (behind)
-  cx.save();cx.strokeStyle='rgba(255,200,0,0.6)';cx.lineWidth=1.5;cx.setLineDash([4,3]);
-  cx.beginPath();cx.arc(hx,hy,h2hR,0,Math.PI*2);cx.stroke();cx.setLineDash([]);cx.restore();
+  // Scale everything to fit: H2H ring must fit in canvas height, body must show 5+ circles
+  const sc=Math.min((H*0.44)/h2hR_w, (H*0.44)/dR, W*0.065/dR);
+  const r=dR*sc, spc=sp*sc;
+  const bodyR=bodyR_w*sc, headR=headR_w*sc, h2hR=h2hR_w*sc;
+
+  // Head position — leave room for H2H ring on right and body on left
+  const hx=Math.min(W-h2hR-6, W*0.58), hy=H/2;
+  const col='#2266CC'; // preview snake color (same blue as default)
+
+  // ── Hitbox rings drawn behind the snake ──────────────────────────────────────
+  // Gold H2H trigger zone (filled so the exact kill area is obvious)
+  cx.save();
+  cx.fillStyle='rgba(255,200,0,0.06)';
+  cx.strokeStyle='rgba(255,200,0,0.95)';cx.lineWidth=2;
+  cx.beginPath();cx.arc(hx,hy,h2hR,0,Math.PI*2);cx.fill();cx.stroke();
+  cx.restore();
+
+  // Cyan facing gate lines to H2H ring edge
+  cx.save();cx.strokeStyle='rgba(0,220,255,0.85)';cx.lineWidth=1.5;cx.setLineDash([3,3]);
+  cx.beginPath();
+  cx.moveTo(hx,hy);cx.lineTo(hx+Math.cos(-faceRad)*h2hR,hy+Math.sin(-faceRad)*h2hR);
+  cx.moveTo(hx,hy);cx.lineTo(hx+Math.cos(faceRad)*h2hR,hy+Math.sin(faceRad)*h2hR);
+  cx.stroke();cx.setLineDash([]);cx.restore();
+
+  // Yellow body hitbox circles — skip first `skip` segs (mirrors server logic)
+  const skip=Math.max(2,Math.ceil(8*SNAKE_SPD/sp));
+  cx.lineWidth=1.2;
+  for(let i=1;i<ns;i++){
+    const bx=hx-i*spc; if(bx<r)break;
+    if(i>=skip){
+      cx.strokeStyle='rgba(255,255,0,0.65)';
+      cx.beginPath();cx.arc(bx,hy,bodyR,0,Math.PI*2);cx.stroke();
+    }
+  }
 
   // Red head hitbox ring
-  cx.strokeStyle='rgba(255,50,50,0.9)';cx.lineWidth=2;
+  cx.strokeStyle='rgba(255,40,40,0.95)';cx.lineWidth=2;
   cx.beginPath();cx.arc(hx,hy,headR,0,Math.PI*2);cx.stroke();
 
-  // Body circles (yellow)
-  cx.lineWidth=1.5;
-  for(let i=1;i<=3;i++){
-    cx.strokeStyle=i===1?'rgba(255,255,0,0.85)':'rgba(255,255,0,0.4)';
-    cx.beginPath();cx.arc(hx-i*r*1.4,hy,r,0,Math.PI*2);cx.stroke();
+  // ── Snake visual body (circles tail→head) — identical to drawSnake ───────────
+  cx.fillStyle=col;
+  cx.beginPath();
+  for(let i=ns-1;i>=1;i--){
+    const bx=hx-i*spc; if(bx<0)continue;
+    cx.moveTo(bx+r,hy);cx.arc(bx,hy,r,0,Math.PI*2);
   }
+  cx.fill();
 
-  // Head filled circle + eyes
-  cx.fillStyle='#2266CC';cx.beginPath();cx.arc(hx,hy,r,0,Math.PI*2);cx.fill();
-  cx.fillStyle='rgba(0,0,0,0.2)';cx.beginPath();cx.arc(hx+r*0.08,hy+r*0.1,r*0.65,0,Math.PI*2);cx.fill();
+  // ── Head circle + eyes (identical to _drawHeadCircle) ───────────────────────
+  cx.save();cx.translate(hx,hy);
+  cx.beginPath();cx.arc(0,0,r,0,Math.PI*2);cx.fillStyle=col;cx.fill();
+  cx.beginPath();cx.arc(r*0.08,r*0.1,r*0.65,0,Math.PI*2);cx.fillStyle='rgba(0,0,0,0.25)';cx.fill();
+  cx.beginPath();cx.arc(-r*0.2,-r*0.25,r*0.3,0,Math.PI*2);cx.fillStyle='rgba(255,255,255,0.25)';cx.fill();
   const eR=r*0.38,eFwd=r*0.34,eSide=r*0.42;
-  cx.fillStyle='#fff';cx.beginPath();cx.arc(hx+eFwd,hy-eSide,eR,0,Math.PI*2);cx.fill();
-  cx.beginPath();cx.arc(hx+eFwd,hy+eSide,eR,0,Math.PI*2);cx.fill();
-  cx.fillStyle='#111';cx.beginPath();cx.arc(hx+eFwd+eR*0.3,hy-eSide,eR*0.55,0,Math.PI*2);cx.fill();
-  cx.beginPath();cx.arc(hx+eFwd+eR*0.3,hy+eSide,eR*0.55,0,Math.PI*2);cx.fill();
+  cx.fillStyle='#fff';
+  cx.beginPath();cx.arc(eFwd,-eSide,eR,0,Math.PI*2);cx.fill();
+  cx.beginPath();cx.arc(eFwd,eSide,eR,0,Math.PI*2);cx.fill();
+  cx.fillStyle='#111';
+  cx.beginPath();cx.arc(eFwd+eR*0.3,-eSide,eR*0.55,0,Math.PI*2);cx.fill();
+  cx.beginPath();cx.arc(eFwd+eR*0.3,eSide,eR*0.55,0,Math.PI*2);cx.fill();
+  cx.restore();
 
-  // Cyan facing gate lines
-  if(_tuning.faceDeg>0&&_tuning.faceDeg<120){
-    const gLen=Math.min(headR*1.5,W*0.45);
-    cx.save();cx.strokeStyle='rgba(0,220,255,0.75)';cx.lineWidth=1.2;cx.setLineDash([3,3]);
-    cx.beginPath();
-    cx.moveTo(hx,hy);cx.lineTo(hx+Math.cos(angle-faceRad)*gLen,hy+Math.sin(angle-faceRad)*gLen);
-    cx.moveTo(hx,hy);cx.lineTo(hx+Math.cos(angle+faceRad)*gLen,hy+Math.sin(angle+faceRad)*gLen);
-    cx.stroke();cx.setLineDash([]);cx.restore();
-  }
-
-  // Labels
+  // ── Labels ───────────────────────────────────────────────────────────────────
   cx.font='bold 7px Orbitron,monospace';
-  cx.fillStyle='rgba(255,50,50,0.9)';cx.fillText('HEAD',hx+headR+2,hy-3);
-  cx.fillStyle='rgba(255,200,0,0.8)';cx.fillText('H2H',hx+h2hR+2,hy+8);
-  if(_tuning.faceDeg>0&&_tuning.faceDeg<120){cx.fillStyle='rgba(0,220,255,0.8)';cx.fillText('GATE',hx+headR*0.5,hy-headR*0.65);}
+  cx.fillStyle='rgba(255,40,40,0.95)';cx.fillText('HEAD',hx+headR+2,hy-2);
+  cx.fillStyle='rgba(255,200,0,0.9)';cx.fillText('H2H',hx+h2hR+2,hy+8);
+  if(_tuning.faceDeg>0&&_tuning.faceDeg<120){cx.fillStyle='rgba(0,220,255,0.9)';cx.fillText('GATE',hx-h2hR*0.35,hy-headR*0.9);}
 }
 function launchPractice(){
   if(localStorage.getItem('ss_owner')!=='1')return;
@@ -2628,7 +2663,7 @@ function rafDraw(ts){
       my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
       trimPath(my);
       const nh=my.path[0];
-      if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead)endSnakeGame('eliminated',null);
+      if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead)eliminateSnake(myPid,null);
     }
   }
 
@@ -2671,7 +2706,7 @@ function rafDraw(ts){
       my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
       trimPath(my);
       const nh=my.path[0];
-      if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead)endSnakeGame('eliminated',null);
+      if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead)eliminateSnake(myPid,null);
     }
   }
 
@@ -2716,8 +2751,8 @@ function rafDraw(ts){
   // Always draw H2H kill zone on own snake — moneyslither formula
   {const _mS=SG&&SG.snakes.get(myPid);
   if(_mS&&_mS.alive&&_mS.path.length){
-    const _mTk=msThick(_mS),_mHR=_mTk*0.95*_tuning.hbs*_tuning.hhbs;
-    const _mH2H=_mHR*2*_tuning.hbs,_mh=_mS.path[0];
+    const _mTk=msThick(_mS),_mHR=_mTk*SS_HB*_tuning.hbs*_tuning.hhbs;
+    const _mH2H=(_mHR+_mHR)*_tuning.hbs,_mh=_mS.path[0]; // (headR+headR)*hbs = trigger vs equal opponent
     ctx.save();
     ctx.strokeStyle='rgba(255,210,0,0.55)';ctx.lineWidth=1.8/_camZoom;
     ctx.setLineDash([5/_camZoom,4/_camZoom]);
@@ -2725,46 +2760,46 @@ function rafDraw(ts){
     ctx.setLineDash([]);ctx.restore();
   }}
 
-  // H key: moneyslither-accurate hitbox overlay
+  // H key: moneyslither-accurate hitbox overlay — mirrors exact server ssCheckCollisions logic
   if(_showHitboxes&&SG){
     SG.snakes.forEach(s=>{
       if(!s.alive||!s.path.length)return;
       const thick=msThick(s);
-      const bodyR=thick*0.95*_tuning.hbs;
+      const bodyR=thick*SS_HB*_tuning.hbs;
       const headR=bodyR*_tuning.hhbs;
-      const h2hR =headR*2*_tuning.hbs;
+      const h2hR =(headR+headR)*_tuning.hbs; // trigger vs equal-size opponent
       const h=s.path[0];
+      const segs=getBodyPoints(s); // exactly what HOST sends as segs in ss packet
+      // Skip first N segs near head (mirrors server: 8*SS_SPD px of clearance)
+      const segSp=sectionRadius(s)*SEGMENT_SPACING;
+      const skip=Math.max(2,Math.ceil(8*SNAKE_SPD/segSp));
 
-      // Yellow body hitbox circles — every 4th path point starting at index 8
+      // Yellow body hitbox circles — at every body seg the server actually checks
       ctx.lineWidth=1.5/_camZoom;
-      const bLim=Math.min(s.path.length,(s.numSections||26)*4+50);
-      for(let k=2;k*4<bLim;k++){
-        const idx=k*4;if(idx>=s.path.length)break;
-        const bp=s.path[idx];
-        ctx.strokeStyle='rgba(255,255,0,0.6)';
+      for(let k=skip;k<segs.length;k++){
+        const bp=segs[k];
+        ctx.strokeStyle='rgba(255,255,0,0.65)';
         ctx.beginPath();ctx.arc(bp.x,bp.y,bodyR,0,Math.PI*2);ctx.stroke();
       }
 
-      // Red head hitbox ring (full circle)
-      ctx.strokeStyle='rgba(255,40,40,0.95)';ctx.lineWidth=2/_camZoom;
-      ctx.beginPath();ctx.arc(h.x,h.y,headR,0,Math.PI*2);ctx.stroke();
+      // Gold H2H trigger ring — SOLID + filled alpha so the exact kill zone is obvious
+      ctx.save();
+      ctx.fillStyle='rgba(255,200,0,0.07)';
+      ctx.strokeStyle='rgba(255,200,0,1.0)';ctx.lineWidth=2.5/_camZoom;
+      ctx.beginPath();ctx.arc(h.x,h.y,h2hR,0,Math.PI*2);ctx.fill();ctx.stroke();
+      ctx.restore();
 
-      // Cyan facing gate lines (H2H only triggers inside this cone)
+      // Cyan facing gate lines — full reach to H2H ring edge
       const faceRad=_tuning.faceDeg*Math.PI/180;
-      if(_tuning.faceDeg<120){
-        ctx.save();ctx.strokeStyle='rgba(0,220,255,0.7)';ctx.lineWidth=1.5/_camZoom;ctx.setLineDash([5/_camZoom,4/_camZoom]);
-        const gLen=h2hR*0.7;
-        ctx.beginPath();
-        ctx.moveTo(h.x,h.y);ctx.lineTo(h.x+Math.cos(s.angle-faceRad)*gLen,h.y+Math.sin(s.angle-faceRad)*gLen);
-        ctx.moveTo(h.x,h.y);ctx.lineTo(h.x+Math.cos(s.angle+faceRad)*gLen,h.y+Math.sin(s.angle+faceRad)*gLen);
-        ctx.stroke();ctx.setLineDash([]);ctx.restore();
-      }
+      ctx.save();ctx.strokeStyle='rgba(0,220,255,0.9)';ctx.lineWidth=2/_camZoom;ctx.setLineDash([5/_camZoom,4/_camZoom]);
+      ctx.beginPath();
+      ctx.moveTo(h.x,h.y);ctx.lineTo(h.x+Math.cos(s.angle-faceRad)*h2hR,h.y+Math.sin(s.angle-faceRad)*h2hR);
+      ctx.moveTo(h.x,h.y);ctx.lineTo(h.x+Math.cos(s.angle+faceRad)*h2hR,h.y+Math.sin(s.angle+faceRad)*h2hR);
+      ctx.stroke();ctx.setLineDash([]);ctx.restore();
 
-      // Gold dashed H2H trigger ring
-      ctx.save();ctx.strokeStyle='rgba(255,200,0,0.85)';ctx.lineWidth=2/_camZoom;
-      ctx.setLineDash([6/_camZoom,4/_camZoom]);
-      ctx.beginPath();ctx.arc(h.x,h.y,h2hR,0,Math.PI*2);ctx.stroke();
-      ctx.setLineDash([]);ctx.restore();
+      // Red head hitbox ring
+      ctx.strokeStyle='rgba(255,40,40,1.0)';ctx.lineWidth=2.5/_camZoom;
+      ctx.beginPath();ctx.arc(h.x,h.y,headR,0,Math.PI*2);ctx.stroke();
     });
   }
 

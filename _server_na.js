@@ -167,8 +167,7 @@ function ssSegSpacing(ns) {
 // Update server snake state from HOST's authoritative ss broadcast.
 // segs[] = output of getBodyPoints() — HOST-simulated body positions, accurate.
 function ssUpdateFromHostSS(lid, snakesData, io) {
-  const sg = ssGames.get(lid);
-  if (!sg) return;
+  const sg = getSsGame(lid); // auto-create so HOST's first ss packet bootstraps the game
   const seenIds = new Set();
   snakesData.forEach(sd => {
     if (!sd.id || !sd.segs || !sd.segs.length) return;
