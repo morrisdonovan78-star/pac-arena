@@ -163,6 +163,9 @@ function getSsGame(lid) {
 function ssSegSpacing(ns) {
   return (8 + Math.pow(ns * 5, 0.6) * 0.8) * 0.5;
 }
+function ssSectionRadius(ns) {
+  return 8 + Math.pow(ns * 5, 0.6) * 0.8;
+}
 
 // Update server snake state from HOST's authoritative ss broadcast.
 // segs[] = output of getBodyPoints() — HOST-simulated body positions, accurate.
@@ -176,7 +179,7 @@ function ssUpdateFromHostSS(lid, snakesData, io) {
     if (!sn) {
       const ns = sd.ns || 26;
       sn = { pid: sd.id, x: sd.segs[0][0], y: sd.segs[0][1],
-             angle: sd.angle || 0, boost: !!sd.boost,
+             angle: typeof sd.angle === 'number' ? sd.angle : 0, boost: !!sd.boost,
              ns, thick: ssThick(ns), segs: sd.segs, alive: true, lastTs: Date.now() };
       sg.snakes.set(sd.id, sn);
       if (!sg.tickInterval) {
@@ -185,7 +188,7 @@ function ssUpdateFromHostSS(lid, snakesData, io) {
       }
     } else {
       if (sd.ns) { sn.ns = sd.ns; sn.thick = ssThick(sd.ns); }
-      sn.angle = sd.angle || sn.angle;
+      sn.angle = typeof sd.angle === 'number' ? sd.angle : sn.angle;
       sn.boost = !!sd.boost;
       sn.x = sd.segs[0][0]; sn.y = sd.segs[0][1];
       sn.segs = sd.segs;
@@ -198,6 +201,8 @@ function ssUpdateFromHostSS(lid, snakesData, io) {
   sg.snakes.forEach((sn, id) => {
     if (!seenIds.has(id)) { sn.alive = false; sn.segs = []; }
   });
+  // Check collisions immediately with fresh positions — don't wait for the async ssTick timer
+  ssCheckCollisions(sg, lid, io);
 }
 
 // ssin: only used for ghost-timer refresh and angle/boost updates — no dead-reckoning
@@ -246,7 +251,7 @@ function ssTick(lid, io) {
   const sg = ssGames.get(lid);
   if (!sg) return;
   const now = Date.now();
-  // Ghost check only — no dead-reckoning; positions come from HOST ss packets
+  // Ghost check only — collision is checked in ssUpdateFromHostSS with fresh positions
   sg.snakes.forEach(sn => {
     if (!sn.alive) return;
     if (now - sn.lastTs > SS_GHOST_MS) {
@@ -254,34 +259,33 @@ function ssTick(lid, io) {
       io.to(lid).emit('elim', { id: sn.pid, killerId: null });
     }
   });
-  ssCheckCollisions(sg, lid, io);
 }
 
 function ssCheckCollisions(sg, lid, io) {
   const T = sg.tuning;
-  const faceCos = Math.cos(T.faceDeg * Math.PI / 180);
   // Only snakes with HOST-supplied segs are collision-ready (segs[0] = head, segs[1+] = body)
   const alive = [...sg.snakes.values()].filter(s => s.alive && s.segs && s.segs.length > 1);
-  if (alive.length > 1) console.log(`[${lid}] collision check: ${alive.length} snakes, heads: ${alive.map(s=>`${s.pid.slice(0,6)}@[${s.segs[0]}]`).join(' | ')}`);
   const died = new Set();
 
-  // ── Head-to-head: both face within faceDeg; winner per T.rule ────────────────
+  // ── Head-to-head: moneyslither formula (headR1+headR2)*hbs; facing gate w/ crossing fallback
+  const _faceCos = Math.cos((T.faceDeg || 75) * Math.PI / 180);
   for (let i = 0; i < alive.length; i++) {
     const p = alive[i]; if (died.has(p.pid)) continue;
-    const hR1 = p.thick * SS_HB * T.hbs * T.hhbs;
     const px = p.segs[0][0], py = p.segs[0][1];
+    const hR1 = ssHeadR(p.thick);
     for (let j = i + 1; j < alive.length; j++) {
       const q = alive[j]; if (died.has(q.pid)) continue;
-      const hR2 = q.thick * SS_HB * T.hbs * T.hhbs;
       const qx = q.segs[0][0], qy = q.segs[0][1];
+      const hR2 = ssHeadR(q.thick);
       const rr = (hR1 + hR2) * T.hbs;
       const dx = qx - px, dy = qy - py, d2 = dx * dx + dy * dy;
       if (d2 > rr * rr) continue;
-      if (d2 > 0) {
+      // Facing gate — skip when snakes have already crossed (d < rr/3 → dot products reversed)
+      if (d2 > rr * rr / 9 && d2 > 0) {
         const dh = Math.sqrt(d2);
         const pDot = Math.cos(p.angle) * (dx / dh) + Math.sin(p.angle) * (dy / dh);
         const qDot = Math.cos(q.angle) * (-dx / dh) + Math.sin(q.angle) * (-dy / dh);
-        if (pDot < faceCos || qDot < faceCos) continue;
+        if (pDot < _faceCos || qDot < _faceCos) continue; // gate fails → falls to H2B
       }
       let loser, winner;
       if (T.rule === 'biggest_wins') {
@@ -314,9 +318,9 @@ function ssCheckCollisions(sg, lid, io) {
       const qq = alive[j]; if (qq.pid === pp.pid || died.has(qq.pid)) continue;
       const bR = qq.thick * SS_HB * T.hbs;
       const crr2 = (hR + bR) * (hR + bR);
-      // Skip segments near victim head: 8*SS_SPD px worth
+      // Skip ~80px from victim head (moneyslither path[8] equivalent at ~10px/frame × 8 frames)
       const spacing = ssSegSpacing(qq.ns);
-      const skip = Math.max(2, Math.ceil(8 * SS_SPD / spacing));
+      const skip = Math.max(2, Math.ceil(80 / spacing));
       for (let k = skip; k < qq.segs.length; k++) {
         const seg = qq.segs[k];
         const sdx = hhx - seg[0], sdy = hhy - seg[1];
