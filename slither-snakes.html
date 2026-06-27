@@ -487,7 +487,7 @@ const SHED_NOEAT_MS = 4000;  // a snake can't re-eat its own boost-shed trail pe
 const SS_HB   = 0.95;   // HITBOX_BASE
 const SS_HBS  = 1.07;   // combatHitboxScale
 const SS_HHBS = 1.18;   // combatHeadHitboxScale
-const HOST_TIMEOUT = 1500;  // ms of host silence before a guest promotes itself (host migration)
+const HOST_TIMEOUT = 800;   // ms of host silence before a guest promotes itself (host migration)
 const SELF_SKIP    = 9999;  // disable self-collision — damnbruh.com: own tail never kills you
 const ESCROW_PUBKEY = '2SYFfCsSmKr8qwK1AfWd36JtAc1BCaRaSSxyECKUJjBb';
 const APP_ID = 'cmq1eo6uz004b0cl8pvk7aakk';
@@ -526,6 +526,7 @@ let _killFeed=[];
 let _pendingKills=[];
 let _elimPairTick=-1,_elimPairSet=new Set(); // per-tick guard (same-tick)
 const _snakesSpawnedFood=new Set(); // tracks which snake IDs already had death food spawned
+const _snakeDeathPos=new Map(); // id → {x,y} head position at death, for respawn detection
 const _recentKillPairs=new Map(); // time-based 2s guard — survives across ticks and host migrations
 let _playerMeta=new Map();
 let _ping=0,_pingIv=null;
@@ -1164,7 +1165,7 @@ async function pkConnect(roomId,gameToken){
       auth:{pid:myPid,lobbyId:roomId,gameToken:gameToken||null,name:myName,color:_myCol,wagerSol:ST.wagerSol||0},
       transports:['websocket','polling'],
       reconnectionAttempts:Infinity,
-      reconnectionDelay:1000,
+      reconnectionDelay:500,
     });
 
     let _initRecv=false,_initGuard=null;
@@ -1206,7 +1207,7 @@ async function pkConnect(roomId,gameToken){
             _sio.io.opts.transports=['polling','websocket'];
             _sio.disconnect(); _sio.connect();
           }
-        },2000);
+        },5000);
         res();
       });
       _sio.on('connect_error',(e)=>{
@@ -1371,7 +1372,7 @@ function pkDisconnect(){
   voiceCleanup();
   _killFeed=[];
   ablyChannel=null;
-  if(_sio){try{_sio.disconnect();}catch(_){}} _sio=null;
+  if(_sio){try{_sio.io.reconnection(false);}catch(_){}try{_sio.disconnect();}catch(_){}} _sio=null;
   myPid=null;isHost=false;isSpectating=false;pkRoomId=null;_pkTick=0;_pkSentTick=0;_myHelloTs=0;
   _joiningLobby=false;_lobbyIsPaid=false;_hostPid=null;
   _guestInputs.clear();
@@ -1562,6 +1563,7 @@ function initSnakeGame(players){
   _autoCircle=false;
   _foodSendCounter=2; // init so first sendSnakeState (→3) immediately includes food
   _snakesSpawnedFood.clear();
+  _snakeDeathPos.clear();
   SG={snakes:new Map(),food:[],tick:0,over:false};
   const myColor=_playerMeta.get(myPid)?.color||colorFromId(myPid);
   if(isHost){
@@ -1903,7 +1905,7 @@ function snakeTick(){
       const f=SG.food[i];
       if(f.o===snake.id&&f.ne&&_nowEat<f.ne)continue; // can't re-eat your own fresh boost-shed (anti circle-farm)
       const dx=h.x-f.x,dy=h.y-f.y;
-      const pickR=f.k?(r+f.size*2):(r+f.size); // SOL kill food: 2× size bonus so latency desync can't miss it
+      const _fThick=msThick(snake);const pickR=f.k?(_fThick+42):(_fThick+29); // moneyslither formula: gold≈57px, normal≈44px
       if(dx*dx+dy*dy<pickR*pickR){
         snake.growQueue+=FOOD_GROW;
         snake.score+=10;
@@ -1922,26 +1924,27 @@ function snakeTick(){
 function _practiceCheckCollisions(){
   if(!SG||SG.over)return;
   const T=_tuning;
-  const faceCos=Math.cos(T.faceDeg*Math.PI/180);
   const alive=[...SG.snakes.values()].filter(s=>s.alive&&s.path&&s.path.length>1);
   const died=new Set();
-  // H2H
+  // H2H — moneyslither formula: (headR1+headR2)*hbs; facing gate skipped when snakes cross (d<rr/3)
+  const _faceCos=Math.cos(T.faceDeg*Math.PI/180);
   for(let i=0;i<alive.length;i++){
     const p=alive[i];if(died.has(p.id))continue;
-    const pt=msThick(p),hR1=pt*SS_HB*T.hbs*T.hhbs;
     const px=p.path[0].x,py=p.path[0].y;
+    const _ptk=msThick(p),hR1=_ptk*SS_HB*T.hbs*T.hhbs;
     for(let j=i+1;j<alive.length;j++){
       const q=alive[j];if(died.has(q.id))continue;
-      const qt=msThick(q),hR2=qt*SS_HB*T.hbs*T.hhbs;
       const qx=q.path[0].x,qy=q.path[0].y;
+      const _qtk=msThick(q),hR2=_qtk*SS_HB*T.hbs*T.hhbs;
       const rr=(hR1+hR2)*T.hbs;
       const dx=qx-px,dy=qy-py,d2=dx*dx+dy*dy;
       if(d2>rr*rr)continue;
-      if(d2>0){
-        const dh=Math.sqrt(d2);
-        const pDot=Math.cos(p.angle)*(dx/dh)+Math.sin(p.angle)*(dy/dh);
-        const qDot=Math.cos(q.angle)*(-dx/dh)+Math.sin(q.angle)*(-dy/dh);
-        if(pDot<faceCos||qDot<faceCos)continue;
+      // Facing gate: skip when very close (crossed); apply otherwise
+      if(d2>rr*rr/9&&d2>0){
+        const _dh=Math.sqrt(d2);
+        const pDot=Math.cos(p.angle)*(dx/_dh)+Math.sin(p.angle)*(dy/_dh);
+        const qDot=Math.cos(q.angle)*(-dx/_dh)+Math.sin(q.angle)*(-dy/_dh);
+        if(pDot<_faceCos||qDot<_faceCos)continue;
       }
       // Determine loser
       let loser,winner;
@@ -1965,7 +1968,7 @@ function _practiceCheckCollisions(){
       const crr=(hHR+bR),crr2=crr*crr;
       const segs=getBodyPoints(qq);
       const spc=sectionRadius(qq)*SEGMENT_SPACING;
-      const skip=Math.max(2,Math.ceil(8*SNAKE_SPD/spc));
+      const skip=Math.max(2,Math.ceil(80/spc)); // skip ~80px from head (moneyslither path[8] equivalent)
       for(let k=skip;k<segs.length;k++){
         const seg=segs[k];
         const sdx=hx-seg.x,sdy=hy-seg.y;
@@ -1993,6 +1996,10 @@ function eliminateSnake(id,killerId){
   }
   snake.alive=false;
   if(isHost)spawnFoodFromSnake(snake); // HOST only — food list is synced to guests via ss food packets
+  // All clients: mark as confirmed-dead so stale ss packets can't revive the body
+  const _dh=snake.path&&snake.path[0];
+  if(_dh)_snakeDeathPos.set(snake.id,{x:_dh.x,y:_dh.y});
+  _snakesSpawnedFood.add(snake.id);
   snake.path=[]; // vanish immediately
   const km=_playerMeta.get(killerId)||{};
   const vm=_playerMeta.get(id)||{};
@@ -2054,7 +2061,7 @@ function sendSnakeState(){
     // Send actual body section positions (radius*0.5 apart per damnbruh updateSegments)
     const bPts=getBodyPoints(s);
     const segs=bPts.map(p=>[Math.round(p.x),Math.round(p.y)]);
-    snakeArr.push({id:s.id,segs,angle:s.angle,score:s.score,boost:s.boost,ns:s.numSections,color:s.color,name:s.name,usd:(s.id===myPid?_myUsd:(s.usd||0))});
+    snakeArr.push({id:s.id,segs,angle:s.angle,score:s.score,boost:s.boost,ns:s.numSections,color:s.color,name:s.name,usd:(s.id===myPid?_myUsd:(s.usd||0)),circle:!!(s.botCircle||s._inputCircle)});
   });
   _foodSendCounter++;
   const msg={t:'ss',snakes:snakeArr,tick:SG.tick,host:myPid,tuning:_tuning}; // tuning syncs to all guests
@@ -2117,9 +2124,15 @@ function applyRemoteState(d){
         s=makeSnake(sd.id,sd.color||meta.color||colorFromId(sd.id),sd.name||meta.name||'SNAKE');
         SG.snakes.set(sd.id,s);
       }
-      // Never reanimate a snake that was confirmed killed — guards against stale SS from migrating host
-      if(_snakesSpawnedFood.has(sd.id)){s.alive=false;return;}
-      s._tAngle=sd.angle; s._lastSeen=Date.now(); // lerp toward server angle; timestamp for timeout
+      // Never reanimate a snake that was confirmed killed — guards against stale SS from migrating host.
+      // Exception: if head is >200px from death pos, it's a fresh respawn — unblock and show.
+      if(_snakesSpawnedFood.has(sd.id)){
+        const _dp=_snakeDeathPos.get(sd.id);
+        const _sh=sd.segs&&sd.segs[0];
+        if(_dp&&_sh){const _fdx=_sh[0]-_dp.x,_fdy=_sh[1]-_dp.y;if(_fdx*_fdx+_fdy*_fdy>200*200){_snakesSpawnedFood.delete(sd.id);_snakeDeathPos.delete(sd.id);}else{s.alive=false;return;}}
+        else{s.alive=false;return;}
+      }
+      s._tAngle=sd.angle; s._lastSeen=Date.now(); s.botCircle=!!sd.circle; // lerp toward server angle; timestamp for timeout
       s.alive=true; s.score=sd.score||0; s.boost=sd.boost||false; s.usd=sd.usd||0;
       s.numSections=sd.ns||(sd.segs&&sd.segs.length)||s.numSections;
       s.color=sd.color||s.color; s.name=sd.name||s.name;
@@ -2243,7 +2256,7 @@ function launchSnakeGame(){
   if(isHost&&localStorage.getItem('ss_owner')==='1'&&_sio)_sio.emit('ss-tune',_tuning);
   rafHandle=requestAnimationFrame(rafDraw);
   if(_hostWatch)clearInterval(_hostWatch);
-  _hostWatch=setInterval(_checkHost,700); // watch for host departure → migrate
+  _hostWatch=setInterval(_checkHost,300); // watch for host departure → migrate
   const _vb=document.getElementById('voice-btn');if(_vb)_vb.style.display='flex';
   const _bb=document.getElementById('bot-bar');if(_bb)_bb.style.display=(_isPractice&&localStorage.getItem('ss_owner')==='1')?'flex':'none';
   if(_firstRemoteSync){const _jo=document.getElementById('join-sync');if(_jo)_jo.style.display='flex';}
@@ -2727,8 +2740,8 @@ function rafDraw(ts){
       if(s._inputCircle||s.botCircle){s.angle+=MAX_TURN*frac;}
       else if(s._tAngle!=null){
         const _da=angleDiff(s._tAngle,s.angle);
-        s.angle+=_da*Math.min(1,frac*0.5);
-        if(Math.abs(_da)<0.005){s.angle=s._tAngle;s._tAngle=null;}
+        s.angle+=Math.max(-MAX_TURN*frac,Math.min(MAX_TURN*frac,_da));
+        if(Math.abs(angleDiff(s._tAngle,s.angle))<0.005){s.angle=s._tAngle;s._tAngle=null;}
       }
       const spd=(s.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=s.path[0];
@@ -2968,12 +2981,10 @@ function drawSnake(snake){
   if(_showHitboxes){
     const thick=msThick(snake);
     const bR=thick*SS_HB*_tuning.hbs;
-    const segSp=r*SEGMENT_SPACING;
-    const skip=Math.max(2,Math.ceil(8*SNAKE_SPD/segSp));
     ctx.lineWidth=1.5/_camZoom;
     ctx.strokeStyle='rgba(255,255,0,0.70)';
     ctx.beginPath();
-    for(let k=skip;k<bPts.length;k++){
+    for(let k=1;k<bPts.length;k++){
       const bp=bPts[k];
       ctx.moveTo(bp.x+bR,bp.y);ctx.arc(bp.x,bp.y,bR,0,Math.PI*2);
     }
@@ -2989,7 +3000,7 @@ function drawSnake(snake){
     const thick=msThick(snake);
     const bR=thick*SS_HB*_tuning.hbs;
     const hR=bR*_tuning.hhbs;
-    const h2hR=hR*2*_tuning.hbs;
+    const h2hR=hR*2*_tuning.hbs; // gold ring = (headR+headR)*hbs — matches moneyslither trigger distance
     ctx.save();
     if(_showHitboxes){
       // Red head hitbox ring
