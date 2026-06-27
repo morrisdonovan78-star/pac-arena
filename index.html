@@ -1560,6 +1560,15 @@ async function pkConnect(roomId, gameToken){
           // Reconnect mid-game: don't re-init G.players — 's' packets will re-sync.
           // Just refresh the maze to pick up any dot changes during the drop.
           if(data.maze&&G){ G.maze=data.maze; _mazeDirty=true; }
+          // Server created a fresh player at a new spawn — reset client state so
+          // the first 's' packet snaps renderX/Y to the new position and so the
+          // first keypress (even if same direction as before the drop) always fires.
+          _localFirstSyncDone=false;
+          _lastSentDx=null; _lastSentDy=null;
+          // Zero out local player direction so client prediction doesn't drive
+          // the render toward the old position while server is at the new spawn.
+          const _rp=G&&G.players&&G.players.get(myPid);
+          if(_rp){ _rp.dx=0; _rp.dy=0; _rp.nx=0; _rp.ny=0; }
           return;
         }
         _pendingState=null; // discard any stale 's' packets from a previous session
@@ -1806,12 +1815,29 @@ async function pkConnect(roomId, gameToken){
     // client using rndSpawn() while server uses nextSpawn() (almost always different).
     _sio.on('rejoin',(data)=>{
       if(!data||!data.id||!G||data.x===undefined) return;
-      // Reset BEFORE null check — on elim, G.players.delete(myPid) runs first,
-      // so p is null here. Without this early reset the dedup stays stale and
+      // Reset dedup/sync flags BEFORE null check — on elim, G.players.delete(myPid) runs
+      // first, so p is null here. Without this early reset the dedup stays stale and
       // pressing the same direction as before death never sends a packet.
       if(data.id===myPid){ _lastSentDx=null; _lastSentDy=null; _localFirstSyncDone=false; }
-      const p=G.players.get(data.id);
-      if(!p) return;
+      let p=G.players.get(data.id);
+      if(!p){
+        // Player was removed from G.players by elim/leave — re-add immediately at the
+        // server's confirmed spawn rather than waiting up to 66ms for the next 's' packet.
+        // Skip for own player: _doFreeRejoin already set G.players[myPid] before emitting.
+        if(data.id===myPid) return;
+        const _sh=_playerMeta.get(data.id)||{};
+        G.players.set(data.id,{
+          id:data.id, num:G.players.size, color:_sh.color||colorFromId(data.id),
+          hat:_sh.hat||'none', trail:_sh.trail||'none', eyes:_sh.eyes||'dot',
+          aura:_sh.aura||'none', _trail:[],
+          x:data.x, y:data.y, dx:0, dy:0, nx:0, ny:0,
+          prevX:data.x, prevY:data.y, renderX:data.x, renderY:data.y,
+          sc:0, lives:1, pow:false, pt:0, mc:0, pep:false, pet:0,
+          held:['cherry','pepper'], name:_sh.name||'', sol:_sh.sol||0
+        });
+        updateScoreboard();
+        return;
+      }
       p.x=data.x; p.y=data.y; p.dx=0; p.dy=0; p.nx=0; p.ny=0;
       p.prevX=data.x; p.prevY=data.y; p.renderX=data.x; p.renderY=data.y;
       p.alive=true; p.sc=0; p._waitSnap=false;
