@@ -527,6 +527,7 @@ let _pendingKills=[];
 let _elimPairTick=-1,_elimPairSet=new Set(); // per-tick guard (same-tick)
 const _snakesSpawnedFood=new Set(); // tracks which snake IDs already had death food spawned
 const _snakeDeathPos=new Map(); // id → {x,y} head position at death, for respawn detection
+const _snakeDeathTs=new Map();  // id → timestamp of death, for time-based respawn unblock
 const _recentKillPairs=new Map(); // time-based 2s guard — survives across ticks and host migrations
 let _playerMeta=new Map();
 let _ping=0,_pingIv=null;
@@ -1385,11 +1386,11 @@ function pkDisconnect(){
 // snake.numSections = number of visible body circles
 // snake.path        = dense array of head positions, head-first
 //
-// damnbruh.com exact updateSegments — nth segment placed at n*spacing from head via interpolation.
-// spacing = radius * SEGMENT_SPACING_FACTOR (0.5) — dynamic, not fixed.
+// Body points sampled at fixed 10px spacing (matches moneyslither's per-frame path density).
+// Using sectionRadius*0.5 made large snakes 2× too long vs moneyslither; fixed 10px corrects that.
 function getBodyPoints(snake){
   const path=snake.path,target=snake.numSections;
-  const r=sectionRadius(snake),spacing=r*SEGMENT_SPACING;
+  const spacing=10;
   const pts=[];
   if(!path.length)return pts;
   pts.push(path[0]);
@@ -1427,8 +1428,7 @@ function msThick(s){
 // distance keeps the rendered body length identical at any framerate and any boost state.
 function trimPath(snake){
   const p=snake.path; if(!p||p.length<3)return;
-  const r=sectionRadius(snake);
-  const keep=snake.numSections*r*SEGMENT_SPACING + 4*r + 80; // full body length + margin
+  const keep=snake.numSections*10 + 4*msThick(snake) + 80; // full body (10px/seg) + head margin
   let cum=0;
   for(let i=0;i+1<p.length;i++){
     cum+=Math.hypot(p[i+1].x-p[i].x,p[i+1].y-p[i].y);
@@ -1564,6 +1564,7 @@ function initSnakeGame(players){
   _foodSendCounter=2; // init so first sendSnakeState (→3) immediately includes food
   _snakesSpawnedFood.clear();
   _snakeDeathPos.clear();
+  _snakeDeathTs.clear();
   SG={snakes:new Map(),food:[],tick:0,over:false};
   const myColor=_playerMeta.get(myPid)?.color||colorFromId(myPid);
   if(isHost){
@@ -1967,8 +1968,7 @@ function _practiceCheckCollisions(){
       const bR=msThick(qq)*SS_HB*T.hbs;
       const crr=(hHR+bR),crr2=crr*crr;
       const segs=getBodyPoints(qq);
-      const spc=sectionRadius(qq)*SEGMENT_SPACING;
-      const skip=Math.max(2,Math.ceil(80/spc)); // skip ~80px from head (moneyslither path[8] equivalent)
+      const skip=Math.max(2,Math.ceil(80/10)); // skip 80px = 8 segs at fixed 10px spacing
       for(let k=skip;k<segs.length;k++){
         const seg=segs[k];
         const sdx=hx-seg.x,sdy=hy-seg.y;
@@ -1999,6 +1999,7 @@ function eliminateSnake(id,killerId){
   // All clients: mark as confirmed-dead so stale ss packets can't revive the body
   const _dh=snake.path&&snake.path[0];
   if(_dh)_snakeDeathPos.set(snake.id,{x:_dh.x,y:_dh.y});
+  _snakeDeathTs.set(snake.id,Date.now());
   _snakesSpawnedFood.add(snake.id);
   snake.path=[]; // vanish immediately
   const km=_playerMeta.get(killerId)||{};
@@ -2125,11 +2126,13 @@ function applyRemoteState(d){
         SG.snakes.set(sd.id,s);
       }
       // Never reanimate a snake that was confirmed killed — guards against stale SS from migrating host.
-      // Exception: if head is >200px from death pos, it's a fresh respawn — unblock and show.
+      // Unblock when: >1500px from death pos (genuine respawn) OR >3s since death (time fallback).
       if(_snakesSpawnedFood.has(sd.id)){
         const _dp=_snakeDeathPos.get(sd.id);
         const _sh=sd.segs&&sd.segs[0];
-        if(_dp&&_sh){const _fdx=_sh[0]-_dp.x,_fdy=_sh[1]-_dp.y;if(_fdx*_fdx+_fdy*_fdy>200*200){_snakesSpawnedFood.delete(sd.id);_snakeDeathPos.delete(sd.id);}else{s.alive=false;return;}}
+        const _timedOut=Date.now()-(_snakeDeathTs.get(sd.id)||0)>3000;
+        const _farFromDeath=_dp&&_sh&&(()=>{const _fdx=_sh[0]-_dp.x,_fdy=_sh[1]-_dp.y;return _fdx*_fdx+_fdy*_fdy>1500*1500;})();
+        if(_timedOut||_farFromDeath){_snakesSpawnedFood.delete(sd.id);_snakeDeathPos.delete(sd.id);_snakeDeathTs.delete(sd.id);}
         else{s.alive=false;return;}
       }
       s._tAngle=sd.angle; s._lastSeen=Date.now(); s.botCircle=!!sd.circle; // lerp toward server angle; timestamp for timeout
@@ -2942,13 +2945,13 @@ function drawFood(){
   });
 }
 
-// ── Circle-based body rendering (slither.io / damnbruh.com style) ─────────────
+// ── Circle-based body rendering (moneyslither.com visual size) ─────────────────
 
 function drawSnake(snake){
   if(!snake.path||snake.path.length<2)return;
   const bPts=getBodyPoints(snake);
   if(bPts.length<2)return;
-  const r=sectionRadius(snake);
+  const r=msThick(snake); // visual radius matches moneyslither thickness formula
   const col=snake.color;
   const n=bPts.length;
   const now=performance.now();

@@ -159,9 +159,9 @@ function getSsGame(lid) {
   return ssGames.get(lid);
 }
 
-// Visual segment spacing matching client getBodyPoints — used for body-check skip calc
+// Fixed 10px spacing — mirrors client getBodyPoints which uses constant 10px (moneyslither body density)
 function ssSegSpacing(ns) {
-  return (8 + Math.pow(ns * 5, 0.6) * 0.8) * 0.5;
+  return 10;
 }
 function ssSectionRadius(ns) {
   return 8 + Math.pow(ns * 5, 0.6) * 0.8;
