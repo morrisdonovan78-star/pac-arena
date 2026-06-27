@@ -473,7 +473,7 @@ const MAX_TURN     = 0.274; // rad/tick
 const BOOST_DRAIN  = 8;     // ticks between boost drain events
 const BOOST_DRAIN_AMT = 3.0;  // drain accumulator per tick = AMT/DRAIN = 0.375 sections/tick (~20% slower than before)
 const SHED_NOEAT_MS = 4000;  // a snake can't re-eat its own boost-shed trail pebbles for this long (anti circle-farm)
-const HOST_TIMEOUT = 2500;  // ms of host silence before a guest promotes itself (host migration)
+const HOST_TIMEOUT = 1500;  // ms of host silence before a guest promotes itself (host migration)
 const SELF_SKIP    = 9999;  // disable self-collision — damnbruh.com: own tail never kills you
 const ESCROW_PUBKEY = '2SYFfCsSmKr8qwK1AfWd36JtAc1BCaRaSSxyECKUJjBb';
 const APP_ID = 'cmq1eo6uz004b0cl8pvk7aakk';
@@ -1293,7 +1293,8 @@ async function pkConnect(roomId,gameToken){
       // Host left → elect the lowest-pid remaining player (maybe me) immediately.
       if(SG&&!SG.over&&did===_hostPid&&!isHost){
         _hostPid=null;
-        const cands=[...(_playerMeta.keys())].filter(id=>id).sort();
+        const _leaveCandSet=new Set([...(_playerMeta.keys()),...(SG?[...SG.snakes.keys()]:[])]);
+        const cands=[..._leaveCandSet].filter(id=>id).sort();
         if(!cands.length||cands[0]===myPid)_electHost();
         _lastSsTs=Date.now();
       }
@@ -1630,7 +1631,9 @@ function _electHost(){
   isHost=true; _hostPid=myPid;
   _hostGraceTicks=15; // skip collision for ~500ms so dual-host ss packets can cross and demote
   if(!SG.food||!SG.food.length)SG.food=seedFoodLayout(); // ensure dots exist if we never synced
-  loadKillFood(); // restore SOL pellets on host migration
+  // Only restore from localStorage if SS sync didn't already give us live kill food.
+  // Calling unconditionally creates DUPLICATE pellets (one from SS, one from stale localStorage).
+  if(!SG.food.some(f=>f.k))loadKillFood();
   if(_guestInputLoop){clearInterval(_guestInputLoop);_guestInputLoop=null;}
   _forceFoodSend=true;
   _lastTickTs=performance.now();
@@ -1649,7 +1652,9 @@ function _checkHost(){
   if(!_lastSsTs){_lastSsTs=Date.now();return;}
   if(Date.now()-_lastSsTs<HOST_TIMEOUT)return;
   // Host went silent — elect the lowest-pid remaining player (excluding the silent host).
-  const cands=[...(_playerMeta.keys())].filter(id=>id&&id!==_hostPid).sort();
+  // Include SG.snakes so reconnected players in the server's 15s grace (no re-join emitted) are counted.
+  const _candSet=new Set([...(_playerMeta.keys()),...(SG?[...SG.snakes.keys()]:[])]);
+  const cands=[..._candSet].filter(id=>id&&id!==_hostPid).sort();
   if(!cands.length||cands[0]===myPid)_electHost();
   _lastSsTs=Date.now(); // back off; the elected host's 'ss' will reset this for everyone else
 }
@@ -1806,8 +1811,13 @@ function snakeTick(){
     if(inp.circle) s.angle+=MAX_TURN; else applyTurn(s,inp.angle);
     s.boost=inp.boost;
     if(inp.x!=null&&inp.y!=null&&inp.fresh){
-      if(s.path.length>0)s.path[0]={x:inp.x,y:inp.y};
       inp.fresh=false;
+      if(s.path.length>0){
+        const _sdx=inp.x-s.path[0].x,_sdy=inp.y-s.path[0].y;
+        // Only hard-snap for large drifts (>6 ticks). Small differences let dead-reckoning
+        // stay current so food pickup uses the live position, not the stale ssin position.
+        if(_sdx*_sdx+_sdy*_sdy>(SNAKE_SPD*6)*(SNAKE_SPD*6))s.path[0]={x:inp.x,y:inp.y};
+      }
     }
   });
 
