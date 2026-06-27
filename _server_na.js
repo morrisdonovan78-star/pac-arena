@@ -155,7 +155,7 @@ function ssHeadR(thick) { return thick * SS_HB * SS_HBS * SS_HHBS; }
 const ssGames = new Map(); // lobbyId → { snakes: Map(pid→snake), tickInterval }
 
 function getSsGame(lid) {
-  if (!ssGames.has(lid)) ssGames.set(lid, { snakes: new Map(), tickInterval: null });
+  if (!ssGames.has(lid)) ssGames.set(lid, { snakes: new Map(), tickInterval: null, tuning: { hbs: SS_HBS, hhbs: SS_HHBS, faceDeg: 75, rule: 'smallest_wins' } });
   return ssGames.get(lid);
 }
 
@@ -231,45 +231,57 @@ function ssTick(lid, io) {
 }
 
 function ssCheckCollisions(sg, lid, io) {
+  const T = sg.tuning;
+  const faceCos = Math.cos(T.faceDeg * Math.PI / 180);
   const alive = [...sg.snakes.values()].filter(s => s.alive && s.path.length > 1);
   const died = new Set();
 
-  // ── Head-to-head: both must face within 75°; smallest_wins ──────────────────
+  // ── Head-to-head: both must face within faceDeg; winner per T.rule ──────────
   for (let i = 0; i < alive.length; i++) {
     const p = alive[i]; if (died.has(p.pid)) continue;
-    const hR1 = ssHeadR(p.thick);
+    const hR1 = p.thick * SS_HB * T.hbs * T.hhbs;
     for (let j = i + 1; j < alive.length; j++) {
       const q = alive[j]; if (died.has(q.pid)) continue;
-      const hR2 = ssHeadR(q.thick);
-      const rr = (hR1 + hR2) * SS_HBS;
+      const hR2 = q.thick * SS_HB * T.hbs * T.hhbs;
+      const rr = (hR1 + hR2) * T.hbs;
       const dx = q.x - p.x, dy = q.y - p.y, d2 = dx * dx + dy * dy;
       if (d2 > rr * rr) continue;
-      // Facing gate — if either snake is NOT aimed at the other, fall to body check
+      // Facing gate — if either snake NOT aimed at the other, fall to body check
       if (d2 > 0) {
         const dh = Math.sqrt(d2);
         const pDot = Math.cos(p.angle) * (dx / dh) + Math.sin(p.angle) * (dy / dh);
         const qDot = Math.cos(q.angle) * (-dx / dh) + Math.sin(q.angle) * (-dy / dh);
-        if (pDot < SS_FACE || qDot < SS_FACE) continue; // not head-on → fall to body check
+        if (pDot < faceCos || qDot < faceCos) continue;
       }
-      // Resolve: smallest wins (moneyslither default)
+      // Resolve winner
       let loser, winner;
-      if      (p.ns < q.ns) { loser = p; winner = q; }
-      else if (q.ns < p.ns) { loser = q; winner = p; }
-      else    { loser = Math.random() < 0.5 ? p : q; winner = loser === p ? q : p; }
+      if (T.rule === 'biggest_wins') {
+        if      (p.ns > q.ns) { loser = q; winner = p; }
+        else if (q.ns > p.ns) { loser = p; winner = q; }
+        else    { loser = Math.random() < 0.5 ? p : q; winner = loser === p ? q : p; }
+      } else if (T.rule === 'both_die') {
+        died.add(p.pid); died.add(q.pid);
+        ssKill(p, q, lid, io); ssKill(q, p, lid, io); continue;
+      } else if (T.rule === 'random') {
+        loser = Math.random() < 0.5 ? p : q; winner = loser === p ? q : p;
+      } else { // smallest_wins (default)
+        if      (p.ns < q.ns) { loser = p; winner = q; }
+        else if (q.ns < p.ns) { loser = q; winner = p; }
+        else    { loser = Math.random() < 0.5 ? p : q; winner = loser === p ? q : p; }
+      }
       died.add(loser.pid);
       ssKill(loser, winner, lid, io);
     }
   }
 
-  // ── Head-to-body: combined radii (headR + bodyR), all angles ────────────────
+  // ── Head-to-body: headR + bodyR, all angles ──────────────────────────────────
   for (let i = 0; i < alive.length; i++) {
     const pp = alive[i]; if (died.has(pp.pid)) continue;
-    const hR = ssHeadR(pp.thick);
+    const hR = pp.thick * SS_HB * T.hbs * T.hhbs;
     for (let j = 0; j < alive.length; j++) {
       const qq = alive[j]; if (qq.pid === pp.pid || died.has(qq.pid)) continue;
-      const bR = ssBodyR(qq.thick);
+      const bR = qq.thick * SS_HB * T.hbs;
       const crr2 = (hR + bR) * (hR + bR);
-      // k=2 → path index 8: skip first 8 path points (near victim head area)
       const lim = Math.min(qq.path.length, qq.ns * SS_SEG_STEP + 50);
       for (let k = 2; k < lim / SS_SEG_STEP; k++) {
         const idx = k * SS_SEG_STEP;
@@ -647,6 +659,15 @@ io.on('connection', socket => {
   socket.on('ssin', (d) => {
     socket.to(lobbyId).emit('ssin', d); // relay for peer dead-reckoning
     if (lobbyId.startsWith('ss-')) ssHandleInput(lobbyId, pid, d, io);
+  });
+  socket.on('ss-tune', (d) => {
+    if (!lobbyId.startsWith('ss-') || !d) return;
+    const sg = ssGames.get(lobbyId); if (!sg) return;
+    if (typeof d.hbs === 'number') sg.tuning.hbs = Math.max(0.5, Math.min(3.0, d.hbs));
+    if (typeof d.hhbs === 'number') sg.tuning.hhbs = Math.max(1.0, Math.min(3.0, d.hhbs));
+    if (typeof d.faceDeg === 'number') sg.tuning.faceDeg = Math.max(0, Math.min(120, d.faceDeg));
+    if (['smallest_wins','biggest_wins','both_die','random'].includes(d.rule)) sg.tuning.rule = d.rule;
+    console.log(`[${lobbyId}] ss-tune: hbs=${sg.tuning.hbs} hhbs=${sg.tuning.hhbs} faceDeg=${sg.tuning.faceDeg} rule=${sg.tuning.rule}`);
   });
 
   // ── Disconnect ────────────────────────────────────────────────
