@@ -475,7 +475,7 @@ const RADIUS_GROWTH      = 0.6;  // exponent for radius curve
 const RADIUS_SCALE       = 0.8;  // multiplier for radius curve
 // radius = BASE_RADIUS + size^RADIUS_GROWTH * RADIUS_SCALE
 const FOOD_TARGET  = 135;   // 135 pebbles on map
-const FOOD_GROW    = 2;     // sections added per food orb
+const FOOD_GROW    = 4;     // sections added per food orb (higher = more visible width gain)
 const MIN_SECTIONS = 8;     // die below this
 const BOOST_MIN    = 12;    // boost stops draining below this length
 const INIT_SECTIONS= 24;    // starting section count
@@ -2970,19 +2970,42 @@ function drawSnake(snake){
   const n=bPts.length;
   const now=performance.now();
 
-  // Smooth tube body — moneyslither style polyline stroke (no visible segment rings)
-  ctx.save();
-  ctx.lineCap='round';ctx.lineJoin='round';
+  // Boost rainbow glow — polyline stroke so the glow is smooth, not per-circle rings
+  if(snake.boost){
+    ctx.save();ctx.lineCap='round';ctx.lineJoin='round';
+    ctx.strokeStyle=`hsla(${(now*0.18)%360},100%,65%,0.50)`;
+    ctx.lineWidth=r*2+10/_camZoom;
+    ctx.beginPath();ctx.moveTo(bPts[n-1].x,bPts[n-1].y);
+    for(let i=n-2;i>=0;i--){const p=bPts[i];ctx.lineTo(p.x,p.y);}
+    ctx.stroke();ctx.restore();
+  }
+
+  // Body circles — main fill (tail→head, bPts[0] drawn by _drawHeadCircle on top)
+  ctx.fillStyle=col;
   ctx.beginPath();
-  ctx.moveTo(bPts[n-1].x,bPts[n-1].y);
-  for(let i=n-2;i>=0;i--){const p=bPts[i];ctx.lineTo(p.x,p.y);}
-  // Dark border pass (depth outline)
-  ctx.strokeStyle='rgba(0,0,0,0.42)';ctx.lineWidth=r*2+2.5/_camZoom;ctx.stroke();
-  // Boost rainbow glow pass
-  if(snake.boost){ctx.strokeStyle=`hsla(${(now*0.18)%360},100%,65%,0.55)`;ctx.lineWidth=r*2+10/_camZoom;ctx.stroke();}
-  // Main color pass
-  ctx.strokeStyle=col;ctx.lineWidth=r*2;ctx.stroke();
-  ctx.restore();
+  for(let i=n-1;i>=1;i--){
+    const p=bPts[i];if(!p)continue;
+    ctx.moveTo(p.x+r,p.y);ctx.arc(p.x,p.y,r,0,Math.PI*2);
+  }
+  ctx.fill();
+
+  // Per-circle shadow — offset dark circle reveals each segment boundary (moneyslither 3D look)
+  ctx.fillStyle='rgba(0,0,0,0.22)';
+  ctx.beginPath();
+  for(let i=n-1;i>=1;i--){
+    const p=bPts[i];if(!p)continue;
+    ctx.moveTo(p.x+r*0.70,p.y+r*0.10);ctx.arc(p.x+r*0.08,p.y+r*0.10,r*0.62,0,Math.PI*2);
+  }
+  ctx.fill();
+
+  // Per-circle highlight — top-left gloss makes segments look 3D like moneyslither
+  ctx.fillStyle='rgba(255,255,255,0.20)';
+  ctx.beginPath();
+  for(let i=n-1;i>=1;i--){
+    const p=bPts[i];if(!p)continue;
+    ctx.moveTo(p.x+r*0.06,p.y-r*0.28);ctx.arc(p.x-r*0.22,p.y-r*0.28,r*0.28,0,Math.PI*2);
+  }
+  ctx.fill();
 
   // Hitbox overlay (H key) — drawn here so circles share z-level with body and
   // can never visually extend past the snake tail (same bPts array, same indices)
