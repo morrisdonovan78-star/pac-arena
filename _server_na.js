@@ -159,9 +159,8 @@ function getSsGame(lid) {
   return ssGames.get(lid);
 }
 
-// Fixed 10px spacing — mirrors client getBodyPoints which uses constant 10px (moneyslither body density)
 function ssSegSpacing(ns) {
-  return 10;
+  return ssSectionRadius(ns) * 0.5; // damnbruh formula: sectionRadius * SEGMENT_SPACING(0.5)
 }
 function ssSectionRadius(ns) {
   return 8 + Math.pow(ns * 5, 0.6) * 0.8;

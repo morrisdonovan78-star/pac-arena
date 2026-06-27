@@ -475,7 +475,7 @@ const RADIUS_GROWTH      = 0.6;  // exponent for radius curve
 const RADIUS_SCALE       = 0.8;  // multiplier for radius curve
 // radius = BASE_RADIUS + size^RADIUS_GROWTH * RADIUS_SCALE
 const FOOD_TARGET  = 135;   // 135 pebbles on map
-const FOOD_GROW    = 4;     // sections added per food orb (higher = more visible width gain)
+const FOOD_GROW    = 2;     // sections added per food orb
 const MIN_SECTIONS = 8;     // die below this
 const BOOST_MIN    = 12;    // boost stops draining below this length
 const INIT_SECTIONS= 24;    // starting section count
@@ -1392,11 +1392,9 @@ function pkDisconnect(){
 // snake.numSections = number of visible body circles
 // snake.path        = dense array of head positions, head-first
 //
-// Body points sampled at fixed 10px spacing (matches moneyslither's per-frame path density).
-// Using sectionRadius*0.5 made large snakes 2× too long vs moneyslither; fixed 10px corrects that.
 function getBodyPoints(snake){
   const path=snake.path,target=snake.numSections;
-  const spacing=10;
+  const r=sectionRadius(snake),spacing=r*SEGMENT_SPACING;
   const pts=[];
   if(!path.length)return pts;
   pts.push(path[0]);
@@ -1434,7 +1432,7 @@ function msThick(s){
 // distance keeps the rendered body length identical at any framerate and any boost state.
 function trimPath(snake){
   const p=snake.path; if(!p||p.length<3)return;
-  const keep=snake.numSections*10 + 4*msThick(snake) + 80; // full body (10px/seg) + head margin
+  const r=sectionRadius(snake);const keep=snake.numSections*r*SEGMENT_SPACING+4*r+80;
   let cum=0;
   for(let i=0;i+1<p.length;i++){
     cum+=Math.hypot(p[i+1].x-p[i].x,p[i+1].y-p[i].y);
@@ -2384,8 +2382,8 @@ function _drawTuningPreview(){
       +'<span>Body hitbox r</span><span style="color:#FFD700">'+_bR.toFixed(1)+'px</span>'
       +'<span>Head hitbox r</span><span style="color:#FF5555">'+_hR.toFixed(1)+'px</span>'
       +'<span>H2H trigger</span><span style="color:#FFD700">'+_h2h.toFixed(1)+'px</span>'
-      +'<span>H2B skip</span><span style="color:#00FFFF">40px / 4 segs</span>'
-      +'<span>Spacing</span><span style="color:#00FFFF">10px fixed</span>'
+      +'<span>H2B skip</span><span style="color:#00FFFF">4 segs (~44px)</span>'
+      +'<span>Spacing</span><span style="color:#00FFFF">r×0.5 damnbruh</span>'
       +'</div>';
   }
 }
@@ -2964,13 +2962,11 @@ function drawFood(){
   });
 }
 
-// ── Circle-based body rendering (moneyslither.com visual size) ─────────────────
-
 function drawSnake(snake){
   if(!snake.path||snake.path.length<2)return;
   const bPts=getBodyPoints(snake);
   if(bPts.length<2)return;
-  const r=msThick(snake); // visual radius matches moneyslither thickness formula
+  const r=sectionRadius(snake); // damnbruh visual radius
   const col=snake.color;
   const n=bPts.length;
   const now=performance.now();
@@ -2985,22 +2981,30 @@ function drawSnake(snake){
     ctx.stroke();ctx.restore();
   }
 
-  // Body circles — main fill (tail→head, bPts[0] drawn by _drawHeadCircle on top)
+  // Body circles — damnbruh 3-pass: fill → inner shadow → highlight.
+  // Head (bPts[0]) included so it looks identical to body (fixes head-size mismatch).
+  // Shadow safe at sectionRadius: 75% overlap means shadow stays within each circle.
   ctx.fillStyle=col;
   ctx.beginPath();
-  for(let i=n-1;i>=1;i--){
+  for(let i=n-1;i>=0;i--){
     const p=bPts[i];if(!p)continue;
     ctx.moveTo(p.x+r,p.y);ctx.arc(p.x,p.y,r,0,Math.PI*2);
   }
   ctx.fill();
 
-  // Per-circle highlight — top-left gloss (small enough to never overlap adjacent circles at 10px spacing)
-  // Shadow pass removed: at 10px spacing, r*0.62 shadow circles overlapped adjacent ones creating star artifacts
+  ctx.fillStyle='rgba(0,0,0,0.25)';
+  ctx.beginPath();
+  for(let i=n-1;i>=0;i--){
+    const p=bPts[i];if(!p)continue;
+    ctx.moveTo(p.x+r*0.72,p.y+r*0.12);ctx.arc(p.x+r*0.10,p.y+r*0.12,r*0.62,0,Math.PI*2);
+  }
+  ctx.fill();
+
   ctx.fillStyle='rgba(255,255,255,0.22)';
   ctx.beginPath();
-  for(let i=n-1;i>=1;i--){
+  for(let i=n-1;i>=0;i--){
     const p=bPts[i];if(!p)continue;
-    ctx.moveTo(p.x+r*0.06,p.y-r*0.28);ctx.arc(p.x-r*0.22,p.y-r*0.28,r*0.28,0,Math.PI*2);
+    ctx.moveTo(p.x-r*0.22+r*0.28,p.y-r*0.28);ctx.arc(p.x-r*0.22,p.y-r*0.28,r*0.28,0,Math.PI*2);
   }
   ctx.fill();
 
@@ -3023,26 +3027,20 @@ function drawSnake(snake){
   const h=bPts[0]; if(!h)return;
   _drawHeadCircle(snake,r);
 
-  // Head hitbox + H2H zone — always-on for own snake; H-key for all snakes
-  if(_showHitboxes||snake.id===myPid){
+  // Head hitbox + H2H zone — H-key only (no always-on ring to avoid confusing visuals)
+  if(_showHitboxes){
     const thick=msThick(snake);
     const bR=thick*SS_HB*_tuning.hbs;
     const hR=bR*_tuning.hhbs;
-    const h2hR=hR*2*_tuning.hbs; // gold ring = (headR+headR)*hbs — matches moneyslither trigger distance
+    const h2hR=hR*2*_tuning.hbs;
     ctx.save();
-    if(_showHitboxes){
-      // Red head hitbox ring
-      ctx.strokeStyle='rgba(255,40,40,0.95)';ctx.lineWidth=2/_camZoom;
-      ctx.beginPath();ctx.arc(h.x,h.y,hR,0,Math.PI*2);ctx.stroke();
-    }
-    // Gold H2H kill-zone ring (always on own snake; H-key for all)
-    const ownAlpha=snake.id===myPid&&!_showHitboxes?0.50:1.0;
-    ctx.strokeStyle=`rgba(255,210,0,${ownAlpha})`;
-    ctx.lineWidth=(_showHitboxes?2.5:1.8)/_camZoom;
-    if(!_showHitboxes){ctx.setLineDash([5/_camZoom,4/_camZoom]);}
-    if(_showHitboxes){ctx.fillStyle='rgba(255,200,0,0.07)';ctx.beginPath();ctx.arc(h.x,h.y,h2hR,0,Math.PI*2);ctx.fill();}
+    // Red head hitbox ring
+    ctx.strokeStyle='rgba(255,40,40,0.95)';ctx.lineWidth=2/_camZoom;
+    ctx.beginPath();ctx.arc(h.x,h.y,hR,0,Math.PI*2);ctx.stroke();
+    // Gold H2H zone
+    ctx.fillStyle='rgba(255,200,0,0.07)';ctx.beginPath();ctx.arc(h.x,h.y,h2hR,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='rgba(255,210,0,1.0)';ctx.lineWidth=2.5/_camZoom;
     ctx.beginPath();ctx.arc(h.x,h.y,h2hR,0,Math.PI*2);ctx.stroke();
-    ctx.setLineDash([]);
     if(_showHitboxes){
       // Cyan facing gate lines
       const faceRad=_tuning.faceDeg*Math.PI/180;
@@ -3081,16 +3079,7 @@ function _drawHeadCircle(snake,r){
   ctx.save();
   ctx.translate(h.x,h.y);
   ctx.rotate(angle);
-
-  // Head body
-  ctx.beginPath();ctx.arc(0,0,r,0,Math.PI*2);
-  ctx.fillStyle=snake.color;ctx.fill();
-  // Depth shadow
-  ctx.beginPath();ctx.arc(r*0.08,r*0.1,r*0.65,0,Math.PI*2);
-  ctx.fillStyle='rgba(0,0,0,0.25)';ctx.fill();
-  // Highlight
-  ctx.beginPath();ctx.arc(-r*0.2,-r*0.25,r*0.3,0,Math.PI*2);
-  ctx.fillStyle='rgba(255,255,255,0.25)';ctx.fill();
+  // Head circle drawn by body batch (bPts[0]) — only add eyes and boost flame here
 
   // Eyes — damnbruh.com exact ratios from tP() function
   const eR=r*0.38, eFwd=r*0.34, eSide=r*0.42;
