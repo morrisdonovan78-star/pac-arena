@@ -1268,18 +1268,23 @@ async function pkConnect(roomId,gameToken){
     // Guest input from guests → host
     _sio.on('ssin',(data)=>{
       if(!isHost||!data||!data.id||data.id===myPid)return;
-      // Auto-create snake if 'join' was missed or player rejoined after death
       if(SG&&!SG.over){
         const ex=SG.snakes.get(data.id);
         if(!ex||!ex.alive){
+          // Guard: a stale ssin arriving ~40ms after death must not revive the ghost.
+          // Dead players stop sending ssin client-side but 1-2 in-flight packets still arrive.
+          // Only re-create after 5s death cooldown (genuine reconnect/respawn).
+          if(ex&&!ex.alive){
+            const _dt=_snakeDeathTs.get(data.id)||0;
+            if(Date.now()-_dt<5000)return; // still in death window — ignore
+          }
           const m=_playerMeta.get(data.id)||{};
           addSnakePlayer(data.id,m.color||colorFromId(data.id),m.name||'SNAKE');
-          // Snap to actual reported position immediately so collision is correct from frame 1
           if(data.x!=null&&data.y!=null){
             const ns=SG.snakes.get(data.id);
             if(ns)ns.path[0]={x:data.x,y:data.y};
           }
-          _forceFoodSend=true; // ensure rejoining player gets food immediately
+          _forceFoodSend=true;
         }
       }
       const _su=SG.snakes.get(data.id); if(_su&&_su.usd==null)_su.usd=data.usd||0; // seed entry value once; winnings are host-owned after
@@ -2989,17 +2994,9 @@ function drawSnake(snake){
   }
   ctx.fill();
 
-  // Per-circle shadow — offset dark circle reveals each segment boundary (moneyslither 3D look)
-  ctx.fillStyle='rgba(0,0,0,0.22)';
-  ctx.beginPath();
-  for(let i=n-1;i>=1;i--){
-    const p=bPts[i];if(!p)continue;
-    ctx.moveTo(p.x+r*0.70,p.y+r*0.10);ctx.arc(p.x+r*0.08,p.y+r*0.10,r*0.62,0,Math.PI*2);
-  }
-  ctx.fill();
-
-  // Per-circle highlight — top-left gloss makes segments look 3D like moneyslither
-  ctx.fillStyle='rgba(255,255,255,0.20)';
+  // Per-circle highlight — top-left gloss (small enough to never overlap adjacent circles at 10px spacing)
+  // Shadow pass removed: at 10px spacing, r*0.62 shadow circles overlapped adjacent ones creating star artifacts
+  ctx.fillStyle='rgba(255,255,255,0.22)';
   ctx.beginPath();
   for(let i=n-1;i>=1;i--){
     const p=bPts[i];if(!p)continue;
