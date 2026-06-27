@@ -1302,19 +1302,11 @@ async function pkConnect(roomId,gameToken){
 
     _sio.on('elim',(data)=>{
       if(!SG||SG.over)return;
-      const km=_playerMeta.get(data.killerId)||{};
-      const vm=_playerMeta.get(data.id)||{};
-      const kName=(km.name||(data.killerId||'').slice(0,6)||'???').toUpperCase();
-      const vName=(vm.name||(data.id||'').slice(0,6)||'???').toUpperCase();
-      _killFeed.push({kName,kColor:km.color||'#FFD700',vName,vColor:vm.color||'#FF69B4',ts:Date.now()});
-      if(_killFeed.length>5)_killFeed.shift();
-      if(data.id===myPid){
-        endSnakeGame('eliminated',data.killerId);
-      }else{
-        // Mark dead only — food comes from host SS packet (spawnFoodFromSnake here causes duplicate trails)
-        const s=SG.snakes.get(data.id);
-        if(s&&s.alive)s.alive=false;
-      }
+      // Server is now authoritative for kills. Call full eliminateSnake so:
+      //   • HOST spawns gold kill food (spawnFoodFromSnake — guarded by _snakesSpawnedFood)
+      //   • kill feed shows on all clients
+      //   • dead player triggers endSnakeGame
+      eliminateSnake(data.id,data.killerId||null);
     });
 
     _sio.on('gameover',()=>{
@@ -1874,117 +1866,9 @@ function snakeTick(){
     if(h.x*h.x+h.y*h.y>=ARENA_R*ARENA_R) eliminateSnake(snake.id,null);
   });
 
-  // Head-vs-body collision. Grace period skips this for ~200ms after host migration fires,
-  // giving dual-host ss packets time to cross so the lower-pid host stays authoritative.
+  // Collision detection is server-side (ss-* rooms). Server emits 'elim' which calls
+  // eliminateSnake() on all clients. Grace counter kept for host migration bookkeeping.
   if(_hostGraceTicks>0){_hostGraceTicks--;}
-  else{
-  const alive=[...SG.snakes.values()].filter(s=>s.alive);
-  const _h2hDone=new Set(); // "id1:id2" canonical key (id1<id2 lexicographically)
-
-  // Body-circle H2H: fires when two head circles physically meet (dist < aR+bR).
-  // Uses actual HEAD position — no forward hurtbox projection — so snake SIZE does
-  // not give extra reach. Rear-arc dead zone still applies (front ±50° is safe).
-  for(let i=0;i<alive.length;i++){
-    const a=alive[i]; if(!a.alive)continue;
-    const ah=a.path[0]; if(!ah)continue;
-    const aR=sectionRadius(a);
-    for(let j=i+1;j<alive.length;j++){
-      const b=alive[j]; if(!b.alive)continue;
-      const bh=b.path[0]; if(!bh)continue;
-      const bR=sectionRadius(b);
-      const cpk=a.id<b.id?a.id+':'+b.id:b.id+':'+a.id;
-      if(_h2hDone.has(cpk))continue;
-      const h2hR=(aR+bR)*_tuning.h2hScale;
-      // A's head in B's rear H2H zone?
-      const dAxB=ah.x-bh.x,dAyB=ah.y-bh.y,d2AB=dAxB*dAxB+dAyB*dAyB;
-      const dotAB=dAxB*Math.cos(b.angle)+dAyB*Math.sin(b.angle);
-      const aInB=d2AB<h2hR*h2hR&&!(dotAB>0&&dotAB*dotAB>0.41*d2AB);
-      // B's head in A's rear H2H zone?
-      const dBxA=bh.x-ah.x,dByA=bh.y-ah.y,d2BA=dBxA*dBxA+dByA*dByA;
-      const dotBA=dBxA*Math.cos(a.angle)+dByA*Math.sin(a.angle);
-      const bInA=d2BA<h2hR*h2hR&&!(dotBA>0&&dotBA*dotBA>0.41*d2BA);
-      if(aInB||bInA){
-        _h2hDone.add(cpk);
-        if(aInB&&bInA){
-          const aWins=a.numSections>b.numSections||(a.numSections===b.numSections&&a.id>b.id);
-          if(aWins)eliminateSnake(b.id,a.id);else eliminateSnake(a.id,b.id);
-        }else if(aInB)eliminateSnake(a.id,b.id);else eliminateSnake(b.id,a.id);
-      }
-    }
-  }
-
-  for(let i=0;i<alive.length;i++){
-    const a=alive[i]; if(!a.alive)continue;
-    const ah=a.path[0];
-    const aR=sectionRadius(a);
-    for(let j=0;j<alive.length;j++){
-      if(!a.alive)break;
-      const b=alive[j]; if(!b.alive)continue;
-      const bR=sectionRadius(b);
-      const bPts=getBodyPoints(b);
-      const startK=(a.id===b.id)?SELF_SKIP:0;
-      const aPrev=a.path[1]||ah;
-      for(let k=startK;k<bPts.length;k++){
-        const bs=bPts[k]; if(!bs)continue;
-        const dx=ah.x-bs.x,dy=ah.y-bs.y;
-        const hit=dx*dx+dy*dy<(aR+bR)*(aR+bR)||(k===0&&b.id!==a.id&&segHitsCircle(aPrev,ah,bs,aR+bR));
-        if(hit){
-          if(k===0&&b.id!==a.id){
-            // Guarantee one resolution per pair per tick — covers both direct overlap AND
-            // swept-head (segHitsCircle) cases which previously let both fall through to eliminate.
-            const pk=a.id<b.id?a.id+':'+b.id:b.id+':'+a.id;
-            if(_h2hDone.has(pk)){break;} // already resolved from the other direction this tick
-            _h2hDone.add(pk);
-            const bh=b.path[0];
-            // Rear-arc rule using actual head positions (no hurtbox projection).
-            const dAx2=ah.x-bh.x,dAy2=ah.y-bh.y;
-            const dotA2=dAx2*Math.cos(b.angle)+dAy2*Math.sin(b.angle);
-            const d2A2=dAx2*dAx2+dAy2*dAy2;
-            const aInRear2=!(dotA2>0&&dotA2*dotA2>0.41*d2A2);
-            const dBx2=bh.x-ah.x,dBy2=bh.y-ah.y;
-            const dotB2=dBx2*Math.cos(a.angle)+dBy2*Math.sin(a.angle);
-            const d2B2=dBx2*dBx2+dBy2*dBy2;
-            const bInRear2=!(dotB2>0&&dotB2*dotB2>0.41*d2B2);
-            if(aInRear2&&bInRear2){
-              const aWins=a.numSections>b.numSections||(a.numSections===b.numSections&&a.id>b.id);
-              if(aWins)eliminateSnake(b.id,a.id);else eliminateSnake(a.id,b.id);
-            }else if(aInRear2){eliminateSnake(a.id,b.id);}
-            else if(bInRear2){eliminateSnake(b.id,a.id);}
-            // both in front dead zones — no H2H kill; body-cut handles it
-          } else if(a.id===b.id){
-            eliminateSnake(a.id,null); // self-collision
-          } else {
-            // A's head hit B's body (k>0, cross-snake body cut)
-            // Hurtbox = pupil-centered half-disk: fwd=aR*0.5 from head, radius=aR*0.5 (tip at nose)
-            const fwdDot=(bs.x-ah.x)*Math.cos(a.angle)+(bs.y-ah.y)*Math.sin(a.angle);
-            if(fwdDot<=0)continue; // body point is beside/behind A's head — side-clip, check next point
-            // Hurtbox: tunable zone at (hbFwd × aR) forward, radius (hbR × aR)
-            const _hbFwd=aR*_tuning.hbFwd,_hbR=aR*_tuning.hbR;
-            const _px=ah.x+Math.cos(a.angle)*_hbFwd,_py=ah.y+Math.sin(a.angle)*_hbFwd;
-            const _pdx=bs.x-_px,_pdy=bs.y-_py;
-            if(_pdx*_pdx+_pdy*_pdy>=(_hbR+bR)*(_hbR+bR))continue;
-            // _h2hDone prevents both hosts from each killing the other's snake on same tick
-            const pk=a.id<b.id?a.id+':'+b.id:b.id+':'+a.id;
-            if(_h2hDone.has(pk)){break;}
-            _h2hDone.add(pk);
-            // Check if B's head also overlaps A's body — dual-host stale-position phantom mutual hit
-            const bh2=b.path[0];const aPts2=getBodyPoints(a);let _mutual2=false;
-            for(let m=1;m<aPts2.length;m++){const ap2=aPts2[m];if(!ap2)continue;const mdx=bh2.x-ap2.x,mdy=bh2.y-ap2.y;if(mdx*mdx+mdy*mdy<(aR+bR)*(aR+bR)){_mutual2=true;break;}}
-            if(_mutual2){
-              // Mutual body cut: larger snake wins. Tie → lower id wins (canonical, same result on both hosts)
-              const aWinsBody=a.numSections>b.numSections||(a.numSections===b.numSections&&a.id>b.id);
-              if(!aWinsBody) eliminateSnake(a.id,b.id); else eliminateSnake(b.id,a.id);
-            } else {
-              eliminateSnake(a.id,b.id); // clear body cut: A's head in B's body → A dies
-            }
-          }
-          break;
-        }
-      }
-      if(!a.alive)break;
-    }
-  }
-  } // end else(_hostGraceTicks)
 
   // Food collection — head radius pickup (damnbruh.com style)
   const _nowEat=Date.now();
@@ -2224,7 +2108,7 @@ function startGuestLoop(){
     const _my0=SG.snakes.get(myPid);
     if(_my0&&_my0.alive&&_my0.path.length){
       const _h0=_my0.path[0];
-      _sio.emit('ssin',{id:myPid,angle:_my0.angle,circle:false,boost:false,x:Math.round(_h0.x),y:Math.round(_h0.y),usd:_myUsd});
+      _sio.emit('ssin',{id:myPid,angle:_my0.angle,circle:false,boost:false,x:Math.round(_h0.x),y:Math.round(_h0.y),usd:_myUsd,ns:_my0.numSections||26});
     }
   }
   _guestInputLoop=setInterval(()=>{
@@ -2235,7 +2119,7 @@ function startGuestLoop(){
     my.boost=canBoost;
     const h=my.path[0];
     // circle:true tells host to apply +MAX_TURN directly — avoids angleDiff(angle+π) float ambiguity
-    _sio.emit('ssin',{id:myPid,angle:targetAngleToMouse(my),circle:_autoCircle||undefined,boost:canBoost,x:Math.round(h.x),y:Math.round(h.y),usd:_myUsd});
+    _sio.emit('ssin',{id:myPid,angle:targetAngleToMouse(my),circle:_autoCircle||undefined,boost:canBoost,x:Math.round(h.x),y:Math.round(h.y),usd:_myUsd,ns:my.numSections||26});
   },40);
 }
 
