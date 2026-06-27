@@ -1815,7 +1815,9 @@ function snakeTick(){
     if(now-inp.ts>1500)return;
     const s=SG.snakes.get(pid);
     if(!s||!s.alive)return;
-    if(inp.circle) s.angle+=MAX_TURN; else applyTurn(s,inp.angle);
+    // Store target angle for smooth 60fps lerp in rafDraw instead of snapping at 30fps
+    if(inp.circle){ s._tAngle=null; s._inputCircle=true; }
+    else { s._tAngle=inp.angle; s._inputCircle=false; }
     s.boost=inp.boost;
     if(inp.x!=null&&inp.y!=null&&inp.fresh){
       inp.fresh=false;
@@ -2641,13 +2643,13 @@ function rafDraw(ts){
       s._predTs=ts;
       if(dt<=1)return;
       const frac=dt/TICK_MS;
-      // Smooth angle toward server target instead of snapping
-      if(s._tAngle!=null&&!s.botCircle){
+      // Smooth angle toward input/server target — lerp at 60fps instead of snapping at 30fps
+      if(s._inputCircle||s.botCircle){s.angle+=MAX_TURN*frac;}
+      else if(s._tAngle!=null){
         const _da=angleDiff(s._tAngle,s.angle);
         s.angle+=_da*Math.min(1,frac*0.5);
         if(Math.abs(_da)<0.005){s.angle=s._tAngle;s._tAngle=null;}
       }
-      if(s.botCircle)s.angle+=MAX_TURN*frac;
       const spd=(s.boost?BOOST_SPD:SNAKE_SPD)*frac;
       const h=s.path[0];
       s.path.unshift({x:h.x+Math.cos(s.angle)*spd,y:h.y+Math.sin(s.angle)*spd});

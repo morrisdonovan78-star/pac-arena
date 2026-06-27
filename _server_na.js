@@ -152,22 +152,64 @@ function ssThick(n) {
 function ssBodyR(thick) { return thick * SS_HB * SS_HBS; }
 function ssHeadR(thick) { return thick * SS_HB * SS_HBS * SS_HHBS; }
 
-const ssGames = new Map(); // lobbyId → { snakes: Map(pid→snake), tickInterval }
+const ssGames = new Map(); // lobbyId → { snakes: Map(pid→snake), tickInterval, tuning }
 
 function getSsGame(lid) {
   if (!ssGames.has(lid)) ssGames.set(lid, { snakes: new Map(), tickInterval: null, tuning: { hbs: SS_HBS, hhbs: SS_HHBS, faceDeg: 75, rule: 'smallest_wins' } });
   return ssGames.get(lid);
 }
 
+// Visual segment spacing matching client getBodyPoints — used for body-check skip calc
+function ssSegSpacing(ns) {
+  return (8 + Math.pow(ns * 5, 0.6) * 0.8) * 0.5;
+}
+
+// Update server snake state from HOST's authoritative ss broadcast.
+// segs[] = output of getBodyPoints() — HOST-simulated body positions, accurate.
+function ssUpdateFromHostSS(lid, snakesData, io) {
+  const sg = ssGames.get(lid);
+  if (!sg) return;
+  const seenIds = new Set();
+  snakesData.forEach(sd => {
+    if (!sd.id || !sd.segs || !sd.segs.length) return;
+    seenIds.add(sd.id);
+    let sn = sg.snakes.get(sd.id);
+    if (!sn) {
+      const ns = sd.ns || 26;
+      sn = { pid: sd.id, x: sd.segs[0][0], y: sd.segs[0][1],
+             angle: sd.angle || 0, boost: !!sd.boost,
+             ns, thick: ssThick(ns), segs: sd.segs, alive: true, lastTs: Date.now() };
+      sg.snakes.set(sd.id, sn);
+      if (!sg.tickInterval) {
+        sg.tickInterval = setInterval(() => ssTick(lid, io), TICK_MS);
+        console.log(`[${lid}] ss game loop started`);
+      }
+    } else {
+      if (sd.ns) { sn.ns = sd.ns; sn.thick = ssThick(sd.ns); }
+      sn.angle = sd.angle || sn.angle;
+      sn.boost = !!sd.boost;
+      sn.x = sd.segs[0][0]; sn.y = sd.segs[0][1];
+      sn.segs = sd.segs;
+      sn.alive = true;
+      sn.lastTs = Date.now();
+    }
+  });
+  // Snakes absent from this ss packet are dead (eliminated or haven't spawned)
+  sg.snakes.forEach((sn, id) => {
+    if (!seenIds.has(id)) { sn.alive = false; sn.segs = []; }
+  });
+}
+
+// ssin: only used for ghost-timer refresh and angle/boost updates — no dead-reckoning
 function ssHandleInput(lid, pid, d, io) {
   const sg = getSsGame(lid);
   let sn = sg.snakes.get(pid);
   if (!sn) {
-    if (d.x == null || d.y == null) return; // wait for position
+    // Fallback creation from ssin before first ss arrives
+    if (d.x == null || d.y == null) return;
     const ns = Math.max(8, d.ns || 26);
     sn = { pid, x: d.x, y: d.y, angle: d.angle || 0, boost: false,
-           path: [{ x: d.x, y: d.y }], ns, thick: ssThick(ns),
-           alive: true, lastTs: Date.now() };
+           ns, thick: ssThick(ns), segs: [], alive: true, lastTs: Date.now() };
     sg.snakes.set(pid, sn);
     if (!sg.tickInterval) {
       sg.tickInterval = setInterval(() => ssTick(lid, io), TICK_MS);
@@ -179,22 +221,15 @@ function ssHandleInput(lid, pid, d, io) {
   if (typeof d.angle === 'number') sn.angle = d.angle;
   sn.boost = !!d.boost;
   if (d.ns && d.ns > 0) { sn.ns = d.ns; sn.thick = ssThick(d.ns); }
-  // Snap head for large drifts only (>6 ticks), let dead-reckoning handle small diffs
-  if (d.x != null && d.y != null && sn.path.length) {
-    const dx = d.x - sn.path[0].x, dy = d.y - sn.path[0].y;
-    if (dx * dx + dy * dy > (SS_SPD * 6) * (SS_SPD * 6)) sn.path[0] = { x: d.x, y: d.y };
-  } else if (d.x != null && d.y != null) {
-    sn.path = [{ x: d.x, y: d.y }];
-    sn.x = d.x; sn.y = d.y;
-  }
+  // Keep head x,y fresh from ssin (40ms) between ss updates (33ms)
+  if (d.x != null && d.y != null) { sn.x = d.x; sn.y = d.y; }
 }
 
 function ssPlayerLeft(lid, pid, io) {
   const sg = ssGames.get(lid);
   if (!sg) return;
   const sn = sg.snakes.get(pid);
-  if (sn) { sn.alive = false; sn.path = []; }
-  // Prune fully-dead rooms after a delay so reconnects within grace can resume
+  if (sn) { sn.alive = false; sn.segs = []; }
   setTimeout(() => {
     const g = ssGames.get(lid);
     if (!g) return;
@@ -211,21 +246,13 @@ function ssTick(lid, io) {
   const sg = ssGames.get(lid);
   if (!sg) return;
   const now = Date.now();
-  // Advance all alive snake paths
+  // Ghost check only — no dead-reckoning; positions come from HOST ss packets
   sg.snakes.forEach(sn => {
-    if (!sn.alive || !sn.path.length) return;
-    // Ghost: no input for SS_GHOST_MS → eliminate
+    if (!sn.alive) return;
     if (now - sn.lastTs > SS_GHOST_MS) {
-      sn.alive = false; sn.path = [];
+      sn.alive = false; sn.segs = [];
       io.to(lid).emit('elim', { id: sn.pid, killerId: null });
-      return;
     }
-    const spd = sn.boost ? SS_BSPD : SS_SPD;
-    const h = sn.path[0];
-    sn.path.unshift({ x: h.x + Math.cos(sn.angle) * spd, y: h.y + Math.sin(sn.angle) * spd });
-    sn.x = sn.path[0].x; sn.y = sn.path[0].y;
-    const maxLen = sn.ns * SS_SEG_STEP + 150;
-    if (sn.path.length > maxLen) sn.path.length = maxLen;
   });
   ssCheckCollisions(sg, lid, io);
 }
@@ -233,27 +260,28 @@ function ssTick(lid, io) {
 function ssCheckCollisions(sg, lid, io) {
   const T = sg.tuning;
   const faceCos = Math.cos(T.faceDeg * Math.PI / 180);
-  const alive = [...sg.snakes.values()].filter(s => s.alive && s.path.length > 1);
+  // Only snakes with HOST-supplied segs are collision-ready (segs[0] = head, segs[1+] = body)
+  const alive = [...sg.snakes.values()].filter(s => s.alive && s.segs && s.segs.length > 1);
   const died = new Set();
 
-  // ── Head-to-head: both must face within faceDeg; winner per T.rule ──────────
+  // ── Head-to-head: both face within faceDeg; winner per T.rule ────────────────
   for (let i = 0; i < alive.length; i++) {
     const p = alive[i]; if (died.has(p.pid)) continue;
     const hR1 = p.thick * SS_HB * T.hbs * T.hhbs;
+    const px = p.segs[0][0], py = p.segs[0][1];
     for (let j = i + 1; j < alive.length; j++) {
       const q = alive[j]; if (died.has(q.pid)) continue;
       const hR2 = q.thick * SS_HB * T.hbs * T.hhbs;
+      const qx = q.segs[0][0], qy = q.segs[0][1];
       const rr = (hR1 + hR2) * T.hbs;
-      const dx = q.x - p.x, dy = q.y - p.y, d2 = dx * dx + dy * dy;
+      const dx = qx - px, dy = qy - py, d2 = dx * dx + dy * dy;
       if (d2 > rr * rr) continue;
-      // Facing gate — if either snake NOT aimed at the other, fall to body check
       if (d2 > 0) {
         const dh = Math.sqrt(d2);
         const pDot = Math.cos(p.angle) * (dx / dh) + Math.sin(p.angle) * (dy / dh);
         const qDot = Math.cos(q.angle) * (-dx / dh) + Math.sin(q.angle) * (-dy / dh);
         if (pDot < faceCos || qDot < faceCos) continue;
       }
-      // Resolve winner
       let loser, winner;
       if (T.rule === 'biggest_wins') {
         if      (p.ns > q.ns) { loser = q; winner = p; }
@@ -264,7 +292,7 @@ function ssCheckCollisions(sg, lid, io) {
         ssKill(p, q, lid, io); ssKill(q, p, lid, io); continue;
       } else if (T.rule === 'random') {
         loser = Math.random() < 0.5 ? p : q; winner = loser === p ? q : p;
-      } else { // smallest_wins (default)
+      } else { // smallest_wins
         if      (p.ns < q.ns) { loser = p; winner = q; }
         else if (q.ns < p.ns) { loser = q; winner = p; }
         else    { loser = Math.random() < 0.5 ? p : q; winner = loser === p ? q : p; }
@@ -274,20 +302,23 @@ function ssCheckCollisions(sg, lid, io) {
     }
   }
 
-  // ── Head-to-body: headR + bodyR, all angles ──────────────────────────────────
+  // ── Head-to-body: use HOST's authoritative segs for victim body ───────────────
+  // Segs are spaced ssSegSpacing(ns) apart. Skip the first ~8*SS_SPD px to avoid
+  // near-head false-kills (same intent as moneyslither's SS_SEG_STEP skip).
   for (let i = 0; i < alive.length; i++) {
     const pp = alive[i]; if (died.has(pp.pid)) continue;
     const hR = pp.thick * SS_HB * T.hbs * T.hhbs;
+    const hhx = pp.segs[0][0], hhy = pp.segs[0][1];
     for (let j = 0; j < alive.length; j++) {
       const qq = alive[j]; if (qq.pid === pp.pid || died.has(qq.pid)) continue;
       const bR = qq.thick * SS_HB * T.hbs;
       const crr2 = (hR + bR) * (hR + bR);
-      const lim = Math.min(qq.path.length, qq.ns * SS_SEG_STEP + 50);
-      for (let k = 2; k < lim / SS_SEG_STEP; k++) {
-        const idx = k * SS_SEG_STEP;
-        if (idx >= qq.path.length) break;
-        const seg = qq.path[idx];
-        const sdx = pp.x - seg.x, sdy = pp.y - seg.y;
+      // Skip segments near victim head: 8*SS_SPD px worth
+      const spacing = ssSegSpacing(qq.ns);
+      const skip = Math.max(2, Math.ceil(8 * SS_SPD / spacing));
+      for (let k = skip; k < qq.segs.length; k++) {
+        const seg = qq.segs[k];
+        const sdx = hhx - seg[0], sdy = hhy - seg[1];
         if (sdx * sdx + sdy * sdy <= crr2) {
           died.add(pp.pid);
           ssKill(pp, qq, lid, io);
@@ -301,8 +332,7 @@ function ssCheckCollisions(sg, lid, io) {
 
 function ssKill(victim, killer, lid, io) {
   if (!victim.alive) return;
-  victim.alive = false; victim.path = [];
-  // Server-authoritative kill — all clients call eliminateSnake on receipt
+  victim.alive = false; victim.segs = [];
   io.to(lid).emit('elim', { id: victim.pid, killerId: killer ? killer.pid : null });
 }
 
@@ -653,6 +683,10 @@ io.on('connection', socket => {
     if (lobbyId.startsWith('ss-') && d && d.kills) {
       d = Object.assign({}, d);
       delete d.kills;
+    }
+    // Feed HOST's authoritative body segs into server collision state
+    if (lobbyId.startsWith('ss-') && d && d.snakes) {
+      ssUpdateFromHostSS(lobbyId, d.snakes, io);
     }
     socket.to(lobbyId).emit('ss', d);
   });

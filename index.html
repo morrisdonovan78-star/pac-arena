@@ -3101,6 +3101,11 @@ function p1d(dx,dy){
   // Pressing into a wall previously killed all momentum; this fix preserves it.
   if(!isHost){
     if(!isWall(me.x, me.y, dx, dy)){ me.dx=dx; me.dy=dy; }
+    // Always mirror nx/ny for guests so the 100ms heartbeat can recover dropped
+    // direction packets. Without this, me.nx stays 0 (never set for guests) and
+    // the heartbeat always sends dx:0,dy:0 which the server rejects — leaving a
+    // player frozen near spawn whenever the initial 'in' packet is dropped.
+    me.nx=dx; me.ny=dy;
     // Only send when direction changed — prevents socket flooding from key-repeat
     // events and rapid alternating presses tripping out the renderer.
     if(dx!==_lastSentDx||dy!==_lastSentDy){
@@ -3404,18 +3409,18 @@ function onKey(e){
   }
   if(!G||G.over) return;
   if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA') return;
-  // Arrow keys — movement
+  // Arrow keys + WASD — movement
   // Skip browser key-repeat: direction is set once per physical press; the server
   // tick loop handles continuous movement. Repeat events flood the socket and
   // cause the character to visually trip out when keys are spammed.
-  if(e.repeat&&(e.key==='ArrowUp'||e.key==='ArrowDown'||e.key==='ArrowLeft'||e.key==='ArrowRight')){
+  if(e.repeat&&(e.key==='ArrowUp'||e.key==='ArrowDown'||e.key==='ArrowLeft'||e.key==='ArrowRight'||e.key==='w'||e.key==='W'||e.key==='a'||e.key==='A'||e.key==='s'||e.key==='S'||e.key==='d'||e.key==='D')){
     e.preventDefault(); return;
   }
   switch(e.key){
-    case'ArrowUp':    p1d(0,-1);  e.preventDefault(); break;
-    case'ArrowDown':  p1d(0,1);   e.preventDefault(); break;
-    case'ArrowLeft':  p1d(-1,0);  e.preventDefault(); break;
-    case'ArrowRight': p1d(1,0);   e.preventDefault(); break;
+    case'ArrowUp':case'w':case'W':    p1d(0,-1);  e.preventDefault(); break;
+    case'ArrowDown':case's':case'S':  p1d(0,1);   e.preventDefault(); break;
+    case'ArrowLeft':case'a':case'A':  p1d(-1,0);  e.preventDefault(); break;
+    case'ArrowRight':case'd':case'D': p1d(1,0);   e.preventDefault(); break;
     // Powerup activation
     case'v': case'V': usePow('cherry');  e.preventDefault(); break;
     case'c': case'C': usePow('pepper');  e.preventDefault(); break;
