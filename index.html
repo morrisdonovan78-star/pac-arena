@@ -1548,6 +1548,9 @@ async function pkConnect(roomId, gameToken){
       _initRecv=true;
       if(_initGuard){ clearTimeout(_initGuard); _initGuard=null; }
       if(!data) return;
+      // Guard: if the join flow was aborted (pkConnect timed out / errored) but the socket
+      // eventually connected anyway, don't launch the game — player is already on scr-lobby.
+      if(!_joiningLobby && !rafHandle) return;
       try{
         (data.players||[]).forEach(h=>_playerMeta.set(h.id,{
           color:h.color||colorFromId(h.id), hat:'none', trail:'none', eyes:'dot', aura:'none',
@@ -1559,6 +1562,7 @@ async function pkConnect(roomId, gameToken){
           if(data.maze&&G){ G.maze=data.maze; _mazeDirty=true; }
           return;
         }
+        _pendingState=null; // discard any stale 's' packets from a previous session
         if(data.maze) _rosterMaze=data.maze;
         // Filter out dead/spectating players so their bodies don't ghost into G.players
         const allPlayers=(data.players||[]).filter(h=>h.alive!==false).map((h,i)=>({
@@ -1645,6 +1649,9 @@ async function pkConnect(roomId, gameToken){
       ablyChannel=null;
       _joiningLobby=false;
       _lobbyIsPaid=false;
+      // Token was explicitly rejected by server — clear escrow flag so the next join attempt
+      // goes through the full payment flow rather than looping with the dead token.
+      ST.hasEscrow=false; ST.entryToken=null;
       setTimeout(()=>{ try{ go('scr-lobby'); }catch(_){} },3000);
     });
 
@@ -1935,6 +1942,16 @@ async function joinLobby(usd){
   ST.wagerSol=usd>0?usdToSol(usd):0;
   _lobbyIsPaid=(usd>0);
   document.getElementById('mm-log').innerHTML='';
+  // If the player already paid for this lobby type (e.g. pkConnect failed after payment),
+  // reuse the existing game token instead of charging them again.
+  if(usd>0 && ST.hasEscrow && ST.entryToken){
+    const _rr=usd===1?'paid-lobby-1':'paid-lobby-25';
+    go('scr-mm');
+    document.getElementById('mm-sub').textContent='Wager already locked · Reconnecting…';
+    lg('mm-log','Resuming existing wager — no new charge','lhi');
+    pkConnect(_rr, ST.entryToken);
+    return;
+  }
   ST.hasEscrow=false;
 
   // Free lobby — no transaction, permanent room
@@ -4699,7 +4716,11 @@ function draw(){
       if(ddx>C/2) ddx-=C; else if(ddx<-C/2) ddx+=C;
       if(ddy>R/2) ddy-=R; else if(ddy<-R/2) ddy+=R;
       if(Math.abs(ddx)>5||Math.abs(ddy)>5){ p.renderX=p.x; p.renderY=p.y; } // teleport snap (real disconnects/respawns only)
-      else if(!_cm){ p.renderX=((p.renderX+ddx*0.22)+C)%C; p.renderY=((p.renderY+ddy*0.22)+R)%R; } // stopped: ease to grid
+      else if(!_cm){
+        // Snap immediately if render overshot into the wall direction; slow ease otherwise
+        if((p.dx!==0||p.dy!==0)&&(ddx*p.dx<0||ddy*p.dy<0)){ p.renderX=p.x; p.renderY=p.y; }
+        else{ p.renderX=((p.renderX+ddx*0.22)+C)%C; p.renderY=((p.renderY+ddy*0.22)+R)%R; }
+      } // stopped: ease to grid
       else{
         // Running: only catch up if BEHIND in movement dir — never pull back when ahead
         if(ddx*p.dx>0.25) p.renderX=((p.renderX+ddx*0.12)+C)%C;
@@ -4722,7 +4743,11 @@ function draw(){
       if(ddy>R/2) ddy-=R; else if(ddy<-R/2) ddy+=R;
       const gap=Math.abs(ddx)+Math.abs(ddy);
       if(gap>5){ p.renderX=p.x; p.renderY=p.y; } // teleport snap
-      else if(!_cm){ p.renderX=((p.renderX+ddx*0.22)+C)%C; p.renderY=((p.renderY+ddy*0.22)+R)%R; } // stopped: ease to grid
+      else if(!_cm){
+        // Snap immediately if render overshot into the wall direction; slow ease otherwise
+        if((p.dx!==0||p.dy!==0)&&(ddx*p.dx<0||ddy*p.dy<0)){ p.renderX=p.x; p.renderY=p.y; }
+        else{ p.renderX=((p.renderX+ddx*0.22)+C)%C; p.renderY=((p.renderY+ddy*0.22)+R)%R; }
+      } // stopped: ease to grid
       else{
         if(ddx*p.dx>0.25) p.renderX=((p.renderX+ddx*0.12)+C)%C;
         if(ddy*p.dy>0.25) p.renderY=((p.renderY+ddy*0.12)+R)%R;

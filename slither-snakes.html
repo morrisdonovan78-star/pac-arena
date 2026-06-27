@@ -2239,6 +2239,8 @@ function launchSnakeGame(){
 
   if(isHost)startHostLoop();
   else startGuestLoop();
+  // Push owner's saved tuning to server on every game start so server doesn't reset to defaults
+  if(isHost&&localStorage.getItem('ss_owner')==='1'&&_sio)_sio.emit('ss-tune',_tuning);
   rafHandle=requestAnimationFrame(rafDraw);
   if(_hostWatch)clearInterval(_hostWatch);
   _hostWatch=setInterval(_checkHost,700); // watch for host departure → migrate

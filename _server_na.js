@@ -700,7 +700,7 @@ io.on('connection', socket => {
   });
   socket.on('ss-tune', (d) => {
     if (!lobbyId.startsWith('ss-') || !d) return;
-    const sg = ssGames.get(lobbyId); if (!sg) return;
+    const sg = getSsGame(lobbyId); // auto-create so pre-game ss-tune from owner is not dropped
     if (typeof d.hbs === 'number') sg.tuning.hbs = Math.max(0.5, Math.min(3.0, d.hbs));
     if (typeof d.hhbs === 'number') sg.tuning.hhbs = Math.max(1.0, Math.min(3.0, d.hhbs));
     if (typeof d.faceDeg === 'number') sg.tuning.faceDeg = Math.max(0, Math.min(120, d.faceDeg));
