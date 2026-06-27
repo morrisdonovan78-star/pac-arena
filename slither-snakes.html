@@ -1992,16 +1992,17 @@ function eliminateSnake(id,killerId){
     _recentKillPairs.set(pk,now+2000);
   }
   snake.alive=false;
-  spawnFoodFromSnake(snake); // drops gold SOL pellets along the body; _forceFoodSend=true inside
+  if(isHost)spawnFoodFromSnake(snake); // HOST only — food list is synced to guests via ss food packets
   snake.path=[]; // vanish immediately
   const km=_playerMeta.get(killerId)||{};
   const vm=_playerMeta.get(id)||{};
   _killFeed.push({kName:(km.name||'ARENA').slice(0,10),kColor:km.color||'#FFD700',vName:(vm.name||'SNAKE').slice(0,10),vColor:vm.color||'#FF69B4',ts:Date.now()});
   if(_killFeed.length>5)_killFeed.shift();
   _guestInputs.delete(id); // drop stale inputs so a dead snake never keeps circling on host
-  // Queue kill event so it goes out in the next ss state packet
-  _pendingKills.push({id,killerId:killerId||null});
-  // Broadcast kill immediately so guests see body vanish at once — don't wait for next snakeTick
+  _pendingKills.push({id,killerId:killerId||null}); // kept for practice mode / direct relay
+  // HOST: emit ss-kill directly so server broadcasts elim to all guests.
+  // Server strips kills from the ss relay, so this dedicated event is the only way guests learn about kills.
+  if(isHost&&ablyChannel)ablyChannel.publish('ss-kill',{id,killerId:killerId||null},()=>{});
   if(isHost&&ablyChannel&&!_bgSuppressSend)sendSnakeState();
   if(id===myPid)endSnakeGame('eliminated',killerId);
 }
@@ -2790,60 +2791,8 @@ function rafDraw(ts){
     _myEyeAngle=Math.atan2(_mwy-_ph.y,_mwx-_ph.x)-_pS.angle;
   }else{_myEyeAngle=null;}}
   if(SG)SG.snakes.forEach(s=>{if(s.alive&&s.path.length>1)drawSnake(s);});
-  // Always draw H2H kill zone on own snake — moneyslither formula
-  {const _mS=SG&&SG.snakes.get(myPid);
-  if(_mS&&_mS.alive&&_mS.path.length){
-    const _mTk=msThick(_mS),_mHR=_mTk*SS_HB*_tuning.hbs*_tuning.hhbs;
-    const _mH2H=(_mHR+_mHR)*_tuning.hbs,_mh=_mS.path[0]; // (headR+headR)*hbs = trigger vs equal opponent
-    ctx.save();
-    ctx.strokeStyle='rgba(255,210,0,0.55)';ctx.lineWidth=1.8/_camZoom;
-    ctx.setLineDash([5/_camZoom,4/_camZoom]);
-    ctx.beginPath();ctx.arc(_mh.x,_mh.y,_mH2H,0,Math.PI*2);ctx.stroke();
-    ctx.setLineDash([]);ctx.restore();
-  }}
-
-  // H key: moneyslither-accurate hitbox overlay — mirrors exact server ssCheckCollisions logic
-  if(_showHitboxes&&SG){
-    SG.snakes.forEach(s=>{
-      if(!s.alive||!s.path.length)return;
-      const thick=msThick(s);
-      const bodyR=thick*SS_HB*_tuning.hbs;
-      const headR=bodyR*_tuning.hhbs;
-      const h2hR =(headR+headR)*_tuning.hbs; // trigger vs equal-size opponent
-      const h=s.path[0];
-      const segs=getBodyPoints(s); // exactly what HOST sends as segs in ss packet
-      // Skip first N segs near head (mirrors server: 8*SS_SPD px of clearance)
-      const segSp=sectionRadius(s)*SEGMENT_SPACING;
-      const skip=Math.max(2,Math.ceil(8*SNAKE_SPD/segSp));
-
-      // Yellow body hitbox circles — at every body seg the server actually checks
-      ctx.lineWidth=1.5/_camZoom;
-      for(let k=skip;k<segs.length;k++){
-        const bp=segs[k];
-        ctx.strokeStyle='rgba(255,255,0,0.65)';
-        ctx.beginPath();ctx.arc(bp.x,bp.y,bodyR,0,Math.PI*2);ctx.stroke();
-      }
-
-      // Gold H2H trigger ring — SOLID + filled alpha so the exact kill zone is obvious
-      ctx.save();
-      ctx.fillStyle='rgba(255,200,0,0.07)';
-      ctx.strokeStyle='rgba(255,200,0,1.0)';ctx.lineWidth=2.5/_camZoom;
-      ctx.beginPath();ctx.arc(h.x,h.y,h2hR,0,Math.PI*2);ctx.fill();ctx.stroke();
-      ctx.restore();
-
-      // Cyan facing gate lines — full reach to H2H ring edge
-      const faceRad=_tuning.faceDeg*Math.PI/180;
-      ctx.save();ctx.strokeStyle='rgba(0,220,255,0.9)';ctx.lineWidth=2/_camZoom;ctx.setLineDash([5/_camZoom,4/_camZoom]);
-      ctx.beginPath();
-      ctx.moveTo(h.x,h.y);ctx.lineTo(h.x+Math.cos(s.angle-faceRad)*h2hR,h.y+Math.sin(s.angle-faceRad)*h2hR);
-      ctx.moveTo(h.x,h.y);ctx.lineTo(h.x+Math.cos(s.angle+faceRad)*h2hR,h.y+Math.sin(s.angle+faceRad)*h2hR);
-      ctx.stroke();ctx.setLineDash([]);ctx.restore();
-
-      // Red head hitbox ring
-      ctx.strokeStyle='rgba(255,40,40,1.0)';ctx.lineWidth=2.5/_camZoom;
-      ctx.beginPath();ctx.arc(h.x,h.y,headR,0,Math.PI*2);ctx.stroke();
-    });
-  }
+  // Hitbox overlay (H key) and own-snake H2H ring are now drawn inside drawSnake()
+  // at body z-level, so circles end exactly where the snake body ends.
 
   if(SG)drawMoneyFx();
   ctx.restore();
@@ -3012,9 +2961,59 @@ function drawSnake(snake){
   }
   ctx.fill();
 
+  // Hitbox overlay (H key) — drawn here so circles share z-level with body and
+  // can never visually extend past the snake tail (same bPts array, same indices)
+  if(_showHitboxes){
+    const thick=msThick(snake);
+    const bR=thick*SS_HB*_tuning.hbs;
+    const segSp=r*SEGMENT_SPACING;
+    const skip=Math.max(2,Math.ceil(8*SNAKE_SPD/segSp));
+    ctx.lineWidth=1.5/_camZoom;
+    ctx.strokeStyle='rgba(255,255,0,0.70)';
+    ctx.beginPath();
+    for(let k=skip;k<bPts.length;k++){
+      const bp=bPts[k];
+      ctx.moveTo(bp.x+bR,bp.y);ctx.arc(bp.x,bp.y,bR,0,Math.PI*2);
+    }
+    ctx.stroke();
+  }
+
   // Head — same radius as body, with eyes/tongue/boost flame
   const h=bPts[0]; if(!h)return;
   _drawHeadCircle(snake,r);
+
+  // Head hitbox + H2H zone — always-on for own snake; H-key for all snakes
+  if(_showHitboxes||snake.id===myPid){
+    const thick=msThick(snake);
+    const bR=thick*SS_HB*_tuning.hbs;
+    const hR=bR*_tuning.hhbs;
+    const h2hR=hR*2*_tuning.hbs;
+    ctx.save();
+    if(_showHitboxes){
+      // Red head hitbox ring
+      ctx.strokeStyle='rgba(255,40,40,0.95)';ctx.lineWidth=2/_camZoom;
+      ctx.beginPath();ctx.arc(h.x,h.y,hR,0,Math.PI*2);ctx.stroke();
+    }
+    // Gold H2H kill-zone ring (always on own snake; H-key for all)
+    const ownAlpha=snake.id===myPid&&!_showHitboxes?0.50:1.0;
+    ctx.strokeStyle=`rgba(255,210,0,${ownAlpha})`;
+    ctx.lineWidth=(_showHitboxes?2.5:1.8)/_camZoom;
+    if(!_showHitboxes){ctx.setLineDash([5/_camZoom,4/_camZoom]);}
+    if(_showHitboxes){ctx.fillStyle='rgba(255,200,0,0.07)';ctx.beginPath();ctx.arc(h.x,h.y,h2hR,0,Math.PI*2);ctx.fill();}
+    ctx.beginPath();ctx.arc(h.x,h.y,h2hR,0,Math.PI*2);ctx.stroke();
+    ctx.setLineDash([]);
+    if(_showHitboxes){
+      // Cyan facing gate lines
+      const faceRad=_tuning.faceDeg*Math.PI/180;
+      ctx.strokeStyle='rgba(0,220,255,0.9)';ctx.lineWidth=1.5/_camZoom;ctx.setLineDash([5/_camZoom,4/_camZoom]);
+      ctx.beginPath();
+      ctx.moveTo(h.x,h.y);ctx.lineTo(h.x+Math.cos(snake.angle-faceRad)*h2hR,h.y+Math.sin(snake.angle-faceRad)*h2hR);
+      ctx.moveTo(h.x,h.y);ctx.lineTo(h.x+Math.cos(snake.angle+faceRad)*h2hR,h.y+Math.sin(snake.angle+faceRad)*h2hR);
+      ctx.stroke();ctx.setLineDash([]);
+    }
+    ctx.restore();
+  }
+
   _drawNameTag(snake,h,r*2);
 }
 

@@ -293,9 +293,9 @@ function ssCheckCollisions(sg, lid, io) {
         ssKill(p, q, lid, io); ssKill(q, p, lid, io); continue;
       } else if (T.rule === 'random') {
         loser = Math.random() < 0.5 ? p : q; winner = loser === p ? q : p;
-      } else { // smallest_wins
-        if      (p.ns < q.ns) { loser = p; winner = q; }
-        else if (q.ns < p.ns) { loser = q; winner = p; }
+      } else { // smallest_wins: fewer sections = wins
+        if      (p.ns < q.ns) { loser = q; winner = p; }
+        else if (q.ns < p.ns) { loser = p; winner = q; }
         else    { loser = Math.random() < 0.5 ? p : q; winner = loser === p ? q : p; }
       }
       died.add(loser.pid);
@@ -706,6 +706,20 @@ io.on('connection', socket => {
     if (typeof d.faceDeg === 'number') sg.tuning.faceDeg = Math.max(0, Math.min(120, d.faceDeg));
     if (['smallest_wins','biggest_wins','both_die','random'].includes(d.rule)) sg.tuning.rule = d.rule;
     console.log(`[${lobbyId}] ss-tune: hbs=${sg.tuning.hbs} hhbs=${sg.tuning.hhbs} faceDeg=${sg.tuning.faceDeg} rule=${sg.tuning.rule}`);
+  });
+
+  // HOST-originated kill — validate server-side, then broadcast elim to everyone.
+  // This bypasses the ss.kills strip (server strips kills from ss relay to own collision
+  // authority). ss-kill goes directly from HOST → server → elim to all guests.
+  socket.on('ss-kill', (d) => {
+    if (!lobbyId.startsWith('ss-') || !d || !d.id) return;
+    const sg = ssGames.get(lobbyId);
+    if (!sg) return;
+    const victim = sg.snakes.get(d.id);
+    if (victim && victim.alive) {
+      const killer = d.killerId ? sg.snakes.get(d.killerId) : null;
+      ssKill(victim, killer, lobbyId, io);
+    }
   });
 
   // ── Disconnect ────────────────────────────────────────────────
