@@ -318,9 +318,9 @@ function ssCheckCollisions(sg, lid, io) {
       const qq = alive[j]; if (qq.pid === pp.pid || died.has(qq.pid)) continue;
       const bR = qq.thick * SS_HB * T.hbs;
       const crr2 = (hR + bR) * (hR + bR);
-      // Skip ~80px from victim head (moneyslither path[8] equivalent at ~10px/frame × 8 frames)
+      // Skip 40px from victim head (4 segs at 10px fixed spacing)
       const spacing = ssSegSpacing(qq.ns);
-      const skip = Math.max(2, Math.ceil(80 / spacing));
+      const skip = Math.max(2, Math.ceil(40 / spacing));
       for (let k = skip; k < qq.segs.length; k++) {
         const seg = qq.segs[k];
         const sdx = hhx - seg[0], sdy = hhy - seg[1];

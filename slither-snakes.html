@@ -392,7 +392,8 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
   </div>
 
   <!-- Live preview canvas -->
-  <canvas id="tun-preview" width="244" height="96" style="width:100%;border-radius:6px;background:#050510;border:1px solid #1a1a3a;margin-bottom:12px;display:block;"></canvas>
+  <canvas id="tun-preview" width="244" height="96" style="width:100%;border-radius:6px;background:#050510;border:1px solid #1a1a3a;margin-bottom:4px;display:block;"></canvas>
+  <div id="tun-stats"></div>
 
   <div style="margin-bottom:11px;">
     <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="color:#aaa;">Hitbox Scale</span><span id="tun-hbs-val" style="color:#FFD700;min-width:42px;text-align:right;">1.07×</span></div>
@@ -1890,11 +1891,10 @@ function snakeTick(){
     if(h.x*h.x+h.y*h.y>=ARENA_R*ARENA_R) eliminateSnake(snake.id,null);
   });
 
-  // Collision detection is server-side (ss-* rooms). Server emits 'elim' which calls
-  // eliminateSnake() on all clients. Grace counter kept for host migration bookkeeping.
   if(_hostGraceTicks>0){_hostGraceTicks--;}
-  // Practice mode: no server connection, run collision locally
-  else if(_isPractice)_practiceCheckCollisions();
+  // HOST runs collision locally (best position quality, no RTT lag). Server is backup/anti-cheat.
+  // Practice mode: no server connection, also runs locally.
+  else if(isHost||_isPractice)_practiceCheckCollisions();
 
   // Food collection — head radius pickup (damnbruh.com style)
   const _nowEat=Date.now();
@@ -1968,7 +1968,7 @@ function _practiceCheckCollisions(){
       const bR=msThick(qq)*SS_HB*T.hbs;
       const crr=(hHR+bR),crr2=crr*crr;
       const segs=getBodyPoints(qq);
-      const skip=Math.max(2,Math.ceil(80/10)); // skip 80px = 8 segs at fixed 10px spacing
+      const skip=Math.max(2,Math.ceil(40/10)); // skip 40px = 4 segs from head (enough to avoid self-hit)
       for(let k=skip;k<segs.length;k++){
         const seg=segs[k];
         const sdx=hx-seg.x,sdy=hy-seg.y;
@@ -2183,7 +2183,7 @@ function applyRemoteState(d){
             if(!wouldReverse){
               const _dx=serverHead.x-s.path[0].x,_dy=serverHead.y-s.path[0].y;
               if(_dx*_dx+_dy*_dy>SNAKE_SPD*SNAKE_SPD*64){s.path[0]=serverHead;} // large gap: snap
-              else{s.path[0]={x:s.path[0].x+_dx*0.35,y:s.path[0].y+_dy*0.35};} // small gap: lerp
+              else{s.path[0]={x:s.path[0].x+_dx*0.8,y:s.path[0].y+_dy*0.8};} // fast correction — eliminates spectator jitter
             }
           }
         }
@@ -2369,6 +2369,20 @@ function _drawTuningPreview(){
   cx.fillStyle='rgba(255,210,0,0.95)';cx.fillText('H2H: '+Math.round(gapW)+'px',CX,9);
   cx.fillStyle='rgba(0,220,255,0.9)';cx.fillText('GATE \xb1'+_tuning.faceDeg+'\xb0',CX,H-3);
   cx.textAlign='left';
+
+  // Numeric stats table
+  const _sd=document.getElementById('tun-stats');
+  if(_sd){
+    const _bR=tk*SS_HB*_tuning.hbs,_hR=_bR*_tuning.hhbs,_h2h=(_hR+_hR)*_tuning.hbs;
+    _sd.innerHTML='<div style="display:grid;grid-template-columns:1fr auto;gap:1px 8px;font-size:9px;padding:5px 2px 6px;border-top:1px solid #1a1a3a;color:#777;">'
+      +'<span>Body diameter</span><span style="color:#FF69B4">'+(tk*2).toFixed(1)+'px</span>'
+      +'<span>Body hitbox r</span><span style="color:#FFD700">'+_bR.toFixed(1)+'px</span>'
+      +'<span>Head hitbox r</span><span style="color:#FF5555">'+_hR.toFixed(1)+'px</span>'
+      +'<span>H2H trigger</span><span style="color:#FFD700">'+_h2h.toFixed(1)+'px</span>'
+      +'<span>H2B skip</span><span style="color:#00FFFF">40px / 4 segs</span>'
+      +'<span>Spacing</span><span style="color:#00FFFF">10px fixed</span>'
+      +'</div>';
+  }
 }
 function launchPractice(){
   if(localStorage.getItem('ss_owner')!=='1')return;
@@ -2956,28 +2970,19 @@ function drawSnake(snake){
   const n=bPts.length;
   const now=performance.now();
 
-  // Rainbow boost glow — single batched stroke (one canvas call instead of n)
-  if(snake.boost){
-    ctx.save();
-    ctx.lineWidth=r*0.55;
-    ctx.strokeStyle=`hsla(${(now*0.18)%360},100%,65%,0.60)`;
-    ctx.beginPath();
-    for(let i=n-1;i>=0;i--){
-      const p=bPts[i];if(!p)continue;
-      ctx.moveTo(p.x+r*1.18,p.y);ctx.arc(p.x,p.y,r*1.18,0,Math.PI*2);
-    }
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  // Draw tail → head: batch all body circles in ONE fill call for performance
-  ctx.fillStyle=col;
+  // Smooth tube body — moneyslither style polyline stroke (no visible segment rings)
+  ctx.save();
+  ctx.lineCap='round';ctx.lineJoin='round';
   ctx.beginPath();
-  for(let i=n-1;i>=1;i--){
-    const p=bPts[i];if(!p)continue;
-    ctx.moveTo(p.x+r,p.y);ctx.arc(p.x,p.y,r,0,Math.PI*2);
-  }
-  ctx.fill();
+  ctx.moveTo(bPts[n-1].x,bPts[n-1].y);
+  for(let i=n-2;i>=0;i--){const p=bPts[i];ctx.lineTo(p.x,p.y);}
+  // Dark border pass (depth outline)
+  ctx.strokeStyle='rgba(0,0,0,0.42)';ctx.lineWidth=r*2+2.5/_camZoom;ctx.stroke();
+  // Boost rainbow glow pass
+  if(snake.boost){ctx.strokeStyle=`hsla(${(now*0.18)%360},100%,65%,0.55)`;ctx.lineWidth=r*2+10/_camZoom;ctx.stroke();}
+  // Main color pass
+  ctx.strokeStyle=col;ctx.lineWidth=r*2;ctx.stroke();
+  ctx.restore();
 
   // Hitbox overlay (H key) — drawn here so circles share z-level with body and
   // can never visually extend past the snake tail (same bPts array, same indices)
