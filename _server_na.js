@@ -490,11 +490,11 @@ function ssCheckCollisions(sg, lid, io) {
   for (let i = 0; i < alive.length; i++) {
     const p = alive[i]; if (died.has(p.pid)) continue;
     const px = p.segs[0][0], py = p.segs[0][1];
-    const hR1 = ssSectionRadius(p.ns) * SS_HB * SS_HBS * SS_HHBS;
+    const hR1 = ssSectionRadius(p.ns) * SS_HB * T.hbs * T.hhbs;
     for (let j = i + 1; j < alive.length; j++) {
       const q = alive[j]; if (died.has(q.pid)) continue;
       const qx = q.segs[0][0], qy = q.segs[0][1];
-      const hR2 = ssSectionRadius(q.ns) * SS_HB * SS_HBS * SS_HHBS;
+      const hR2 = ssSectionRadius(q.ns) * SS_HB * T.hbs * T.hhbs;
       const rr = (hR1 + hR2) * T.hbs;
       const dx = qx - px, dy = qy - py, d2 = dx * dx + dy * dy;
       if (d2 > rr * rr) continue;

@@ -2442,13 +2442,16 @@ function _drawTuningPreview(){
   const _sd=document.getElementById('tun-stats');
   if(_sd){
     const _bR=dR*SS_HB*_tuning.hbs,_hR=_bR*_tuning.hhbs,_h2h=(_hR+_hR)*_tuning.hbs;
+    const _sp=dR*SEGMENT_SPACING;
+    const _skip=Math.max(2,Math.ceil(40/_sp));
+    const _h2b=(_hR+_bR).toFixed(1);
     _sd.innerHTML='<div style="display:grid;grid-template-columns:1fr auto;gap:1px 8px;font-size:9px;padding:5px 2px 6px;border-top:1px solid #1a1a3a;color:#777;">'
       +'<span>Body diameter</span><span style="color:#FF69B4">'+(dR*2).toFixed(1)+'px</span>'
       +'<span>Body hitbox r</span><span style="color:#FFD700">'+_bR.toFixed(1)+'px</span>'
       +'<span>Head hitbox r</span><span style="color:#FF5555">'+_hR.toFixed(1)+'px</span>'
       +'<span>H2H trigger</span><span style="color:#FFD700">'+_h2h.toFixed(1)+'px</span>'
-      +'<span>H2B skip</span><span style="color:#00FFFF">4 segs (~52px)</span>'
-      +'<span>Spacing</span><span style="color:#00FFFF">r×0.5 damnbruh</span>'
+      +'<span>H2B kill zone</span><span style="color:#FF9900">'+_h2b+'px</span>'
+      +'<span>H2B skip</span><span style="color:#00FFFF">'+_skip+' segs (~'+(_skip*_sp).toFixed(0)+'px)</span>'
       +'</div>';
   }
 }
