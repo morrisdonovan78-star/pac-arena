@@ -541,6 +541,8 @@ let _guestInputLoop=null;
 let _foodSendCounter=0;
 let _forceFoodSend=false;
 let _firstRemoteSync=false;
+const _ssBuf=new Map(); // id → [{x,y,angle,ns,boost,score,usd,t}] — server snapshot buffer
+const _INTERP_DELAY=100; // ms: render this far behind the latest snapshot for smooth motion
 let _localDead=false;
 let _autoCircle=false; // toggle: snake auto-circles until toggled off (E key / L3 button)
 let _lastRoomId=null;
@@ -1324,11 +1326,67 @@ async function pkConnect(roomId,gameToken){
 
     _sio.on('elim',(data)=>{
       if(!SG||SG.over)return;
-      // Server is now authoritative for kills. Call full eliminateSnake so:
-      //   • HOST spawns gold kill food (spawnFoodFromSnake — guarded by _snakesSpawnedFood)
-      //   • kill feed shows on all clients
-      //   • dead player triggers endSnakeGame
       eliminateSnake(data.id,data.killerId||null);
+    });
+
+    // Server-authoritative state: head pos + angle per tick, no body segs
+    _sio.on('ss-state',d=>{
+      if(!SG||SG.over)return;
+      // Sync food (sent every ~250ms or when changed)
+      if(d.food){
+        SG.food=d.food.map(f=>({x:f[0],y:f[1],ci:f[2]||0,size:f[3]||6,k:f[4]||0,w:f[5]?f[5]/1e6:0}));
+      }
+      const pktT=d.t||Date.now();
+      const seen=new Set();
+      (d.snakes||[]).forEach(sd=>{
+        seen.add(sd.id);
+        // Buffer snapshots (keep ~400ms worth at 30fps)
+        if(!_ssBuf.has(sd.id))_ssBuf.set(sd.id,[]);
+        const buf=_ssBuf.get(sd.id);
+        buf.push({x:sd.x,y:sd.y,angle:sd.angle,ns:sd.ns,boost:sd.boost,score:sd.score||0,usd:sd.usd||0,t:pktT});
+        while(buf.length>12)buf.shift();
+        _playerMeta.set(sd.id,{color:sd.color,name:sd.name});
+        // Ensure local snake object exists
+        if(!SG.snakes.has(sd.id)){
+          const _ns=makeSnake(sd.id,sd.color||colorFromId(sd.id),sd.name||'SNAKE',sd.x,sd.y);
+          _ns.numSections=sd.ns||26;
+          SG.snakes.set(sd.id,_ns);
+        }
+        const s=SG.snakes.get(sd.id);
+        if(!s)return;
+        s.alive=true;s.score=sd.score||0;s.boost=sd.boost||false;
+        s.numSections=sd.ns||s.numSections;s.color=sd.color||s.color;s.name=sd.name||s.name;
+        // Own snake: reconcile metadata + gently correct position if large drift
+        if(sd.id===myPid){
+          const own=SG.snakes.get(myPid);
+          if(own){
+            if(_firstRemoteSync){
+              // First server snapshot — rebuild path from confirmed spawn position
+              own.angle=sd.angle;
+              const _r=sectionRadius(own);
+              const _pLen=Math.ceil(own.numSections*_r*SEGMENT_SPACING*2/SNAKE_SPD)+10;
+              own.path=[];
+              for(let _i=0;_i<_pLen;_i++)
+                own.path.push({x:sd.x-Math.cos(sd.angle)*_i*SNAKE_SPD,y:sd.y-Math.sin(sd.angle)*_i*SNAKE_SPD});
+              _firstRemoteSync=false;_hideSyncOverlay();
+            } else if(own.alive&&own.path.length){
+              const h=own.path[0];
+              const d2=(sd.x-h.x)*(sd.x-h.x)+(sd.y-h.y)*(sd.y-h.y);
+              // Snap only on large drift (>10 ticks worth); smaller corrections let local prediction rule
+              if(d2>SNAKE_SPD*SNAKE_SPD*100)own.path[0]={x:sd.x,y:sd.y};
+            }
+            if(sd.ns)own.numSections=sd.ns;
+            if(sd.usd!=null){
+              if(sd.usd>_myUsd+0.0001){const _oh=own.path&&own.path[0];if(_oh)_spawnMoneyFx(_oh.x,_oh.y);}
+              _myUsd=sd.usd;
+            }
+          }
+        }
+      });
+      // Kill snakes absent from the packet (server stopped sending them = dead)
+      if(SG)SG.snakes.forEach((s,id)=>{
+        if(id!==myPid&&s.alive&&!seen.has(id)){s.alive=false;s.path=[];_ssBuf.delete(id);}
+      });
     });
 
     _sio.on('gameover',()=>{
@@ -1383,6 +1441,7 @@ function pkDisconnect(){
   myPid=null;isHost=false;isSpectating=false;pkRoomId=null;_pkTick=0;_pkSentTick=0;_myHelloTs=0;
   _joiningLobby=false;_lobbyIsPaid=false;_hostPid=null;
   _guestInputs.clear();
+  _ssBuf.clear();
   _guestPredTs=0;
 }
 
@@ -1571,7 +1630,8 @@ function initSnakeGame(players){
   _snakeDeathTs.clear();
   SG={snakes:new Map(),food:[],tick:0,over:false};
   const myColor=_playerMeta.get(myPid)?.color||colorFromId(myPid);
-  if(isHost){
+  if(isHost&&_isPractice){
+    // Practice mode only: HOST owns physics locally
     SG.snakes.set(myPid,makeSnake(myPid,myColor,getMyName()));
     players.forEach(p=>{
       if(p.id!==myPid)
@@ -1579,14 +1639,12 @@ function initSnakeGame(players){
     });
     SG.food=seedFoodLayout();loadKillFood();
   } else {
-    // Guest joining active game: spawn at center (0,0); host will snap to real position on first ss.
-    // Don't pre-create other players' snakes at random positions — applyRemoteState populates them at
-    // correct positions on first ss packet, avoiding the confusing "snakes everywhere" initial state.
+    // Live game: server assigns spawn position. Start at 0,0; ss-state will snap us on first packet.
     SG.snakes.set(myPid,makeSnake(myPid,myColor,getMyName(),0,0));
     _firstRemoteSync=true;
-    setTimeout(()=>{if(_firstRemoteSync){_firstRemoteSync=false;_hideSyncOverlay();}},600);
+    setTimeout(()=>{if(_firstRemoteSync){_firstRemoteSync=false;_hideSyncOverlay();}},1500);
   }
-  _hostPid=isHost?myPid:null; _lastSsTs=Date.now(); // host-migration tracking
+  _hostPid=isHost&&_isPractice?myPid:null; _lastSsTs=Date.now();
   _myUsd=ST.lobbyUsd||0; // start at entry wager value
 }
 
@@ -2202,24 +2260,24 @@ function applyRemoteState(d){
 function _hideSyncOverlay(){const _jo=document.getElementById('join-sync');if(_jo)_jo.style.display='none';}
 function startGuestLoop(){
   if(_guestInputLoop){clearInterval(_guestInputLoop);_guestInputLoop=null;}
-  // Send one ssin immediately so host registers us on their very next tick (don't wait up to 40ms)
-  if(SG&&!SG.over&&_sio){
-    const _my0=SG.snakes.get(myPid);
-    if(_my0&&_my0.alive&&_my0.path.length){
-      const _h0=_my0.path[0];
-      _sio.emit('ssin',{id:myPid,angle:_my0.angle,circle:false,boost:false,x:Math.round(_h0.x),y:Math.round(_h0.y),usd:_myUsd,ns:_my0.numSections||26});
-    }
+  // Send immediately so server spawns our snake on its very next tick
+  if(_sio){
+    const _my0=SG&&SG.snakes.get(myPid);
+    const _h0=_my0&&_my0.path&&_my0.path[0]||{x:0,y:0};
+    _sio.emit('ssin',{id:myPid,angle:(_my0&&_my0.angle)||0,circle:false,boost:false,
+      x:Math.round(_h0.x),y:Math.round(_h0.y),ns:(_my0&&_my0.numSections)||26,
+      color:(_my0&&_my0.color)||colorFromId(myPid),name:getMyName()});
   }
   _guestInputLoop=setInterval(()=>{
-    if(!SG||SG.over||!ablyChannel||isSpectating||_localDead)return;
+    if(!SG||SG.over||!_sio||isSpectating||_localDead)return;
     const my=SG.snakes.get(myPid);
     if(!my||!my.alive)return;
     const canBoost=(_mouseBoost||_padBoost)&&my.numSections>BOOST_MIN;
     my.boost=canBoost;
-    const h=my.path[0];
-    // circle:true tells host to apply +MAX_TURN directly — avoids angleDiff(angle+π) float ambiguity
-    _sio.emit('ssin',{id:myPid,angle:targetAngleToMouse(my),circle:_autoCircle||undefined,boost:canBoost,x:Math.round(h.x),y:Math.round(h.y),usd:_myUsd,ns:my.numSections||26});
-  },40);
+    const h=my.path&&my.path[0]||{x:0,y:0};
+    _sio.emit('ssin',{id:myPid,angle:_autoCircle?null:targetAngleToMouse(my),circle:!!_autoCircle,
+      boost:canBoost,x:Math.round(h.x),y:Math.round(h.y),ns:my.numSections||26});
+  },33); // match server tick rate
 }
 
 // ══ LAUNCH / END GAME ═══════════════════════════════════════
@@ -2256,13 +2314,14 @@ function launchSnakeGame(){
   // Init mouse to center so snake doesn't immediately spin
   _mouseX=canvas.width/2; _mouseY=canvas.height/2-10;
 
-  if(isHost)startHostLoop();
-  else startGuestLoop();
-  // Push owner's saved tuning to server on every game start so server doesn't reset to defaults
+  if(isHost&&_isPractice)startHostLoop();
+  else startGuestLoop(); // All live players: send inputs only, server runs physics
+  // Push owner's saved tuning to server on every game start
   if(isHost&&localStorage.getItem('ss_owner')==='1'&&_sio)_sio.emit('ss-tune',_tuning);
   rafHandle=requestAnimationFrame(rafDraw);
   if(_hostWatch)clearInterval(_hostWatch);
-  _hostWatch=setInterval(_checkHost,300); // watch for host departure → migrate
+  // Host migration only applies in practice mode; live games use server authority
+  if(_isPractice)_hostWatch=setInterval(_checkHost,300);
   const _vb=document.getElementById('voice-btn');if(_vb)_vb.style.display='flex';
   const _bb=document.getElementById('bot-bar');if(_bb)_bb.style.display=(_isPractice&&localStorage.getItem('ss_owner')==='1')?'flex':'none';
   if(_firstRemoteSync){const _jo=document.getElementById('join-sync');if(_jo)_jo.style.display='flex';}
@@ -2745,28 +2804,61 @@ function rafDraw(ts){
     }
   }
 
-  // Dead reckoning for remote snakes — advance every frame so they look smooth
-  // (same principle as damnbruh.com's client-side headPath accumulation)
+  // Remote snake advancement: snapshot interpolation (live) or dead-reckoning (practice bots)
   if(SG&&!SG.over){
+    const _renderT=Date.now()-_INTERP_DELAY;
     SG.snakes.forEach(s=>{
-      if(s.id===myPid||!s.alive||!s.path.length)return;
-      // Kill ghost snakes not confirmed alive by host for > 500ms
-      if(!s.id.startsWith('bot-')&&s._lastSeen&&Date.now()-s._lastSeen>500){s.alive=false;s.path=[];return;}
-      const dt=Math.min(s._predTs?ts-s._predTs:TICK_MS,80);
-      s._predTs=ts;
-      if(dt<=1)return;
-      const frac=dt/TICK_MS;
-      // Smooth angle toward input/server target — lerp at 60fps instead of snapping at 30fps
-      if(s._inputCircle||s.botCircle){s.angle+=MAX_TURN*frac;}
-      else if(s._tAngle!=null){
-        const _da=angleDiff(s._tAngle,s.angle);
-        s.angle+=Math.max(-MAX_TURN*frac,Math.min(MAX_TURN*frac,_da));
-        if(Math.abs(angleDiff(s._tAngle,s.angle))<0.005){s.angle=s._tAngle;s._tAngle=null;}
+      if(s.id===myPid||!s.alive)return;
+      const buf=_ssBuf.get(s.id);
+      if(buf&&buf.length>=2){
+        // ── Snapshot interpolation (server-authoritative live game) ──────────────
+        const latest=buf[buf.length-1];
+        if(Date.now()-latest.t>800){s.alive=false;s.path=[];_ssBuf.delete(s.id);return;}
+        // Find two snapshots bracketing _renderT
+        let a=buf[0],b=latest;
+        for(let bi=1;bi<buf.length;bi++){if(buf[bi].t>=_renderT){a=buf[bi-1];b=buf[bi];break;}}
+        const span=b.t-a.t;
+        const frac=span>0?Math.max(0,Math.min(1.5,(_renderT-a.t)/span)):1;
+        // Angle shortest-arc lerp
+        let da=b.angle-a.angle;
+        while(da>Math.PI)da-=Math.PI*2;while(da<-Math.PI)da+=Math.PI*2;
+        const ix=a.x+(b.x-a.x)*frac, iy=a.y+(b.y-a.y)*frac;
+        s.angle=a.angle+da*frac;
+        s.numSections=b.ns; s.boost=b.boost;
+        // Accumulate interpolated positions into path for body rendering
+        const ph=s.path&&s.path[0];
+        if(!ph||Math.hypot(ix-ph.x,iy-ph.y)>0.3){
+          if(!s.path)s.path=[];
+          s.path.unshift({x:ix,y:iy});
+          trimPath(s);
+        }
+      }else if(buf&&buf.length===1){
+        // 1 snapshot — dead-reckon from the last known position
+        const snap=buf[0];
+        if(!s.path||!s.path.length)s.path=[{x:snap.x,y:snap.y}];
+        const dt=Math.min(s._predTs?ts-s._predTs:TICK_MS,80); s._predTs=ts;
+        if(dt>1){
+          const f2=dt/TICK_MS,spd2=(s.boost?BOOST_SPD:SNAKE_SPD)*f2,h2=s.path[0];
+          s.path.unshift({x:h2.x+Math.cos(s.angle)*spd2,y:h2.y+Math.sin(s.angle)*spd2});
+          trimPath(s);
+        }
+      }else{
+        // ── Dead-reckoning fallback (practice bots, no ss-state) ──────────────
+        if(!s.path||!s.path.length)return;
+        if(!s.id.startsWith('bot-')&&s._lastSeen&&Date.now()-s._lastSeen>500){s.alive=false;s.path=[];return;}
+        const dt=Math.min(s._predTs?ts-s._predTs:TICK_MS,80); s._predTs=ts;
+        if(dt<=1)return;
+        const frac2=dt/TICK_MS;
+        if(s._inputCircle||s.botCircle){s.angle+=MAX_TURN*frac2;}
+        else if(s._tAngle!=null){
+          const _da=angleDiff(s._tAngle,s.angle);
+          s.angle+=Math.max(-MAX_TURN*frac2,Math.min(MAX_TURN*frac2,_da));
+          if(Math.abs(angleDiff(s._tAngle,s.angle))<0.005){s.angle=s._tAngle;s._tAngle=null;}
+        }
+        const spd3=(s.boost?BOOST_SPD:SNAKE_SPD)*frac2,h3=s.path[0];
+        s.path.unshift({x:h3.x+Math.cos(s.angle)*spd3,y:h3.y+Math.sin(s.angle)*spd3});
+        trimPath(s);
       }
-      const spd=(s.boost?BOOST_SPD:SNAKE_SPD)*frac;
-      const h=s.path[0];
-      s.path.unshift({x:h.x+Math.cos(s.angle)*spd,y:h.y+Math.sin(s.angle)*spd});
-      trimPath(s);
     });
   }
 
