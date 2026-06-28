@@ -726,7 +726,6 @@ app.get('/counts', (_, res) => {
     const r = io.sockets.adapter.rooms.get(id);
     counts[id] = r ? r.size : 0;
   }
-  res.setHeader('Access-Control-Allow-Origin', '*');
   res.json(counts);
 });
 
