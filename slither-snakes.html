@@ -1336,6 +1336,7 @@ async function pkConnect(roomId,gameToken){
       if(d.food){
         SG.food=d.food.map(f=>({x:f[0],y:f[1],ci:f[2]||0,size:f[3]||6,k:f[4]||0,w:f[5]?f[5]/1e6:0}));
       }
+      if(d.tick!=null&&SG)SG.tick=d.tick; // keep SG.tick in sync so the elim dedup guard resets each server tick
       const pktT=Date.now(); // use client receive-time; server clock may differ
       const seen=new Set();
       (d.snakes||[]).forEach(sd=>{
@@ -1633,6 +1634,7 @@ function initSnakeGame(players){
   _snakeDeathPos.clear();
   _snakeDeathTs.clear();
   SG={snakes:new Map(),food:[],tick:0,over:false};
+  _elimPairSet.clear();_recentKillPairs.clear();_elimPairTick=-1; // reset dedup guards for new game
   const myColor=_playerMeta.get(myPid)?.color||colorFromId(myPid);
   if(isHost&&_isPractice){
     // Practice mode only: HOST owns physics locally
