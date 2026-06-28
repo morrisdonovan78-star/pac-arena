@@ -2011,15 +2011,12 @@ function _practiceCheckCollisions(){
       const rr=(hR1+hR2)*T.hbs;
       const dx=qx-px,dy=qy-py,d2=dx*dx+dy*dy;
       if(d2>rr*rr)continue;
-      // Facing gate: skip when very close (crossed) OR when a snake is circling
-      // (circling movement is tangential → dot≈0, always fails gate even at correct angle)
-      if(d2>rr*rr/9&&d2>0){
+      // Facing gate: both must face each other within faceDeg° — exact moneyslither rule.
+      if(d2>0){
         const _dh=Math.sqrt(d2);
         const pDot=Math.cos(p.angle)*(dx/_dh)+Math.sin(p.angle)*(dy/_dh);
         const qDot=Math.cos(q.angle)*(-dx/_dh)+Math.sin(q.angle)*(-dy/_dh);
-        const pCirc=p._inputCircle||(p.id===myPid&&_autoCircle);
-        const qCirc=q._inputCircle||(q.id===myPid&&_autoCircle);
-        if(!pCirc&&!qCirc&&(pDot<_faceCos||qDot<_faceCos))continue;
+        if(pDot<_faceCos||qDot<_faceCos)continue;
       }
       // Determine loser
       let loser,winner;
@@ -2041,7 +2038,7 @@ function _practiceCheckCollisions(){
       const bR=msThick(qq)*SS_HB*T.hbs;
       const crr=(hHR+bR),crr2=crr*crr;
       const segs=getBodyPoints(qq);
-      const skip=Math.max(2,Math.ceil(40/10)); // skip 40px = 4 segs from head (enough to avoid self-hit)
+      const skip=1; // skip segs[0]=head only; first check segs[1]≈11px (moneyslither: path[8]=12.8px)
       for(let k=skip;k<segs.length;k++){
         const seg=segs[k];
         const sdx=hx-seg.x,sdy=hy-seg.y;

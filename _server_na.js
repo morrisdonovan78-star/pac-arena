@@ -487,16 +487,15 @@ function ssCheckCollisions(sg, lid, io) {
       const rr = (hR1 + hR2) * T.hbs;
       const dx = qx - px, dy = qy - py, d2 = dx * dx + dy * dy;
       if (d2 > rr * rr) continue;
-      // Facing gate — skip when snakes have already crossed (d < rr/3 → dot products reversed)
-      // Circling snakes bypass the gate: their tangential movement (⊥ to the radial line) gives
-      // dot≈0 which always fails the facing check, even when aimed squarely at the victim's head.
-      if (d2 > rr * rr / 9 && d2 > 0) {
+      // Facing gate: both snakes must face each other within faceDeg° (moneyslither exact).
+      // Use client-reported faceAngle (lag-free) instead of server's turn-limited angle.
+      if (d2 > 0) {
         const dh = Math.sqrt(d2);
         const pFace = p.faceAngle ?? p.angle;
         const qFace = q.faceAngle ?? q.angle;
         const pDot = Math.cos(pFace) * (dx / dh) + Math.sin(pFace) * (dy / dh);
         const qDot = Math.cos(qFace) * (-dx / dh) + Math.sin(qFace) * (-dy / dh);
-        if (!p.circling && !q.circling && (pDot < _faceCos || qDot < _faceCos)) continue;
+        if (pDot < _faceCos || qDot < _faceCos) continue;
       }
       let loser, winner;
       if (T.rule === 'biggest_wins') {
@@ -518,9 +517,8 @@ function ssCheckCollisions(sg, lid, io) {
     }
   }
 
-  // ── Head-to-body: use HOST's authoritative segs for victim body ───────────────
-  // Segs are spaced ssSegSpacing(ns) apart. Skip the first ~8*SS_SPD px to avoid
-  // near-head false-kills (same intent as moneyslither's SS_SEG_STEP skip).
+  // ── Head-to-body: moneyslither uses path index k=2 (≈12.8px from head) as first check.
+  // Our segs are spaced ~11px apart, so skip=1 (segs[1]≈11px) matches that intent.
   for (let i = 0; i < alive.length; i++) {
     const pp = alive[i]; if (died.has(pp.pid)) continue;
     const hR = pp.thick * SS_HB * T.hbs * T.hhbs;
@@ -529,9 +527,7 @@ function ssCheckCollisions(sg, lid, io) {
       const qq = alive[j]; if (qq.pid === pp.pid || died.has(qq.pid)) continue;
       const bR = qq.thick * SS_HB * T.hbs;
       const crr2 = (hR + bR) * (hR + bR);
-      // Skip 40px from victim head (4 segs at 10px fixed spacing)
-      const spacing = ssSegSpacing(qq.ns);
-      const skip = Math.max(2, Math.ceil(40 / spacing));
+      const skip = 1; // skip segs[0]=head; first check segs[1]≈11px (moneyslither: path[8]=12.8px)
       for (let k = skip; k < qq.segs.length; k++) {
         const seg = qq.segs[k];
         const sdx = hhx - seg[0], sdy = hhy - seg[1];
