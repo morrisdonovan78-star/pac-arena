@@ -477,11 +477,11 @@ function ssCheckCollisions(sg, lid, io) {
   for (let i = 0; i < alive.length; i++) {
     const p = alive[i]; if (died.has(p.pid)) continue;
     const px = p.segs[0][0], py = p.segs[0][1];
-    const hR1 = ssHeadR(p.thick);
+    const hR1 = ssSectionRadius(p.ns) * SS_HB * SS_HBS * SS_HHBS;
     for (let j = i + 1; j < alive.length; j++) {
       const q = alive[j]; if (died.has(q.pid)) continue;
       const qx = q.segs[0][0], qy = q.segs[0][1];
-      const hR2 = ssHeadR(q.thick);
+      const hR2 = ssSectionRadius(q.ns) * SS_HB * SS_HBS * SS_HHBS;
       const rr = (hR1 + hR2) * T.hbs;
       const dx = qx - px, dy = qy - py, d2 = dx * dx + dy * dy;
       if (d2 > rr * rr) continue;
@@ -517,11 +517,11 @@ function ssCheckCollisions(sg, lid, io) {
   // near-head false-kills (same intent as moneyslither's SS_SEG_STEP skip).
   for (let i = 0; i < alive.length; i++) {
     const pp = alive[i]; if (died.has(pp.pid)) continue;
-    const hR = pp.thick * SS_HB * T.hbs * T.hhbs;
+    const hR = ssSectionRadius(pp.ns) * SS_HB * T.hbs * T.hhbs;
     const hhx = pp.segs[0][0], hhy = pp.segs[0][1];
     for (let j = 0; j < alive.length; j++) {
       const qq = alive[j]; if (qq.pid === pp.pid || died.has(qq.pid)) continue;
-      const bR = qq.thick * SS_HB * T.hbs;
+      const bR = ssSectionRadius(qq.ns) * SS_HB * T.hbs;
       const crr2 = (hR + bR) * (hR + bR);
       // Skip 40px from victim head (4 segs at 10px fixed spacing)
       const spacing = ssSegSpacing(qq.ns);
