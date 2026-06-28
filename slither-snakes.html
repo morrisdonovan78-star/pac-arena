@@ -1763,14 +1763,18 @@ function _bgSimStep(){
       if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead)endSnakeGame('eliminated',null);
     }
   }
-  // Remote snakes — dead reckon at full tick speed.
-  SG.snakes.forEach(s=>{
-    if(s.id===myPid||!s.alive||!s.path.length)return;
-    const spd=s.boost?BOOST_SPD:SNAKE_SPD;
-    const h=s.path[0];
-    s.path.unshift({x:h.x+Math.cos(s.angle)*spd,y:h.y+Math.sin(s.angle)*spd});
-    trimPath(s);
-  });
+  // Remote snakes — only dead-reckon in practice mode.
+  // Live ss-* games use snapshot interpolation; dead-reckoning here creates a path
+  // U-turn (same zigzag as the main interpolation bug) when the tab returns to focus.
+  if(_isPractice){
+    SG.snakes.forEach(s=>{
+      if(s.id===myPid||!s.alive||!s.path.length)return;
+      const spd=s.boost?BOOST_SPD:SNAKE_SPD;
+      const h=s.path[0];
+      s.path.unshift({x:h.x+Math.cos(s.angle)*spd,y:h.y+Math.sin(s.angle)*spd});
+      trimPath(s);
+    });
+  }
 }
 function _bgStep(){
   if(!SG||SG.over){if(_bgPump){clearInterval(_bgPump);_bgPump=null;}return;}
@@ -1780,7 +1784,7 @@ function _bgStep(){
   const steps=Math.max(1,Math.min(90,Math.round(dt/TICK_MS)));
   for(let k=0;k<steps;k++){
     _bgSimStep();
-    if(isHost){_bgSuppressSend=(k<steps-1);snakeTick();} // suppress all but last send → ~1 packet/fire
+    if(isHost&&_isPractice){_bgSuppressSend=(k<steps-1);snakeTick();} // practice only — live games: server runs physics
     if(!SG||SG.over)break;
   }
   _bgSuppressSend=false;
@@ -2060,7 +2064,7 @@ function eliminateSnake(id,killerId){
     _recentKillPairs.set(pk,now+2000);
   }
   snake.alive=false;
-  if(isHost)spawnFoodFromSnake(snake); // HOST only — food list is synced to guests via ss food packets
+  if(isHost&&_isPractice)spawnFoodFromSnake(snake); // practice only — live games: server spawns kill food via ssSpawnKillFood
   // All clients: mark as confirmed-dead so stale ss packets can't revive the body
   const _dh=snake.path&&snake.path[0];
   if(_dh)_snakeDeathPos.set(snake.id,{x:_dh.x,y:_dh.y});
