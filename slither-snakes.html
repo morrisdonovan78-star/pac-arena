@@ -2001,11 +2001,11 @@ function _practiceCheckCollisions(){
   for(let i=0;i<alive.length;i++){
     const p=alive[i];if(died.has(p.id))continue;
     const px=p.path[0].x,py=p.path[0].y;
-    const hR1=sectionRadius(p)*SS_HB*T.hbs*T.hhbs;
+    const hR1=msThick(p)*SS_HB*T.hbs*T.hhbs;
     for(let j=i+1;j<alive.length;j++){
       const q=alive[j];if(died.has(q.id))continue;
       const qx=q.path[0].x,qy=q.path[0].y;
-      const hR2=sectionRadius(q)*SS_HB*T.hbs*T.hhbs;
+      const hR2=msThick(q)*SS_HB*T.hbs*T.hhbs;
       const rr=(hR1+hR2)*T.hbs;
       const dx=qx-px,dy=qy-py,d2=dx*dx+dy*dy;
       if(d2>rr*rr)continue;
@@ -2029,11 +2029,11 @@ function _practiceCheckCollisions(){
   for(let pi=0;pi<alive.length;pi++){
     const pp=alive[pi];if(died.has(pp.id))continue;
     const hx=pp.path[0].x,hy=pp.path[0].y;
-    const hHR=sectionRadius(pp)*SS_HB*T.hbs*T.hhbs;
+    const hHR=msThick(pp)*SS_HB*T.hbs*T.hhbs;
     for(let qi=0;qi<alive.length;qi++){
       if(pi===qi)continue;
       const qq=alive[qi];if(died.has(qq.id))continue;
-      const bR=sectionRadius(qq)*SS_HB*T.hbs;
+      const bR=msThick(qq)*SS_HB*T.hbs;
       const crr=(hHR+bR),crr2=crr*crr;
       const segs=getBodyPoints(qq);
       const skip=Math.max(2,Math.ceil(40/10)); // skip 40px = 4 segs from head (enough to avoid self-hit)
@@ -2381,7 +2381,9 @@ function _drawTuningPreview(){
   const ns=24;
   const dR=BASE_RADIUS+Math.pow(ns*SIZE_PER_SEGMENT,RADIUS_GROWTH)*RADIUS_SCALE;
   const sp=dR*SEGMENT_SPACING;
-  const bRw=dR*SS_HB*_tuning.hbs;    // body hitbox radius (world px)
+  // Hitbox base = msThick (moneyslither formula), same as server sn.thick
+  const tk=Math.max(10,(7.5+0.55*Math.sqrt(ns))*1.43);
+  const bRw=tk*SS_HB*_tuning.hbs;    // body hitbox radius (world px)
   const hRw=bRw*_tuning.hhbs;        // head hitbox radius (world px)
   const gapW=(hRw+hRw)*_tuning.hbs;  // H2H trigger distance (world px)
   const fRad=_tuning.faceDeg*Math.PI/180;
@@ -2441,7 +2443,8 @@ function _drawTuningPreview(){
   // Numeric stats table
   const _sd=document.getElementById('tun-stats');
   if(_sd){
-    const _bR=dR*SS_HB*_tuning.hbs,_hR=_bR*_tuning.hhbs,_h2h=(_hR+_hR)*_tuning.hbs;
+    const _tk=Math.max(10,(7.5+0.55*Math.sqrt(ns))*1.43);
+    const _bR=_tk*SS_HB*_tuning.hbs,_hR=_bR*_tuning.hhbs,_h2h=(_hR+_hR)*_tuning.hbs;
     const _sp=dR*SEGMENT_SPACING;
     const _skip=Math.max(2,Math.ceil(40/_sp));
     const _h2b=(_hR+_bR).toFixed(1);
@@ -3119,7 +3122,7 @@ function drawSnake(snake){
   // Hitbox overlay (H key) — drawn here so circles share z-level with body and
   // can never visually extend past the snake tail (same bPts array, same indices)
   if(_showHitboxes){
-    const bR=r*SS_HB*_tuning.hbs;
+    const bR=msThick(snake)*SS_HB*_tuning.hbs;
     ctx.lineWidth=1.5/_camZoom;
     ctx.strokeStyle='rgba(255,255,0,0.70)';
     ctx.beginPath();
@@ -3136,7 +3139,7 @@ function drawSnake(snake){
 
   // Head hitbox + H2H zone — H-key only (no always-on ring to avoid confusing visuals)
   if(_showHitboxes){
-    const bR=r*SS_HB*_tuning.hbs;
+    const bR=msThick(snake)*SS_HB*_tuning.hbs;
     const hR=bR*_tuning.hhbs;
     const h2hR=hR*2*_tuning.hbs;
     ctx.save();
