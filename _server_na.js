@@ -488,13 +488,15 @@ function ssCheckCollisions(sg, lid, io) {
       const dx = qx - px, dy = qy - py, d2 = dx * dx + dy * dy;
       if (d2 > rr * rr) continue;
       // Facing gate — skip when snakes have already crossed (d < rr/3 → dot products reversed)
+      // Circling snakes bypass the gate: their tangential movement (⊥ to the radial line) gives
+      // dot≈0 which always fails the facing check, even when aimed squarely at the victim's head.
       if (d2 > rr * rr / 9 && d2 > 0) {
         const dh = Math.sqrt(d2);
-        const pFace = p.circling ? p.angle : (p.faceAngle ?? p.angle);
-        const qFace = q.circling ? q.angle : (q.faceAngle ?? q.angle);
+        const pFace = p.faceAngle ?? p.angle;
+        const qFace = q.faceAngle ?? q.angle;
         const pDot = Math.cos(pFace) * (dx / dh) + Math.sin(pFace) * (dy / dh);
         const qDot = Math.cos(qFace) * (-dx / dh) + Math.sin(qFace) * (-dy / dh);
-        if (pDot < _faceCos || qDot < _faceCos) continue; // gate fails → falls to H2B
+        if ((!p.circling && pDot < _faceCos) || (!q.circling && qDot < _faceCos)) continue;
       }
       let loser, winner;
       if (T.rule === 'biggest_wins') {

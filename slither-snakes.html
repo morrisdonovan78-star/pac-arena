@@ -2011,12 +2011,15 @@ function _practiceCheckCollisions(){
       const rr=(hR1+hR2)*T.hbs;
       const dx=qx-px,dy=qy-py,d2=dx*dx+dy*dy;
       if(d2>rr*rr)continue;
-      // Facing gate: skip when very close (crossed); apply otherwise
+      // Facing gate: skip when very close (crossed) OR when a snake is circling
+      // (circling movement is tangential → dot≈0, always fails gate even at correct angle)
       if(d2>rr*rr/9&&d2>0){
         const _dh=Math.sqrt(d2);
         const pDot=Math.cos(p.angle)*(dx/_dh)+Math.sin(p.angle)*(dy/_dh);
         const qDot=Math.cos(q.angle)*(-dx/_dh)+Math.sin(q.angle)*(-dy/_dh);
-        if(pDot<_faceCos||qDot<_faceCos)continue;
+        const pCirc=p._inputCircle||(p.id===myPid&&_autoCircle);
+        const qCirc=q._inputCircle||(q.id===myPid&&_autoCircle);
+        if((!pCirc&&pDot<_faceCos)||(!qCirc&&qDot<_faceCos))continue;
       }
       // Determine loser
       let loser,winner;
