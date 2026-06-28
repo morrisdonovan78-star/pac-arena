@@ -496,7 +496,7 @@ function ssCheckCollisions(sg, lid, io) {
         const qFace = q.faceAngle ?? q.angle;
         const pDot = Math.cos(pFace) * (dx / dh) + Math.sin(pFace) * (dy / dh);
         const qDot = Math.cos(qFace) * (-dx / dh) + Math.sin(qFace) * (-dy / dh);
-        if ((!p.circling && pDot < _faceCos) || (!q.circling && qDot < _faceCos)) continue;
+        if (!p.circling && !q.circling && (pDot < _faceCos || qDot < _faceCos)) continue;
       }
       let loser, winner;
       if (T.rule === 'biggest_wins') {
