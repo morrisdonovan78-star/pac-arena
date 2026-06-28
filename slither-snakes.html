@@ -2037,10 +2037,11 @@ function _practiceCheckCollisions(){
       const qq=alive[qi];if(died.has(qq.id))continue;
       const bR=msThick(qq)*SS_HB*T.hbs;
       const crr=(hHR+bR),crr2=crr*crr;
-      const segs=getBodyPoints(qq);
-      const skip=1; // skip segs[0]=head only; first check segs[1]≈11px (moneyslither: path[8]=12.8px)
-      for(let k=skip;k<segs.length;k++){
-        const seg=segs[k];
+      // Check full path arc (not just numSections segs) so circle coil is fully covered.
+      // path[0]=head (skip), path[1..n]=body arc including tail beyond visible segments.
+      const qpath=qq.path;
+      for(let k=1;k<qpath.length;k++){
+        const seg=qpath[k];
         const sdx=hx-seg.x,sdy=hy-seg.y;
         if(sdx*sdx+sdy*sdy<=crr2){died.add(pp.id);eliminateSnake(pp.id,qq.id);break;}
       }

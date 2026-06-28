@@ -225,13 +225,16 @@ function ssSpawnSnake(pid, color, name) {
 function ssGetSegsFromPath(sn) {
   if (!sn.path || !sn.path.length) return [];
   const r = ssSectionRadius(sn.ns), spacing = r * 0.5;
+  // Cover the full kept-path arc (ns visible segs + tail buffer) so circling snakes
+  // have their complete coil checked in H2B — not just the first 58% of one loop.
+  const maxSegs = sn.ns + Math.ceil((4 * r + 80) / spacing) + 2;
   const pts = [[Math.round(sn.x), Math.round(sn.y)]];
   let cum = 0;
-  for (let o = 0; o + 1 < sn.path.length && pts.length < sn.ns; o++) {
+  for (let o = 0; o + 1 < sn.path.length && pts.length < maxSegs; o++) {
     const dx = sn.path[o + 1].x - sn.path[o].x, dy = sn.path[o + 1].y - sn.path[o].y;
     const d = Math.hypot(dx, dy);
     if (d > 0) {
-      while (pts.length < sn.ns && cum + d >= spacing * pts.length) {
+      while (pts.length < maxSegs && cum + d >= spacing * pts.length) {
         const f = (spacing * pts.length - cum) / d;
         pts.push([Math.round(sn.path[o].x + f * dx), Math.round(sn.path[o].y + f * dy)]);
       }
