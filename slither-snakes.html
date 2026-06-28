@@ -1336,7 +1336,7 @@ async function pkConnect(roomId,gameToken){
       if(d.food){
         SG.food=d.food.map(f=>({x:f[0],y:f[1],ci:f[2]||0,size:f[3]||6,k:f[4]||0,w:f[5]?f[5]/1e6:0}));
       }
-      const pktT=d.t||Date.now();
+      const pktT=Date.now(); // use client receive-time; server clock may differ
       const seen=new Set();
       (d.snakes||[]).forEach(sd=>{
         seen.add(sd.id);
@@ -1383,9 +1383,13 @@ async function pkConnect(roomId,gameToken){
           }
         }
       });
-      // Kill snakes absent from the packet (server stopped sending them = dead)
+      // Kill snakes absent 2+ consecutive packets (grace for single dropped packet)
       if(SG)SG.snakes.forEach((s,id)=>{
-        if(id!==myPid&&s.alive&&!seen.has(id)){s.alive=false;s.path=[];_ssBuf.delete(id);}
+        if(id===myPid||!s.alive)return;
+        if(!seen.has(id)){
+          s._missedPkts=(s._missedPkts||0)+1;
+          if(s._missedPkts>=2){s.alive=false;s.path=[];_ssBuf.delete(id);s._missedPkts=0;}
+        }else{s._missedPkts=0;}
       });
     });
 
@@ -2822,25 +2826,32 @@ function rafDraw(ts){
         // Angle shortest-arc lerp
         let da=b.angle-a.angle;
         while(da>Math.PI)da-=Math.PI*2;while(da<-Math.PI)da+=Math.PI*2;
-        const ix=a.x+(b.x-a.x)*frac, iy=a.y+(b.y-a.y)*frac;
+        const ix=a.x+(b.x-a.x)*frac,iy=a.y+(b.y-a.y)*frac;
         s.angle=a.angle+da*frac;
-        s.numSections=b.ns; s.boost=b.boost;
-        // Accumulate interpolated positions into path for body rendering
-        const ph=s.path&&s.path[0];
-        if(!ph||Math.hypot(ix-ph.x,iy-ph.y)>0.3){
-          if(!s.path)s.path=[];
-          s.path.unshift({x:ix,y:iy});
-          trimPath(s);
+        s.numSections=b.ns;s.boost=b.boost;
+        // Seed path if empty (revival after death or first appearance without makeSnake)
+        if(!s.path||!s.path.length){
+          const _r=sectionRadius(s);
+          const _pLen=Math.ceil(s.numSections*_r*SEGMENT_SPACING*2/SNAKE_SPD)+10;
+          s.path=[];
+          for(let _i=0;_i<_pLen;_i++)s.path.push({x:ix-Math.cos(s.angle)*_i*SNAKE_SPD,y:iy-Math.sin(s.angle)*_i*SNAKE_SPD});
+        }else{
+          // Accumulate interpolated head position into path for body rendering
+          const ph=s.path[0];
+          if(!ph||Math.hypot(ix-ph.x,iy-ph.y)>0.3){s.path.unshift({x:ix,y:iy});trimPath(s);}
         }
       }else if(buf&&buf.length===1){
-        // 1 snapshot — dead-reckon from the last known position
+        // 1 snapshot — update state from snapshot; DO NOT dead-reckon.
+        // Dead-reckoning here causes a path U-turn (forward then back to snap pos)
+        // when the 2nd snapshot arrives and interpolation starts at frac=0.
         const snap=buf[0];
-        if(!s.path||!s.path.length)s.path=[{x:snap.x,y:snap.y}];
-        const dt=Math.min(s._predTs?ts-s._predTs:TICK_MS,80); s._predTs=ts;
-        if(dt>1){
-          const f2=dt/TICK_MS,spd2=(s.boost?BOOST_SPD:SNAKE_SPD)*f2,h2=s.path[0];
-          s.path.unshift({x:h2.x+Math.cos(s.angle)*spd2,y:h2.y+Math.sin(s.angle)*spd2});
-          trimPath(s);
+        s.angle=snap.angle;s.numSections=snap.ns;s.boost=snap.boost;
+        // Seed path if empty (revival/first appearance); otherwise keep makeSnake path
+        if(!s.path||!s.path.length){
+          const _r=sectionRadius(s);
+          const _pLen=Math.ceil(snap.ns*_r*SEGMENT_SPACING*2/SNAKE_SPD)+10;
+          s.path=[];
+          for(let _i=0;_i<_pLen;_i++)s.path.push({x:snap.x-Math.cos(snap.angle)*_i*SNAKE_SPD,y:snap.y-Math.sin(snap.angle)*_i*SNAKE_SPD});
         }
       }else{
         // ── Dead-reckoning fallback (practice bots, no ss-state) ──────────────
