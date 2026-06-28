@@ -2284,7 +2284,7 @@ function startGuestLoop(){
     const canBoost=(_mouseBoost||_padBoost)&&my.numSections>BOOST_MIN;
     my.boost=canBoost;
     const h=my.path&&my.path[0]||{x:0,y:0};
-    _sio.emit('ssin',{id:myPid,angle:_autoCircle?null:targetAngleToMouse(my),circle:!!_autoCircle,
+    _sio.emit('ssin',{id:myPid,angle:my.angle,circle:!!_autoCircle,
       boost:canBoost,x:Math.round(h.x),y:Math.round(h.y),ns:my.numSections||26});
   },33); // match server tick rate
 }

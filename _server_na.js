@@ -488,11 +488,12 @@ function ssCheckCollisions(sg, lid, io) {
       const dx = qx - px, dy = qy - py, d2 = dx * dx + dy * dy;
       if (d2 > rr * rr) continue;
       // Facing gate: both snakes must face each other within faceDeg° (moneyslither exact).
-      // Use client-reported faceAngle (lag-free) instead of server's turn-limited angle.
+      // Circling snakes: use sn.angle (live, updated every ssTick) — faceAngle is stale
+      // since client sends angle:null when circling, freezing faceAngle at pre-circle heading.
       if (d2 > 0) {
         const dh = Math.sqrt(d2);
-        const pFace = p.faceAngle ?? p.angle;
-        const qFace = q.faceAngle ?? q.angle;
+        const pFace = p.circling ? p.angle : (p.faceAngle ?? p.angle);
+        const qFace = q.circling ? q.angle : (q.faceAngle ?? q.angle);
         const pDot = Math.cos(pFace) * (dx / dh) + Math.sin(pFace) * (dy / dh);
         const qDot = Math.cos(qFace) * (-dx / dh) + Math.sin(qFace) * (-dy / dh);
         if (pDot < _faceCos || qDot < _faceCos) continue;
