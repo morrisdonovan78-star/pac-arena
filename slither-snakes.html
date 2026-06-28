@@ -1717,7 +1717,7 @@ function _electHost(){
   if(_guestInputLoop){clearInterval(_guestInputLoop);_guestInputLoop=null;}
   _forceFoodSend=true;
   _lastTickTs=performance.now();
-  startHostLoop();
+  if(!pkRoomId||!pkRoomId.startsWith('ss-'))startHostLoop();
   addToast('👑 You are the host now','#FFD700');
 }
 function _demoteFromHost(){
@@ -1963,7 +1963,7 @@ function snakeTick(){
   if(_hostGraceTicks>0){_hostGraceTicks--;}
   // HOST runs collision locally (best position quality, no RTT lag). Server is backup/anti-cheat.
   // Practice mode: no server connection, also runs locally.
-  else if(isHost||_isPractice)_practiceCheckCollisions();
+  else if(_isPractice)_practiceCheckCollisions();
 
   // Food collection — head radius pickup (damnbruh.com style)
   const _nowEat=Date.now();

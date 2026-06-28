@@ -325,6 +325,19 @@ function ssHandleInput(lid, pid, d, io) {
   sn.boost = !!d.boost && sn.ns > SS_BOOST_MIN;
   if (d.color) sn.color = d.color;
   if (d.name)  sn.name  = d.name;
+  // Store client's reported facing for H2H gate (client angle is lag-free; server angle is 1-2 ticks behind)
+  if (typeof d.angle === 'number') sn.faceAngle = d.angle;
+  // Gentle position correction: pull server position toward client's dead-reckoned position.
+  // Eliminates turning-lag positional drift that causes circle kills to miss on the server.
+  if (typeof d.x === 'number' && typeof d.y === 'number') {
+    const cdx = d.x - sn.x, cdy = d.y - sn.y;
+    const cd = Math.hypot(cdx, cdy);
+    if (cd > 0 && cd < SS_SPD * 6) {
+      sn.x += cdx * 0.4;
+      sn.y += cdy * 0.4;
+      if (sn.path && sn.path.length) sn.path[0] = { x: sn.x, y: sn.y };
+    }
+  }
 }
 
 function ssPlayerLeft(lid, pid, io) {
@@ -488,8 +501,10 @@ function ssCheckCollisions(sg, lid, io) {
       // Facing gate — skip when snakes have already crossed (d < rr/3 → dot products reversed)
       if (d2 > rr * rr / 9 && d2 > 0) {
         const dh = Math.sqrt(d2);
-        const pDot = Math.cos(p.angle) * (dx / dh) + Math.sin(p.angle) * (dy / dh);
-        const qDot = Math.cos(q.angle) * (-dx / dh) + Math.sin(q.angle) * (-dy / dh);
+        const pFace = p.circling ? p.angle : (p.faceAngle ?? p.angle);
+        const qFace = q.circling ? q.angle : (q.faceAngle ?? q.angle);
+        const pDot = Math.cos(pFace) * (dx / dh) + Math.sin(pFace) * (dy / dh);
+        const qDot = Math.cos(qFace) * (-dx / dh) + Math.sin(qFace) * (-dy / dh);
         if (pDot < _faceCos || qDot < _faceCos) continue; // gate fails → falls to H2B
       }
       let loser, winner;
