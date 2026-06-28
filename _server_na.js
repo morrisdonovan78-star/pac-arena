@@ -129,7 +129,7 @@ const ssElimPairs = new Map();
 // head-to-body with combined radii (headR + bodyR), all angles, no rear dead zone.
 
 const SS_SPD      = 19.83;   // px/tick normal — mirrors client SNAKE_SPD
-const SS_BSPD     = 34.5;    // px/tick boost  — mirrors client BOOST_SPD
+const SS_BSPD     = 39.64;   // px/tick boost  — mirrors client BOOST_SPD
 const SS_GHOST_MS = 6000;    // ms of silence before server eliminates as ghost
 const SS_HB       = 0.95;    // HITBOX_BASE
 const SS_HBS      = 1.07;    // combatHitboxScale
@@ -137,6 +137,19 @@ const SS_HHBS     = 1.18;    // combatHeadHitboxScale
 const SS_FACE     = Math.cos(75 * Math.PI / 180); // cos(75°) ≈ 0.259, facing gate threshold
 const SS_SEG_STEP = 4;       // path indices between checked body segments (SEGMENT_SPACING_TICKS)
 const SS_MIN_SIZE = 40;
+
+// Server-authoritative physics constants (must match client exactly)
+const SS_ARENA_R       = 3000;
+const SS_MAX_TURN      = 0.274;   // rad/tick — client MAX_TURN
+const SS_FOOD_TARGET   = 135;     // client FOOD_TARGET
+const SS_FOOD_GROW     = 2;       // client FOOD_GROW
+const SS_BOOST_MIN     = 12;      // client BOOST_MIN
+const SS_BOOST_DRAIN_A = 3.0;    // client BOOST_DRAIN_AMT
+const SS_BOOST_DRAIN_T = 8;      // client BOOST_DRAIN
+const SS_INIT_NS       = 24;     // client INIT_SECTIONS
+const SS_MIN_NS        = 8;      // client MIN_SECTIONS
+const SS_MAX_NS        = 300;    // client MAX_SECTIONS
+const SS_SHED_NE_MS    = 4000;   // client SHED_NOEAT_MS
 
 function ssSegs(size) {
   const s = Math.max(SS_MIN_SIZE, Number(size) || SS_MIN_SIZE);
@@ -152,10 +165,90 @@ function ssThick(n) {
 function ssBodyR(thick) { return thick * SS_HB * SS_HBS; }
 function ssHeadR(thick) { return thick * SS_HB * SS_HBS * SS_HHBS; }
 
+function ssAngleDiff(a, b) {
+  let d = a - b;
+  while (d > Math.PI)  d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return d;
+}
+
+function ssMakeFood(x, y, k, w, o, ne) {
+  if (x == null) {
+    const a = Math.random() * Math.PI * 2;
+    const r = Math.sqrt(Math.random()) * SS_ARENA_R * 0.9;
+    x = Math.cos(a) * r; y = Math.sin(a) * r;
+  }
+  return { x, y, ci: Math.floor(Math.random() * 20), size: 4 + Math.random() * 3,
+           k: k || 0, w: w || 0, o: o || null, ne: ne || 0 };
+}
+
+function ssReconcileFood(sg) {
+  if (!sg.food) sg.food = [];
+  let reg = 0;
+  sg.food.forEach(f => { if (!f.k) reg++; });
+  while (reg < SS_FOOD_TARGET) { sg.food.push(ssMakeFood()); reg++; }
+}
+
+function ssSpawnKillFood(sg, sn) {
+  if (!sn || !sn.path || !sn.path.length) return;
+  const maxOrbs = Math.min(10, Math.floor(sn.ns / 3) + 2);
+  const step = Math.max(1, Math.floor(sn.path.length / maxOrbs));
+  const wPerOrb = (sn.usd || 0) / maxOrbs;
+  for (let i = 0, c = 0; i < sn.path.length && c < maxOrbs; i += step, c++) {
+    const p = sn.path[i];
+    sg.food.push(ssMakeFood(p.x + (Math.random() - 0.5) * 40, p.y + (Math.random() - 0.5) * 40, 1, wPerOrb));
+    if (Math.random() < 0.5)
+      sg.food.push(ssMakeFood(p.x + (Math.random() - 0.5) * 50, p.y + (Math.random() - 0.5) * 50));
+  }
+}
+
+function ssSpawnSnake(pid, color, name) {
+  const a = Math.random() * Math.PI * 2;
+  const r = SS_ARENA_R * (0.22 + Math.random() * 0.56);
+  const sx = Math.cos(a) * r, sy = Math.sin(a) * r;
+  const face = Math.atan2(-sy, -sx);
+  const ns = SS_INIT_NS;
+  const initR = ssSectionRadius(ns);
+  const pathLen = Math.ceil(ns * initR * 0.5 * 2 / SS_SPD) + 10;
+  const path = [];
+  for (let i = 0; i < pathLen; i++)
+    path.push({ x: sx - Math.cos(face) * i * SS_SPD, y: sy - Math.sin(face) * i * SS_SPD });
+  return {
+    pid, color: color || '#FFD700', name: name || 'SNAKE',
+    x: sx, y: sy, angle: face, targetAngle: face, circling: false,
+    ns, thick: ssThick(ns), path, segs: [],
+    growQueue: 0, _boostDrainAcc: 0, _shed: 0,
+    alive: true, boost: false, score: 0, usd: 0, lastTs: Date.now()
+  };
+}
+
+function ssGetSegsFromPath(sn) {
+  if (!sn.path || !sn.path.length) return [];
+  const r = ssSectionRadius(sn.ns), spacing = r * 0.5;
+  const pts = [[Math.round(sn.x), Math.round(sn.y)]];
+  let cum = 0;
+  for (let o = 0; o + 1 < sn.path.length && pts.length < sn.ns; o++) {
+    const dx = sn.path[o + 1].x - sn.path[o].x, dy = sn.path[o + 1].y - sn.path[o].y;
+    const d = Math.hypot(dx, dy);
+    if (d > 0) {
+      while (pts.length < sn.ns && cum + d >= spacing * pts.length) {
+        const f = (spacing * pts.length - cum) / d;
+        pts.push([Math.round(sn.path[o].x + f * dx), Math.round(sn.path[o].y + f * dy)]);
+      }
+    }
+    cum += d;
+  }
+  return pts;
+}
+
 const ssGames = new Map(); // lobbyId → { snakes: Map(pid→snake), tickInterval, tuning }
 
 function getSsGame(lid) {
-  if (!ssGames.has(lid)) ssGames.set(lid, { snakes: new Map(), tickInterval: null, tuning: { hbs: SS_HBS, hhbs: SS_HHBS, faceDeg: 75, rule: 'smallest_wins' } });
+  if (!ssGames.has(lid)) ssGames.set(lid, {
+    snakes: new Map(), tickInterval: null, tick: 0,
+    food: [], _foodDirty: true, _lastFoodSend: 0,
+    tuning: { hbs: SS_HBS, hhbs: SS_HHBS, faceDeg: 75, rule: 'smallest_wins' }
+  });
   return ssGames.get(lid);
 }
 
@@ -204,36 +297,46 @@ function ssUpdateFromHostSS(lid, snakesData, io) {
   ssCheckCollisions(sg, lid, io);
 }
 
-// ssin: only used for ghost-timer refresh and angle/boost updates — no dead-reckoning
+// ssHandleInput: receive direction/boost input — server owns position, no x/y needed from client
 function ssHandleInput(lid, pid, d, io) {
   const sg = getSsGame(lid);
   let sn = sg.snakes.get(pid);
-  if (!sn) {
-    // Fallback creation from ssin before first ss arrives
-    if (d.x == null || d.y == null) return;
-    const ns = Math.max(8, d.ns || 26);
-    sn = { pid, x: d.x, y: d.y, angle: d.angle || 0, boost: false,
-           ns, thick: ssThick(ns), segs: [], alive: true, lastTs: Date.now() };
+  if (!sn || (!sn.alive && (!sn._killedAt || Date.now() - sn._killedAt > 2000))) {
+    // First input OR dead snake rejoin (2s cooldown prevents revival from in-flight packets)
+    sn = ssSpawnSnake(pid, (sn && sn.color) || d.color || '#FFD700', (sn && sn.name) || d.name || 'SNAKE');
+    if (d.ns && d.ns > SS_INIT_NS) { sn.ns = Math.min(SS_MAX_NS, d.ns); sn.thick = ssThick(sn.ns); }
     sg.snakes.set(pid, sn);
+    if (!sg.food || !sg.food.length) ssReconcileFood(sg);
     if (!sg.tickInterval) {
       sg.tickInterval = setInterval(() => ssTick(lid, io), TICK_MS);
       console.log(`[${lid}] ss game loop started`);
     }
     return;
   }
+  if (!sn.alive) return; // within 2s death cooldown — ignore
   sn.lastTs = Date.now();
-  if (typeof d.angle === 'number') sn.angle = d.angle;
-  sn.boost = !!d.boost;
-  if (d.ns && d.ns > 0) { sn.ns = d.ns; sn.thick = ssThick(d.ns); }
-  // Keep head x,y fresh from ssin (40ms) between ss updates (33ms)
-  if (d.x != null && d.y != null) { sn.x = d.x; sn.y = d.y; }
+  if (d.circle) {
+    sn.circling = true;
+    sn.targetAngle = null;
+  } else {
+    sn.circling = false;
+    if (typeof d.angle === 'number') sn.targetAngle = d.angle;
+  }
+  sn.boost = !!d.boost && sn.ns > SS_BOOST_MIN;
+  if (d.color) sn.color = d.color;
+  if (d.name)  sn.name  = d.name;
 }
 
 function ssPlayerLeft(lid, pid, io) {
   const sg = ssGames.get(lid);
   if (!sg) return;
   const sn = sg.snakes.get(pid);
-  if (sn) { sn.alive = false; sn.segs = []; }
+  if (sn && sn.alive) {
+    if (!sg.food) sg.food = [];
+    ssSpawnKillFood(sg, sn);
+    sg._foodDirty = true;
+    sn.alive = false; sn.segs = []; sn.path = [];
+  } else if (sn) { sn.segs = []; sn.path = []; }
   setTimeout(() => {
     const g = ssGames.get(lid);
     if (!g) return;
@@ -249,15 +352,118 @@ function ssPlayerLeft(lid, pid, io) {
 function ssTick(lid, io) {
   const sg = ssGames.get(lid);
   if (!sg) return;
+  sg.tick = (sg.tick || 0) + 1;
   const now = Date.now();
-  // Ghost check only — collision is checked in ssUpdateFromHostSS with fresh positions
+  if (!sg.food || !sg.food.length) ssReconcileFood(sg);
+
+  // 1. Move all alive snakes
   sg.snakes.forEach(sn => {
     if (!sn.alive) return;
-    if (now - sn.lastTs > SS_GHOST_MS) {
-      sn.alive = false; sn.segs = [];
-      io.to(lid).emit('elim', { id: sn.pid, killerId: null });
+    if (now - sn.lastTs > SS_GHOST_MS) { ssKill(sn, null, lid, io); return; }
+
+    // Turn toward target angle (or circle)
+    if (sn.circling) {
+      sn.angle += SS_MAX_TURN;
+    } else if (typeof sn.targetAngle === 'number') {
+      const delta = ssAngleDiff(sn.targetAngle, sn.angle);
+      sn.angle += Math.max(-SS_MAX_TURN, Math.min(SS_MAX_TURN, delta));
+    }
+    while (sn.angle >  Math.PI) sn.angle -= 2 * Math.PI;
+    while (sn.angle < -Math.PI) sn.angle += 2 * Math.PI;
+
+    // Advance head
+    const spd = (sn.boost && sn.ns > SS_BOOST_MIN) ? SS_BSPD : SS_SPD;
+    const nx = sn.x + Math.cos(sn.angle) * spd;
+    const ny = sn.y + Math.sin(sn.angle) * spd;
+    if (nx * nx + ny * ny >= SS_ARENA_R * SS_ARENA_R) { ssKill(sn, null, lid, io); return; }
+    sn.x = nx; sn.y = ny;
+    if (!sn.path) sn.path = [];
+    sn.path.unshift({ x: nx, y: ny });
+
+    // Trim path to needed arc length
+    const rr = ssSectionRadius(sn.ns);
+    const keepLen = sn.ns * rr * 0.5 + 4 * rr + 80;
+    let cum = 0;
+    for (let i = 0; i + 1 < sn.path.length; i++) {
+      cum += Math.hypot(sn.path[i + 1].x - sn.path[i].x, sn.path[i + 1].y - sn.path[i].y);
+      if (cum >= keepLen) { sn.path.length = i + 2; break; }
+    }
+
+    // Apply growth queue
+    while ((sn.growQueue || 0) > 0 && sn.ns < SS_MAX_NS) { sn.growQueue--; sn.ns++; sn.thick = ssThick(sn.ns); }
+
+    // Boost drain + shed pellets
+    if (sn.boost && sn.ns > SS_BOOST_MIN) {
+      sn._boostDrainAcc = (sn._boostDrainAcc || 0) + SS_BOOST_DRAIN_A;
+      while (sn._boostDrainAcc >= SS_BOOST_DRAIN_T) {
+        sn._boostDrainAcc -= SS_BOOST_DRAIN_T;
+        sn.ns = Math.max(SS_BOOST_MIN, sn.ns - 1); sn.thick = ssThick(sn.ns);
+        sn._shed = (sn._shed || 0) + 1;
+        if (sn._shed >= SS_FOOD_GROW) {
+          sn._shed -= SS_FOOD_GROW;
+          const tail = sn.path[sn.path.length - 1] || { x: sn.x, y: sn.y };
+          sg.food.push(ssMakeFood(tail.x + (Math.random()-0.5)*6, tail.y + (Math.random()-0.5)*6, 0, 0, sn.pid, now + SS_SHED_NE_MS));
+          sg._foodDirty = true;
+        }
+      }
+    } else { sn._boostDrainAcc = 0; }
+
+    if (sn.ns < SS_MIN_NS) { ssKill(sn, null, lid, io); }
+  });
+
+  // 2. Food pickup — exact head position, no guessing
+  sg.snakes.forEach(sn => {
+    if (!sn.alive) return;
+    for (let i = sg.food.length - 1; i >= 0; i--) {
+      const f = sg.food[i];
+      if (f.o === sn.pid && f.ne && now < f.ne) continue; // shed cooldown
+      const dx = sn.x - f.x, dy = sn.y - f.y;
+      const pickR = f.k ? (sn.thick + 42) : (sn.thick + 29);
+      if (dx * dx + dy * dy < pickR * pickR) {
+        sn.growQueue = (sn.growQueue || 0) + SS_FOOD_GROW;
+        sn.score = (sn.score || 0) + (f.k ? 50 : 10);
+        if (f.w) sn.usd = (sn.usd || 0) + f.w;
+        sg.food.splice(i, 1);
+        sg._foodDirty = true;
+      }
     }
   });
+  ssReconcileFood(sg);
+
+  // 3. Recompute segs from server path (used by ssCheckCollisions)
+  sg.snakes.forEach(sn => { if (sn.alive) sn.segs = ssGetSegsFromPath(sn); });
+
+  // 4. Collision check (H2H + H2B)
+  ssCheckCollisions(sg, lid, io);
+
+  // 5. Broadcast state to all clients
+  ssBroadcastState(sg, lid, io);
+}
+
+function ssBroadcastState(sg, lid, io) {
+  if (!sg) return;
+  const snakePkts = [];
+  sg.snakes.forEach(sn => {
+    if (!sn.alive) return;
+    snakePkts.push({
+      id: sn.pid, x: Math.round(sn.x), y: Math.round(sn.y),
+      angle: sn.angle, ns: sn.ns, boost: sn.boost,
+      score: sn.score || 0, usd: sn.usd || 0,
+      color: sn.color, name: sn.name
+    });
+  });
+  const pkt = { snakes: snakePkts, t: Date.now(), tick: sg.tick || 0 };
+  const now = Date.now();
+  if (sg._foodDirty || !sg._lastFoodSend || now - sg._lastFoodSend > 250) {
+    pkt.food = sg.food.map(f => [
+      Math.round(f.x), Math.round(f.y),
+      f.ci || 0, Math.round((f.size || 6) * 10) / 10,
+      f.k ? 1 : 0, f.w ? Math.round(f.w * 1e6) : 0
+    ]);
+    sg._lastFoodSend = now;
+    sg._foodDirty = false;
+  }
+  io.to(lid).emit('ss-state', pkt);
 }
 
 function ssCheckCollisions(sg, lid, io) {
@@ -337,9 +543,13 @@ function ssCheckCollisions(sg, lid, io) {
 function ssKill(victim, killer, lid, io) {
   if (!victim.alive) return;
   victim.alive = false;
-  victim._killedAt = Date.now(); // prevent ss packet revival during RTT window
+  victim._killedAt = Date.now();
+  console.log(`[${lid}] KILL: ${victim.pid.slice(0,8)} by ${killer ? killer.pid.slice(0,8) : 'wall/size'}`);
+  // Spawn kill food before clearing path
+  const sg = ssGames.get(lid);
+  if (sg) { if (!sg.food) sg.food = []; ssSpawnKillFood(sg, victim); sg._foodDirty = true; }
   victim.segs = [];
-  console.log(`[${lid}] KILL: ${victim.pid.slice(0,8)} by ${killer ? killer.pid.slice(0,8) : 'border'}`);
+  victim.path = [];
   io.to(lid).emit('elim', { id: victim.pid, killerId: killer ? killer.pid : null });
 }
 
@@ -686,20 +896,18 @@ io.on('connection', socket => {
 
   // ── Snake relay (ss-* rooms) ─────────────────────────────────
   socket.on('ss', (d) => {
-    // Server owns kill authority for ss-* rooms — strip client-reported kills before relay.
-    if (lobbyId.startsWith('ss-') && d && d.kills) {
-      d = Object.assign({}, d);
-      delete d.kills;
-    }
-    // Feed HOST's authoritative body segs into server collision state
-    if (lobbyId.startsWith('ss-') && d && d.snakes) {
-      ssUpdateFromHostSS(lobbyId, d.snakes, io);
-    }
+    // Server is now authoritative for ss-* lobbies — ignore HOST-originated ss packets.
+    // The server runs physics itself (ssTick) and broadcasts ss-state; no relay needed.
+    if (lobbyId.startsWith('ss-')) return;
     socket.to(lobbyId).emit('ss', d);
   });
   socket.on('ssin', (d) => {
-    socket.to(lobbyId).emit('ssin', d); // relay for peer dead-reckoning
-    if (lobbyId.startsWith('ss-')) ssHandleInput(lobbyId, pid, d, io);
+    if (lobbyId.startsWith('ss-')) {
+      // Server-authoritative: handle input directly, no peer relay
+      ssHandleInput(lobbyId, pid, d, io);
+    } else {
+      socket.to(lobbyId).emit('ssin', d);
+    }
   });
   socket.on('ss-tune', (d) => {
     if (!lobbyId.startsWith('ss-') || !d) return;
