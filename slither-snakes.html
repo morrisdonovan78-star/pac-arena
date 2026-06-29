@@ -546,7 +546,7 @@ const _INTERP_DELAY=100; // ms: render this far behind the latest snapshot for s
 let _localDead=false;
 let _autoCircle=false; // toggle: snake auto-circles until toggled off (E key / L3 button)
 let _lastRoomId=null;
-let _tuning={hbs:1.07,hhbs:1.18,faceDeg:75,rule:'smallest_wins'};
+let _tuning={hbs:1.07,hhbs:1.18,faceDeg:75,rule:'biggest_wins'};
 try{const _sv=localStorage.getItem('ss_tuning_v2');if(_sv&&localStorage.getItem('ss_owner')==='1')Object.assign(_tuning,JSON.parse(_sv));}catch(_){}
 let _showTuning=false;
 let _botCount=0,_isPractice=false;
@@ -2011,17 +2011,30 @@ function _practiceCheckCollisions(){
       const rr=(hR1+hR2)*T.hbs;
       const dx=qx-px,dy=qy-py,d2=dx*dx+dy*dy;
       if(d2>rr*rr)continue;
-      // Facing gate: both must face each other within faceDeg° — exact moneyslither rule.
+      // Facing gate — mirrors server ssCheckCollisions exactly (circle-kill one-sided gate).
       if(d2>0){
         const _dh=Math.sqrt(d2);
         const pDot=Math.cos(p.angle)*(dx/_dh)+Math.sin(p.angle)*(dy/_dh);
         const qDot=Math.cos(q.angle)*(-dx/_dh)+Math.sin(q.angle)*(-dy/_dh);
-        if(pDot<_faceCos||qDot<_faceCos)continue;
+        const _pFacing=pDot>=_faceCos,_qFacing=qDot>=_faceCos;
+        // One-sided gate for auto-circle: only victim needs to face the circler's head
+        const _pCircling=(p.id===myPid)&&_autoCircle;
+        const _qCircling=(q.id===myPid)&&_autoCircle;
+        if(_pCircling&&!_qCircling){
+          if(!_qFacing)continue;
+          died.add(q.id);eliminateSnake(q.id,p.id);continue;
+        }
+        if(_qCircling&&!_pCircling){
+          if(!_pFacing)continue;
+          died.add(p.id);eliminateSnake(p.id,q.id);continue;
+        }
+        if(!_pFacing||!_qFacing)continue;
       }
-      // Determine loser
+      // Determine loser (standard H2H — neither or both circling)
       let loser,winner;
       if(T.rule==='both_die'){died.add(p.id);died.add(q.id);eliminateSnake(p.id,q.id);eliminateSnake(q.id,p.id);continue;}
       if(T.rule==='random'){if(Math.random()<0.5){loser=p;winner=q;}else{loser=q;winner=p;}}
+      else if(T.rule==='biggest_wins'){if(p.numSections>=q.numSections){loser=q;winner=p;}else{loser=p;winner=q;}}
       else if(T.rule==='smallest_wins'){if(p.numSections<=q.numSections){loser=q;winner=p;}else{loser=p;winner=q;}}
       else{if(p.numSections>=q.numSections){loser=q;winner=p;}else{loser=p;winner=q;}}
       died.add(loser.id);eliminateSnake(loser.id,winner.id);
