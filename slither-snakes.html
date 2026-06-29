@@ -488,6 +488,8 @@ const SHED_NOEAT_MS = 4000;  // a snake can't re-eat its own boost-shed trail pe
 const SS_HB   = 0.95;   // HITBOX_BASE
 const SS_HBS  = 1.07;   // combatHitboxScale
 const SS_HHBS = 1.18;   // combatHeadHitboxScale
+const FOOD_PICKUP_R      = 29;  // food pickup reach beyond thick (moneyslither formula)
+const KILL_FOOD_PICKUP_R = 42;  // kill-food (SOL wager) pickup reach beyond thick
 const HOST_TIMEOUT = 800;   // ms of host silence before a guest promotes itself (host migration)
 const SELF_SKIP    = 9999;  // disable self-collision — damnbruh.com: own tail never kills you
 const ESCROW_PUBKEY = '2SYFfCsSmKr8qwK1AfWd36JtAc1BCaRaSSxyECKUJjBb';
@@ -1496,7 +1498,11 @@ function msThick(s){
 // distance keeps the rendered body length identical at any framerate and any boost state.
 function trimPath(snake){
   const p=snake.path; if(!p||p.length<3)return;
-  const r=sectionRadius(snake);const keep=snake.numSections*r*SEGMENT_SPACING+4*r+80;
+  const r=sectionRadius(snake),spacing=r*SEGMENT_SPACING;
+  // Keep exactly the arc that _getSegsFromPath needs (maxSegs * spacing + 1 spacing buffer).
+  // Old formula (ns*r*0.5 + 4*r+80) was ~20px short for ns=24, leaving the tail 2 segs uncovered.
+  const maxSegs=snake.numSections+Math.ceil((4*r+80)/spacing)+2;
+  const keep=maxSegs*spacing+spacing;
   let cum=0;
   for(let i=0;i+1<p.length;i++){
     cum+=Math.hypot(p[i+1].x-p[i].x,p[i+1].y-p[i].y);
@@ -1804,19 +1810,25 @@ function _onVisibility(){
 }
 document.addEventListener('visibilitychange',_onVisibility);
 
-// Swept segment→circle hit test: did segment p1→p2 pass through circle (c,r)?
-function segHitsCircle(p1,p2,c,r){
-  const ex=p2.x-p1.x,ey=p2.y-p1.y;
-  const fx=p1.x-c.x,fy=p1.y-c.y;
-  const a=ex*ex+ey*ey;
-  if(a<0.001)return fx*fx+fy*fy<r*r;
-  const b=2*(fx*ex+fy*ey);
-  const cc=fx*fx+fy*fy-r*r;
-  const disc=b*b-4*a*cc;
-  if(disc<0)return false;
-  const sq=Math.sqrt(disc);
-  const t1=(-b-sq)/(2*a),t2=(-b+sq)/(2*a);
-  return(t1>=0&&t1<=1)||(t2>=0&&t2<=1)||(t1<=0&&t2>=1);
+// Extract evenly-spaced collision segs from a snake's path, mirroring ssGetSegsFromPath.
+// Used by _practiceCheckCollisions H2B so practice and server use identical sampling.
+function _getSegsFromPath(snake){
+  const r=sectionRadius(snake),spacing=r*SEGMENT_SPACING;
+  const maxSegs=snake.numSections+Math.ceil((4*r+80)/spacing)+2;
+  const pts=[snake.path[0]];
+  let cum=0;
+  for(let o=0;o+1<snake.path.length&&pts.length<maxSegs;o++){
+    const dx=snake.path[o+1].x-snake.path[o].x,dy=snake.path[o+1].y-snake.path[o].y;
+    const d=Math.hypot(dx,dy);
+    if(d>0){
+      while(pts.length<maxSegs&&cum+d>=spacing*pts.length){
+        const f=(spacing*pts.length-cum)/d;
+        pts.push({x:snake.path[o].x+f*dx,y:snake.path[o].y+f*dy});
+      }
+    }
+    cum+=d;
+  }
+  return pts;
 }
 
 function snakeTick(){
@@ -1977,10 +1989,10 @@ function snakeTick(){
       const f=SG.food[i];
       if(f.o===snake.id&&f.ne&&_nowEat<f.ne)continue; // can't re-eat your own fresh boost-shed (anti circle-farm)
       const dx=h.x-f.x,dy=h.y-f.y;
-      const _fThick=msThick(snake);const pickR=f.k?(_fThick+42):(_fThick+29); // moneyslither formula: gold≈57px, normal≈44px
+      const _fThick=msThick(snake);const pickR=f.k?(_fThick+KILL_FOOD_PICKUP_R):(_fThick+FOOD_PICKUP_R);
       if(dx*dx+dy*dy<pickR*pickR){
         snake.growQueue+=FOOD_GROW;
-        snake.score+=10;
+        snake.score+=(f.k?50:10);
         if(f.w){ if(snake.id===myPid){_myUsd+=f.w;_spawnMoneyFx(h.x,h.y);} else snake.usd=(snake.usd||0)+f.w; } // collect wager share from kill food
         SG.food.splice(i,1); // eaten pebble becomes body mass — no respawn; reconcileFood conserves the total
       }
@@ -2040,7 +2052,10 @@ function _practiceCheckCollisions(){
       died.add(loser.id);eliminateSnake(loser.id,winner.id);
     }
   }
-  // H2B
+  // H2B — use _getSegsFromPath (same spacing as server ssGetSegsFromPath) so practice
+  // and server fire H2B at identical distances. Pre-compute segs once per snake per tick.
+  const _segsCache=new Map();
+  alive.forEach(s=>{if(!died.has(s.id))_segsCache.set(s.id,_getSegsFromPath(s));});
   for(let pi=0;pi<alive.length;pi++){
     const pp=alive[pi];if(died.has(pp.id))continue;
     const hx=pp.path[0].x,hy=pp.path[0].y;
@@ -2049,12 +2064,10 @@ function _practiceCheckCollisions(){
       if(pi===qi)continue;
       const qq=alive[qi];if(died.has(qq.id))continue;
       const bR=msThick(qq)*SS_HB*T.hbs;
-      const crr=(hHR+bR),crr2=crr*crr;
-      // Check full path arc (not just numSections segs) so circle coil is fully covered.
-      // path[0]=head (skip), path[1..n]=body arc including tail beyond visible segments.
-      const qpath=qq.path;
-      for(let k=1;k<qpath.length;k++){
-        const seg=qpath[k];
+      const crr2=(hHR+bR)*(hHR+bR);
+      const qsegs=_segsCache.get(qq.id)||[];
+      for(let k=1;k<qsegs.length;k++){
+        const seg=qsegs[k];
         const sdx=hx-seg.x,sdy=hy-seg.y;
         if(sdx*sdx+sdy*sdy<=crr2){died.add(pp.id);eliminateSnake(pp.id,qq.id);break;}
       }

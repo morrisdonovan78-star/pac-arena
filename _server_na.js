@@ -150,21 +150,15 @@ const SS_INIT_NS       = 24;     // client INIT_SECTIONS
 const SS_MIN_NS        = 8;      // client MIN_SECTIONS
 const SS_MAX_NS        = 300;    // client MAX_SECTIONS
 const SS_SHED_NE_MS    = 4000;   // client SHED_NOEAT_MS
+const SS_FOOD_PICKUP_R      = 29;  // client FOOD_PICKUP_R
+const SS_KILL_FOOD_PICKUP_R = 42;  // client KILL_FOOD_PICKUP_R
 
-function ssSegs(size) {
-  const s = Math.max(SS_MIN_SIZE, Number(size) || SS_MIN_SIZE);
-  const n = s <= 100 ? 8 + (s - 40) * (26 - 8) / (100 - 40) : 26 + (s - 100) * 0.08;
-  return Math.max(8, Math.round(n));
-}
 function ssThick(n) {
   n = Math.max(1, Number(n) || 1);
   let t = 7.5 + 0.55 * Math.sqrt(n);
   if (n > 26) t += Math.pow(n - 26, 0.7) * 0.17;
   return Math.max(10, t * 1.43);
 }
-function ssBodyR(thick) { return thick * SS_HB * SS_HBS; }
-function ssHeadR(thick) { return thick * SS_HB * SS_HBS * SS_HHBS; }
-
 function ssAngleDiff(a, b) {
   let d = a - b;
   while (d > Math.PI)  d -= 2 * Math.PI;
@@ -262,44 +256,6 @@ function ssSectionRadius(ns) {
   return 8 + Math.pow(ns * 5, 0.6) * 0.8;
 }
 
-// Update server snake state from HOST's authoritative ss broadcast.
-// segs[] = output of getBodyPoints() — HOST-simulated body positions, accurate.
-function ssUpdateFromHostSS(lid, snakesData, io) {
-  const sg = getSsGame(lid); // auto-create so HOST's first ss packet bootstraps the game
-  const seenIds = new Set();
-  snakesData.forEach(sd => {
-    if (!sd.id || !sd.segs || !sd.segs.length) return;
-    seenIds.add(sd.id);
-    let sn = sg.snakes.get(sd.id);
-    if (!sn) {
-      const ns = sd.ns || 26;
-      sn = { pid: sd.id, x: sd.segs[0][0], y: sd.segs[0][1],
-             angle: typeof sd.angle === 'number' ? sd.angle : 0, boost: !!sd.boost,
-             ns, thick: ssThick(ns), segs: sd.segs, alive: true, lastTs: Date.now() };
-      sg.snakes.set(sd.id, sn);
-      if (!sg.tickInterval) {
-        sg.tickInterval = setInterval(() => ssTick(lid, io), TICK_MS);
-        console.log(`[${lid}] ss game loop started`);
-      }
-    } else {
-      if (sd.ns) { sn.ns = sd.ns; sn.thick = ssThick(sd.ns); }
-      sn.angle = typeof sd.angle === 'number' ? sd.angle : sn.angle;
-      sn.boost = !!sd.boost;
-      sn.x = sd.segs[0][0]; sn.y = sd.segs[0][1];
-      sn.segs = sd.segs;
-      // Only revive if server hasn't killed this snake within last 2s (HOST takes ~100ms to process elim)
-      if (!sn._killedAt || Date.now() - sn._killedAt > 2000) sn.alive = true;
-      sn.lastTs = Date.now();
-    }
-  });
-  // Snakes absent from this ss packet are dead (eliminated or haven't spawned)
-  sg.snakes.forEach((sn, id) => {
-    if (!seenIds.has(id)) { sn.alive = false; sn.segs = []; }
-  });
-  // Check collisions immediately with fresh positions — don't wait for the async ssTick timer
-  ssCheckCollisions(sg, lid, io);
-}
-
 // ssHandleInput: receive direction/boost input — server owns position, no x/y needed from client
 function ssHandleInput(lid, pid, d, io) {
   const sg = getSsGame(lid);
@@ -385,9 +341,11 @@ function ssTick(lid, io) {
     if (!sn.path) sn.path = [];
     sn.path.unshift({ x: nx, y: ny });
 
-    // Trim path to needed arc length
+    // Trim path to the exact arc length needed by ssGetSegsFromPath (maxSegs * spacing + 1 buffer)
     const rr = ssSectionRadius(sn.ns);
-    const keepLen = sn.ns * rr * 0.5 + 4 * rr + 80;
+    const spacing = rr * 0.5;
+    const maxSegs = sn.ns + Math.ceil((4 * rr + 80) / spacing) + 2;
+    const keepLen = maxSegs * spacing + spacing;
     let cum = 0;
     for (let i = 0; i + 1 < sn.path.length; i++) {
       cum += Math.hypot(sn.path[i + 1].x - sn.path[i].x, sn.path[i + 1].y - sn.path[i].y);
@@ -423,7 +381,7 @@ function ssTick(lid, io) {
       const f = sg.food[i];
       if (f.o === sn.pid && f.ne && now < f.ne) continue; // shed cooldown
       const dx = sn.x - f.x, dy = sn.y - f.y;
-      const pickR = f.k ? (sn.thick + 42) : (sn.thick + 29);
+      const pickR = f.k ? (sn.thick + SS_KILL_FOOD_PICKUP_R) : (sn.thick + SS_FOOD_PICKUP_R);
       if (dx * dx + dy * dy < pickR * pickR) {
         sn.growQueue = (sn.growQueue || 0) + SS_FOOD_GROW;
         sn.score = (sn.score || 0) + (f.k ? 50 : 10);
