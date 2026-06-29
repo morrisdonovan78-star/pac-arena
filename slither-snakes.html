@@ -464,8 +464,8 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
 
 // ══ CONSTANTS ════════════════════════════════════════════════
 const ARENA_R      = 3000;  // world radius
-const SNAKE_SPD    = 9.6;   // px/tick normal — 288 px/s ÷ 30 TPS (moneyslither BASE_SPEED)
-const BOOST_SPD    = 21.0;  // px/tick boost  — 630 px/s ÷ 30 TPS (moneyslither BOOST_SPEED)
+const SNAKE_SPD    = 288 / 30;  // moneyslither BASE_SPEED  288 px/s ÷ 30 TPS = 9.6 px/tick
+const BOOST_SPD    = 630 / 30;  // moneyslither BOOST_SPEED 630 px/s ÷ 30 TPS = 21 px/tick
 const TICK_MS      = 33;    // 30 TPS
 // damnbruh.com exact physics constants (extracted from page-d38402305f41a2e6.js)
 const SIZE_PER_SEGMENT   = 5;    // segments = floor(size / 5)
