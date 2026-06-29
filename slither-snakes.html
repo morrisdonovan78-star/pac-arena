@@ -2352,8 +2352,12 @@ function launchSnakeGame(){
 
   if(isHost&&_isPractice)startHostLoop();
   else startGuestLoop(); // All live players: send inputs only, server runs physics
-  // Push owner's saved tuning to server on every game start
-  if(isHost&&localStorage.getItem('ss_owner')==='1'&&_sio)_sio.emit('ss-tune',_tuning);
+  // Reload owner's saved tuning on every game start (covers rejoin without page reload).
+  // Push to server regardless of isHost — in ss-* lobbies the owner isn't always amFirst.
+  if(localStorage.getItem('ss_owner')==='1'){
+    try{const _sv=localStorage.getItem('ss_tuning_v2');if(_sv)Object.assign(_tuning,JSON.parse(_sv));}catch(_){}
+    if(_sio)_sio.emit('ss-tune',_tuning);
+  }
   rafHandle=requestAnimationFrame(rafDraw);
   if(_hostWatch)clearInterval(_hostWatch);
   // Host migration only applies in practice mode; live games use server authority
@@ -2388,11 +2392,11 @@ function _syncTuningUI(){
   e('tun-hbs').value=_tuning.hbs;       e('tun-hbs-val').textContent  =_tuning.hbs.toFixed(2)+'×';
   e('tun-hhbs').value=_tuning.hhbs;     e('tun-hhbs-val').textContent =_tuning.hhbs.toFixed(2)+'×';
   e('tun-face').value=_tuning.faceDeg;  e('tun-face-val').textContent =_tuning.faceDeg+'°';
-  e('tun-rule').value=_tuning.rule||'smallest_wins';
+  e('tun-rule').value=_tuning.rule||'biggest_wins';
   _drawTuningPreview();
 }
 function _resetTuning(){
-  _tuning={hbs:1.07,hhbs:1.18,faceDeg:75,rule:'smallest_wins'};
+  _tuning={hbs:1.07,hhbs:1.18,faceDeg:75,rule:'biggest_wins'};
   try{localStorage.removeItem('ss_tuning_v2');}catch(_){}
   _syncTuningUI();
   if(_sio)_sio.emit('ss-tune',_tuning);
