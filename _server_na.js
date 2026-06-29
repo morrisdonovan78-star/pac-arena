@@ -435,15 +435,24 @@ function ssCheckCollisions(sg, lid, io) {
   const alive = [...sg.snakes.values()].filter(s => s.alive && s.segs && s.segs.length > 1);
   const died = new Set();
 
-  // ── Head-to-head: moneyslither formula (headR1+headR2)*hbs
-  // Circle-kill rule (matches moneyslither behavior): when one snake is auto-circling,
-  // the victim only needs to face the circler's head — the circler's tangential heading
-  // is not required. This fires H2H (not H2B) when the victim charges into the circler's
-  // head zone, closing the 0-11px gap that neither H2H nor H2B would otherwise cover.
+  // ── Head-to-head: two-type pipeline. No circling overrides — circling only affects
+  // which angle value is used in gate computation (live vs client-reported).
+  //
+  // TYPE 1 — direct face-off: both snakes face each other within faceDeg → bigger wins.
+  // TYPE 2 — grazing/circling: one or both fail gate but heads are within rr →
+  //          higher approach component wins; if ambiguous, smaller wins.
+  //
+  // Steps:
+  //   1  head positions (segs[0] = post-movement rounded)
+  //   2  candidate check: d < rr = (hR1+hR2)*hbs
+  //   3  compute pDot / qDot
+  //   4  classify: both pass faceCos → TYPE 1 ; else → TYPE 2
+  //   5  resolve per type
+  //   6  apply once via died set; emit debug log
   const _faceCos = Math.cos((T.faceDeg || 75) * Math.PI / 180);
   for (let i = 0; i < alive.length; i++) {
     const p = alive[i]; if (died.has(p.pid)) continue;
-    const px = p.segs[0][0], py = p.segs[0][1];
+    const px = p.segs[0][0], py = p.segs[0][1];                       // Step 1
     const hR1 = p.thick * SS_HB * T.hbs * T.hhbs;
     for (let j = i + 1; j < alive.length; j++) {
       const q = alive[j]; if (died.has(q.pid)) continue;
@@ -451,46 +460,32 @@ function ssCheckCollisions(sg, lid, io) {
       const hR2 = q.thick * SS_HB * T.hbs * T.hhbs;
       const rr = (hR1 + hR2) * T.hbs;
       const dx = qx - px, dy = qy - py, d2 = dx * dx + dy * dy;
-      if (d2 > rr * rr) continue;
-      if (d2 > 0) {
-        const dh = Math.sqrt(d2);
+      if (d2 > rr * rr) continue;                                       // Step 2
+      let pDot = 0, qDot = 0, dh = 0;
+      if (d2 > 0) {                                                      // Step 3
+        dh = Math.sqrt(d2);
         const pFace = p.circling ? p.angle : (p.faceAngle ?? p.angle);
         const qFace = q.circling ? q.angle : (q.faceAngle ?? q.angle);
-        const pDot = Math.cos(pFace) * (dx / dh) + Math.sin(pFace) * (dy / dh);
-        const qDot = Math.cos(qFace) * (-dx / dh) + Math.sin(qFace) * (-dy / dh);
-        const pFacing = pDot >= _faceCos, qFacing = qDot >= _faceCos;
-        // One snake is auto-circling: only the victim needs to face the circler's head.
-        // Circler always wins — victim ran into the head zone of an encircling snake.
-        if (p.circling && !q.circling) {
-          if (!qFacing) continue;
-          if (!died.has(q.pid)) { died.add(q.pid); ssKill(q, p, lid, io); } continue;
-        }
-        if (q.circling && !p.circling) {
-          if (!pFacing) continue;
-          if (!died.has(p.pid)) { died.add(p.pid); ssKill(p, q, lid, io); } continue;
-        }
-        // Standard H2H (neither or both circling): both must face each other
-        if (!pFacing || !qFacing) continue;
+        pDot = Math.cos(pFace) * (dx / dh) + Math.sin(pFace) * (dy / dh);
+        qDot = Math.cos(qFace) * (-dx / dh) + Math.sin(qFace) * (-dy / dh);
       }
-      // Winner for standard H2H
-      if (T.rule === 'both_die') {
-        died.add(p.pid); died.add(q.pid);
-        ssKill(p, q, lid, io); ssKill(q, p, lid, io); continue;
+      const pFacing = pDot >= _faceCos, qFacing = qDot >= _faceCos;    // Step 4
+      let loser, winner, reason;
+      if (pFacing && qFacing) {
+        // TYPE 1: mutual face-off → bigger wins; equal size → random
+        if      (p.ns > q.ns) { winner = p; loser = q; reason = 'T1-bigger'; }
+        else if (q.ns > p.ns) { winner = q; loser = p; reason = 'T1-bigger'; }
+        else                   { winner = Math.random() < 0.5 ? p : q; loser = winner === p ? q : p; reason = 'T1-tie'; }
+      } else {
+        // TYPE 2: grazing/circling → first-contact by approach component; smaller breaks ties
+        const pA = Math.max(0, pDot), qA = Math.max(0, qDot);
+        if      (pA > qA + 0.05) { winner = p; loser = q; reason = 'T2-approach'; }
+        else if (qA > pA + 0.05) { winner = q; loser = p; reason = 'T2-approach'; }
+        else if (p.ns <= q.ns)   { winner = p; loser = q; reason = 'T2-smaller'; }
+        else                     { winner = q; loser = p; reason = 'T2-smaller'; }
       }
-      let loser, winner;
-      if (T.rule === 'biggest_wins') {
-        if      (p.ns > q.ns) { loser = q; winner = p; }
-        else if (q.ns > p.ns) { loser = p; winner = q; }
-        else    { loser = Math.random() < 0.5 ? p : q; winner = loser === p ? q : p; }
-      } else if (T.rule === 'random') {
-        loser = Math.random() < 0.5 ? p : q; winner = loser === p ? q : p;
-      } else { // smallest_wins: fewer sections = wins
-        if      (p.ns < q.ns) { loser = q; winner = p; }
-        else if (q.ns < p.ns) { loser = p; winner = q; }
-        else    { loser = Math.random() < 0.5 ? p : q; winner = loser === p ? q : p; }
-      }
-      died.add(loser.pid);
-      ssKill(loser, winner, lid, io);
+      console.log(`[H2H] p=${p.pid} q=${q.pid} d=${dh.toFixed(1)} pDot=${pDot.toFixed(3)} qDot=${qDot.toFixed(3)} pFacing=${pFacing} qFacing=${qFacing} type=${pFacing&&qFacing?1:2} winner=${winner.pid} reason=${reason}`);
+      died.add(loser.pid); ssKill(loser, winner, lid, io);               // Step 6
     }
   }
 

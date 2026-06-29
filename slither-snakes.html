@@ -2010,7 +2010,9 @@ function _practiceCheckCollisions(){
   const T=_tuning;
   const alive=[...SG.snakes.values()].filter(s=>s.alive&&s.path&&s.path.length>1);
   const died=new Set();
-  // H2H — moneyslither formula: (headR1+headR2)*hbs; facing gate skipped when snakes cross (d<rr/3)
+  // H2H — two-type pipeline mirroring server ssCheckCollisions. No circling overrides.
+  // TYPE 1 (both facing): bigger wins. TYPE 2 (grazing/one-sided): approach wins; smaller tiebreaker.
+  // Practice uses live p.angle (no network lag to compensate for).
   const _faceCos=Math.cos(T.faceDeg*Math.PI/180);
   for(let i=0;i<alive.length;i++){
     const p=alive[i];if(died.has(p.id))continue;
@@ -2022,34 +2024,29 @@ function _practiceCheckCollisions(){
       const hR2=msThick(q)*SS_HB*T.hbs*T.hhbs;
       const rr=(hR1+hR2)*T.hbs;
       const dx=qx-px,dy=qy-py,d2=dx*dx+dy*dy;
-      if(d2>rr*rr)continue;
-      // Facing gate — mirrors server ssCheckCollisions exactly (circle-kill one-sided gate).
-      if(d2>0){
-        const _dh=Math.sqrt(d2);
-        const pDot=Math.cos(p.angle)*(dx/_dh)+Math.sin(p.angle)*(dy/_dh);
-        const qDot=Math.cos(q.angle)*(-dx/_dh)+Math.sin(q.angle)*(-dy/_dh);
-        const _pFacing=pDot>=_faceCos,_qFacing=qDot>=_faceCos;
-        // One-sided gate for auto-circle: only victim needs to face the circler's head
-        const _pCircling=(p.id===myPid)&&_autoCircle;
-        const _qCircling=(q.id===myPid)&&_autoCircle;
-        if(_pCircling&&!_qCircling){
-          if(!_qFacing)continue;
-          died.add(q.id);eliminateSnake(q.id,p.id);continue;
-        }
-        if(_qCircling&&!_pCircling){
-          if(!_pFacing)continue;
-          died.add(p.id);eliminateSnake(p.id,q.id);continue;
-        }
-        if(!_pFacing||!_qFacing)continue;
+      if(d2>rr*rr)continue;                                                // Step 2
+      let pDot=0,qDot=0,_dh=0;
+      if(d2>0){                                                             // Step 3
+        _dh=Math.sqrt(d2);
+        pDot=Math.cos(p.angle)*(dx/_dh)+Math.sin(p.angle)*(dy/_dh);
+        qDot=Math.cos(q.angle)*(-dx/_dh)+Math.sin(q.angle)*(-dy/_dh);
       }
-      // Determine loser (standard H2H — neither or both circling)
+      const pFacing=pDot>=_faceCos,qFacing=qDot>=_faceCos;                // Step 4 classify
       let loser,winner;
-      if(T.rule==='both_die'){died.add(p.id);died.add(q.id);eliminateSnake(p.id,q.id);eliminateSnake(q.id,p.id);continue;}
-      if(T.rule==='random'){if(Math.random()<0.5){loser=p;winner=q;}else{loser=q;winner=p;}}
-      else if(T.rule==='biggest_wins'){if(p.numSections>=q.numSections){loser=q;winner=p;}else{loser=p;winner=q;}}
-      else if(T.rule==='smallest_wins'){if(p.numSections<=q.numSections){loser=q;winner=p;}else{loser=p;winner=q;}}
-      else{if(p.numSections>=q.numSections){loser=q;winner=p;}else{loser=p;winner=q;}}
-      died.add(loser.id);eliminateSnake(loser.id,winner.id);
+      if(pFacing&&qFacing){
+        // TYPE 1: mutual face-off → bigger wins; tie → random
+        if(p.numSections>q.numSections){winner=p;loser=q;}
+        else if(q.numSections>p.numSections){winner=q;loser=p;}
+        else{winner=Math.random()<0.5?p:q;loser=winner===p?q:p;}
+      }else{
+        // TYPE 2: grazing/circling → higher approach wins; smaller breaks tie
+        const pA=Math.max(0,pDot),qA=Math.max(0,qDot);
+        if(pA>qA+0.05){winner=p;loser=q;}
+        else if(qA>pA+0.05){winner=q;loser=p;}
+        else if(p.numSections<=q.numSections){winner=p;loser=q;}
+        else{winner=q;loser=p;}
+      }
+      died.add(loser.id);eliminateSnake(loser.id,winner.id);               // Step 6
     }
   }
   // H2B — use _getSegsFromPath (same spacing as server ssGetSegsFromPath) so practice
