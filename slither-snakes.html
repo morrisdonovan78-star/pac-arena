@@ -548,8 +548,8 @@ const _INTERP_DELAY=100; // ms: render this far behind the latest snapshot for s
 let _localDead=false;
 let _autoCircle=false; // toggle: snake auto-circles until toggled off (E key / L3 button)
 let _lastRoomId=null;
-let _tuning={hbs:1.07,hhbs:1.18,faceDeg:75,rule:'biggest_wins'};
-try{const _sv=localStorage.getItem('ss_tuning_v2');if(_sv&&localStorage.getItem('ss_owner')==='1')Object.assign(_tuning,JSON.parse(_sv));}catch(_){}
+let _tuning={hbs:1.07,hhbs:1.18,faceDeg:100,rule:'smallest_wins'};
+try{const _sv=localStorage.getItem('ss_tuning_v3');if(_sv&&localStorage.getItem('ss_owner')==='1')Object.assign(_tuning,JSON.parse(_sv));}catch(_){}
 let _showTuning=false;
 let _botCount=0,_isPractice=false;
 
@@ -2010,9 +2010,8 @@ function _practiceCheckCollisions(){
   const T=_tuning;
   const alive=[...SG.snakes.values()].filter(s=>s.alive&&s.path&&s.path.length>1);
   const died=new Set();
-  // H2H — two-type pipeline mirroring server ssCheckCollisions. No circling overrides.
-  // TYPE 1 (both facing): bigger wins. TYPE 2 (grazing/one-sided): approach wins; smaller tiebreaker.
-  // Practice uses live p.angle (no network lag to compensate for).
+  // H2H — MoneySlither pipeline mirroring server ssCheckCollisions.
+  // Both must face within faceDeg; gate fails → H2B only. No TYPE-2 fallback.
   const _faceCos=Math.cos(T.faceDeg*Math.PI/180);
   for(let i=0;i<alive.length;i++){
     const p=alive[i];if(died.has(p.id))continue;
@@ -2031,21 +2030,11 @@ function _practiceCheckCollisions(){
         pDot=Math.cos(p.angle)*(dx/_dh)+Math.sin(p.angle)*(dy/_dh);
         qDot=Math.cos(q.angle)*(-dx/_dh)+Math.sin(q.angle)*(-dy/_dh);
       }
-      const pFacing=pDot>=_faceCos,qFacing=qDot>=_faceCos;                // Step 4 classify
+      if(pDot<_faceCos||qDot<_faceCos)continue;                            // gate fails → H2B
       let loser,winner;
-      if(pFacing&&qFacing){
-        // TYPE 1: mutual face-off → bigger wins; tie → random
-        if(p.numSections>q.numSections){winner=p;loser=q;}
-        else if(q.numSections>p.numSections){winner=q;loser=p;}
-        else{winner=Math.random()<0.5?p:q;loser=winner===p?q:p;}
-      }else{
-        // TYPE 2: grazing/circling → higher approach wins; smaller breaks tie
-        const pA=Math.max(0,pDot),qA=Math.max(0,qDot);
-        if(pA>qA+0.05){winner=p;loser=q;}
-        else if(qA>pA+0.05){winner=q;loser=p;}
-        else if(p.numSections<=q.numSections){winner=p;loser=q;}
-        else{winner=q;loser=p;}
-      }
+      if(p.numSections>q.numSections){winner=p;loser=q;}
+      else if(q.numSections>p.numSections){winner=q;loser=p;}
+      else{winner=Math.random()<0.5?p:q;loser=winner===p?q:p;}
       died.add(loser.id);eliminateSnake(loser.id,winner.id);               // Step 6
     }
   }
@@ -2309,7 +2298,8 @@ function startGuestLoop(){
     my.boost=canBoost;
     const h=my.path&&my.path[0]||{x:0,y:0};
     _sio.emit('ssin',{id:myPid,angle:my.angle,circle:!!_autoCircle,
-      boost:canBoost,x:Math.round(h.x),y:Math.round(h.y),ns:my.numSections||26});
+      boost:canBoost,x:Math.round(h.x),y:Math.round(h.y),ns:my.numSections||26,
+      color:my.color||colorFromId(myPid)});
   },33); // match server tick rate
 }
 
@@ -2352,7 +2342,7 @@ function launchSnakeGame(){
   // Reload owner's saved tuning on every game start (covers rejoin without page reload).
   // Push to server regardless of isHost — in ss-* lobbies the owner isn't always amFirst.
   if(localStorage.getItem('ss_owner')==='1'){
-    try{const _sv=localStorage.getItem('ss_tuning_v2');if(_sv)Object.assign(_tuning,JSON.parse(_sv));}catch(_){}
+    try{const _sv=localStorage.getItem('ss_tuning_v3');if(_sv)Object.assign(_tuning,JSON.parse(_sv));}catch(_){}
     if(_sio)_sio.emit('ss-tune',_tuning);
   }
   rafHandle=requestAnimationFrame(rafDraw);
@@ -2380,7 +2370,7 @@ function _onTuning(){
   document.getElementById('tun-hhbs-val').textContent =_tuning.hhbs.toFixed(2)+'×';
   document.getElementById('tun-face-val').textContent =_tuning.faceDeg+'°';
   _drawTuningPreview();
-  try{localStorage.setItem('ss_tuning_v2',JSON.stringify(_tuning));}catch(_){}
+  try{localStorage.setItem('ss_tuning_v3',JSON.stringify(_tuning));}catch(_){}
   if(_sio)_sio.emit('ss-tune',_tuning);
 }
 function _syncTuningUI(){
@@ -2393,8 +2383,8 @@ function _syncTuningUI(){
   _drawTuningPreview();
 }
 function _resetTuning(){
-  _tuning={hbs:1.07,hhbs:1.18,faceDeg:75,rule:'biggest_wins'};
-  try{localStorage.removeItem('ss_tuning_v2');}catch(_){}
+  _tuning={hbs:1.07,hhbs:1.18,faceDeg:100,rule:'smallest_wins'};
+  try{localStorage.removeItem('ss_tuning_v3');}catch(_){}
   _syncTuningUI();
   if(_sio)_sio.emit('ss-tune',_tuning);
   addToast('Tuning reset to moneyslither defaults','#888');
@@ -2478,7 +2468,7 @@ function _drawTuningPreview(){
     const _sp=dR*SEGMENT_SPACING;
     const _skip=1; // matches server: skip segs[0]=head, first check segs[1]≈11px
     const _h2b=(_hR+_bR).toFixed(1);
-    const _isDefault=Math.abs(_tuning.hbs-1.07)<0.01&&Math.abs(_tuning.hhbs-1.18)<0.01&&_tuning.faceDeg===75&&_tuning.rule==='smallest_wins';
+    const _isDefault=Math.abs(_tuning.hbs-1.07)<0.01&&Math.abs(_tuning.hhbs-1.18)<0.01&&_tuning.faceDeg===100&&_tuning.rule==='smallest_wins';
     _sd.innerHTML='<div style="display:grid;grid-template-columns:1fr auto;gap:1px 8px;font-size:9px;padding:5px 2px 6px;border-top:1px solid #1a1a3a;color:#777;">'
       +(_isDefault?'<span colspan="2" style="grid-column:1/-1;color:#00cc66;text-align:center;padding-bottom:3px;font-size:8px;">✔ MONEYSLITHER DEFAULTS</span>':'<span colspan="2" style="grid-column:1/-1;color:#FF9900;text-align:center;padding-bottom:3px;font-size:8px;">⚠ CUSTOM (RESET to restore)</span>')
       +'<span>Body diameter</span><span style="color:#FF69B4">'+(dR*2).toFixed(1)+'px</span>'
