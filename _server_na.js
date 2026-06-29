@@ -128,8 +128,8 @@ const ssElimPairs = new Map();
 // Formulas: thicknessForSegments, head-to-head with dual-facing gate (smallest_wins),
 // head-to-body with combined radii (headR + bodyR), all angles, no rear dead zone.
 
-const SS_SPD      = 19.83;   // px/tick normal — mirrors client SNAKE_SPD
-const SS_BSPD     = 39.64;   // px/tick boost  — mirrors client BOOST_SPD
+const SS_SPD      = 9.6;     // px/tick normal  — 288 px/s ÷ 30 TPS (moneyslither BASE_SPEED)
+const SS_BSPD     = 21.0;    // px/tick boost   — 630 px/s ÷ 30 TPS (moneyslither BOOST_SPEED)
 const SS_GHOST_MS = 6000;    // ms of silence before server eliminates as ghost
 const SS_HB       = 0.95;    // HITBOX_BASE
 const SS_HBS      = 1.07;    // combatHitboxScale
