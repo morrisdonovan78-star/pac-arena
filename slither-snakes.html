@@ -2945,11 +2945,10 @@ function rafDraw(ts){
     // Follow first alive snake while spectating
     for(const s of SG.snakes.values()){if(s.alive&&s.path.length){_camX=s.path[0].x;_camY=s.path[0].y;break;}}
   }
-  // Fixed zoom based on screen size — identical to damnbruh's zoom formula
-  // Zoom = screen-fit base + user offset (scroll wheel, +/- keys, gamepad right stick).
-  // Floor 0.18 lets you zoom out far enough to see (almost) the whole arena. Re-clamp the
-  // offset to the range that maps onto [0.18 .. 2.0] for THIS screen so there's no dead scroll.
-  const _zbase=Math.min(canvas.width/1920,canvas.height/1080);
+  // Zoom formula matched to MoneySlither's effective zoom level at 288 px/s.
+  // Divisors 928/522 ≈ 1920/2.07 / 1080/2.07 — gives ~2.07× base vs damnbruh's 1/1920 formula,
+  // so 288 px/s world speed looks as fast on screen as MoneySlither does.
+  const _zbase=Math.min(canvas.width/928,canvas.height/522);
   _zoomOffset=Math.max(0.18-_zbase,Math.min(2.0-_zbase,_zoomOffset));
   _camZoom=Math.max(0.18,Math.min(2.0,_zbase+_zoomOffset));
 
