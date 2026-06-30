@@ -2030,7 +2030,7 @@ function _practiceCheckCollisions(){
       const q=alive[j];if(died.has(q.id))continue;
       const qx=q.path[0].x,qy=q.path[0].y;
       const hR2=msThick(q)*SS_HB*T.hbs*T.hhbs;
-      const rr=hR1+hR2; // body-contact distance; hhbs is now the body-size scale, no extra hbs factor
+      const rr=(hR1+hR2)*T.hbs; // MoneySlither exact: (headR1+headR2)*combatHBS
       const dx=qx-px,dy=qy-py,d2=dx*dx+dy*dy;
       if(d2>rr*rr)continue;                                                // Step 2
       let pDot=0,qDot=0,_dh=0;
@@ -2058,7 +2058,7 @@ function _practiceCheckCollisions(){
     for(let qi=0;qi<alive.length;qi++){
       if(pi===qi)continue;
       const qq=alive[qi];if(died.has(qq.id))continue;
-      const bR=msThick(qq)*SS_HB*T.hbs*T.hhbs; // body hurtbox uses hhbs — consistent with head hitbox
+      const bR=msThick(qq)*SS_HB*T.hbs; // MoneySlither exact: bodyR = thick*HITBOX_BASE*combatHBS (no hhbs)
       const crr2=(hHR+bR)*(hHR+bR);
       const qsegs=_segsCache.get(qq.id)||[];
       for(let k=1;k<qsegs.length;k++){
@@ -2415,7 +2415,7 @@ function _drawTuningPreview(){
   const tk=Math.max(10,(7.5+0.55*Math.sqrt(ns))*1.43);
   const bRw=tk*SS_HB*_tuning.hbs;    // body hitbox base (world px)
   const hRw=bRw*_tuning.hhbs;        // body radius = hbs*hhbs (world px)
-  const gapW=hRw+hRw;               // H2H trigger = body contact (hhbs controls body size)
+  const gapW=(hRw+hRw)*_tuning.hbs; // MoneySlither H2H trigger: (headR1+headR2)*combatHBS
   const fRad=_tuning.faceDeg*Math.PI/180;
 
   // Scale: fit 3 body circles per side + gap, stay within canvas height
@@ -2474,7 +2474,7 @@ function _drawTuningPreview(){
   const _sd=document.getElementById('tun-stats');
   if(_sd){
     const _tk=Math.max(10,(7.5+0.55*Math.sqrt(ns))*1.43);
-    const _bR=_tk*SS_HB*_tuning.hbs,_hR=_bR*_tuning.hhbs,_h2h=_hR+_hR; // H2H = body contact
+    const _bR=_tk*SS_HB*_tuning.hbs,_hR=_bR*_tuning.hhbs,_h2h=(_hR+_hR)*_tuning.hbs; // MoneySlither H2H: (headR+headR)*combatHBS
     const _sp=dR*SEGMENT_SPACING;
     const _skip=1; // matches server: skip segs[0]=head, first check segs[1]≈11px
     const _h2b=(_hR+_bR).toFixed(1);
@@ -3175,7 +3175,7 @@ function drawSnake(snake){
   if(_showHitboxes){
     const bR=msThick(snake)*SS_HB*_tuning.hbs;
     const hR=bR*_tuning.hhbs;
-    const h2hR=hR; // H2H trigger = body radius (hhbs controls body size, no extra factor)
+    const h2hR=hR*2*_tuning.hbs; // MoneySlither H2H zone: (headR+headR)*combatHBS — shown as radius around one head
     ctx.save();
     // Red head hitbox ring (same as body width)
     ctx.strokeStyle='rgba(255,40,40,0.95)';ctx.lineWidth=2/_camZoom;

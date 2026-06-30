@@ -471,7 +471,7 @@ function ssCheckCollisions(sg, lid, io) {
       const q = alive[j]; if (died.has(q.pid)) continue;
       const qx = q.segs[0][0], qy = q.segs[0][1];
       const hR2 = q.thick * SS_HB * T.hbs * T.hhbs;
-      const rr = hR1 + hR2; // body-contact distance; hhbs controls body size, no extra hbs factor
+      const rr = (hR1 + hR2) * T.hbs; // MoneySlither exact: (headR1+headR2) * combatHitboxScale
       const dx = qx - px, dy = qy - py, d2 = dx * dx + dy * dy;
       if (d2 > rr * rr) continue;
       let pDot = 0, qDot = 0, dh = 0;
@@ -500,7 +500,7 @@ function ssCheckCollisions(sg, lid, io) {
     const hhx = pp.segs[0][0], hhy = pp.segs[0][1];
     for (let j = 0; j < alive.length; j++) {
       const qq = alive[j]; if (qq.pid === pp.pid || died.has(qq.pid)) continue;
-      const bR = qq.thick * SS_HB * T.hbs * T.hhbs; // body hurtbox uses hhbs — consistent with head hitbox
+      const bR = qq.thick * SS_HB * T.hbs; // MoneySlither exact: bodyR = thick * HITBOX_BASE * combatHBS (no hhbs)
       const crr2 = (hR + bR) * (hR + bR);
       const skip = 1; // skip segs[0]=head; first check segs[1]≈11px (moneyslither: path[8]=12.8px)
       for (let k = skip; k < qq.segs.length; k++) {
