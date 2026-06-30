@@ -196,10 +196,33 @@ function ssSpawnKillFood(sg, sn) {
   }
 }
 
-function ssSpawnSnake(pid, color, name) {
-  const a = Math.random() * Math.PI * 2;
-  const r = SS_ARENA_R * (0.22 + Math.random() * 0.56);
-  const sx = Math.cos(a) * r, sy = Math.sin(a) * r;
+function ssFindSafeSpawn(sg) {
+  const minDist = 900;
+  let best = null, bestMin = -1;
+  for (let att = 0; att < 40; att++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = SS_ARENA_R * (0.22 + Math.random() * 0.56);
+    const sx = Math.cos(a) * r, sy = Math.sin(a) * r;
+    let nearestDist = Infinity;
+    sg.snakes.forEach(sn => {
+      if (!sn.alive) return;
+      const dx = sn.x - sx, dy = sn.y - sy;
+      nearestDist = Math.min(nearestDist, Math.sqrt(dx * dx + dy * dy));
+    });
+    if (nearestDist > minDist) return [sx, sy]; // good spot found
+    if (nearestDist > bestMin) { bestMin = nearestDist; best = [sx, sy]; }
+  }
+  return best || [Math.cos(Math.random() * Math.PI * 2) * SS_ARENA_R * 0.5, Math.sin(Math.random() * Math.PI * 2) * SS_ARENA_R * 0.5];
+}
+
+function ssSpawnSnake(pid, color, name, sg) {
+  let sx, sy;
+  if (sg) { [sx, sy] = ssFindSafeSpawn(sg); }
+  else {
+    const a = Math.random() * Math.PI * 2;
+    const r = SS_ARENA_R * (0.22 + Math.random() * 0.56);
+    sx = Math.cos(a) * r; sy = Math.sin(a) * r;
+  }
   const face = Math.atan2(-sy, -sx);
   const ns = SS_INIT_NS;
   const initR = ssSectionRadius(ns);
@@ -244,7 +267,7 @@ function getSsGame(lid) {
   if (!ssGames.has(lid)) ssGames.set(lid, {
     snakes: new Map(), tickInterval: null, tick: 0,
     food: [], _foodDirty: true, _lastFoodSend: 0,
-    tuning: { hbs: SS_HBS, hhbs: SS_HHBS, faceDeg: 75, rule: 'biggest_wins' }
+    tuning: { hbs: SS_HBS, hhbs: SS_HHBS, faceDeg: 100, rule: 'smallest_wins' }
   });
   return ssGames.get(lid);
 }
@@ -262,8 +285,9 @@ function ssHandleInput(lid, pid, d, io) {
   let sn = sg.snakes.get(pid);
   if (!sn || (!sn.alive && (!sn._killedAt || Date.now() - sn._killedAt > 2000))) {
     // First input OR dead snake rejoin (2s cooldown prevents revival from in-flight packets)
-    sn = ssSpawnSnake(pid, (sn && sn.color) || d.color || '#FFD700', (sn && sn.name) || d.name || 'SNAKE');
+    sn = ssSpawnSnake(pid, (sn && sn.color) || d.color || '#FFD700', (sn && sn.name) || d.name || 'SNAKE', sg);
     if (d.ns && d.ns > SS_INIT_NS) { sn.ns = Math.min(SS_MAX_NS, d.ns); sn.thick = ssThick(sn.ns); }
+    if (d.usd != null && typeof d.usd === 'number' && sn.usd === 0) sn.usd = Math.max(0, d.usd);
     sg.snakes.set(pid, sn);
     if (!sg.food || !sg.food.length) ssReconcileFood(sg);
     if (!sg.tickInterval) {
@@ -296,7 +320,7 @@ function ssPlayerLeft(lid, pid, io) {
     if (!sg.food) sg.food = [];
     ssSpawnKillFood(sg, sn);
     sg._foodDirty = true;
-    sn.alive = false; sn.segs = []; sn.path = [];
+    sn.alive = false; sn._killedAt = Date.now(); sn.segs = []; sn.path = [];
   } else if (sn) { sn.segs = []; sn.path = []; }
   setTimeout(() => {
     const g = ssGames.get(lid);
@@ -435,57 +459,36 @@ function ssCheckCollisions(sg, lid, io) {
   const alive = [...sg.snakes.values()].filter(s => s.alive && s.segs && s.segs.length > 1);
   const died = new Set();
 
-  // ── Head-to-head: two-type pipeline. No circling overrides — circling only affects
-  // which angle value is used in gate computation (live vs client-reported).
-  //
-  // TYPE 1 — direct face-off: both snakes face each other within faceDeg → bigger wins.
-  // TYPE 2 — grazing/circling: one or both fail gate but heads are within rr →
-  //          higher approach component wins; if ambiguous, smaller wins.
-  //
-  // Steps:
-  //   1  head positions (segs[0] = post-movement rounded)
-  //   2  candidate check: d < rr = (hR1+hR2)*hbs
-  //   3  compute pDot / qDot
-  //   4  classify: both pass faceCos → TYPE 1 ; else → TYPE 2
-  //   5  resolve per type
-  //   6  apply once via died set; emit debug log
-  const _faceCos = Math.cos((T.faceDeg || 75) * Math.PI / 180);
+  // ── Head-to-head: MoneySlither pipeline. Both snakes must face each other within faceDeg.
+  // Gate fails → pair falls through to H2B only (no TYPE-2 fallback).
+  // Gate passes → bigger snake wins; equal size → random.
+  const _faceCos = Math.cos((T.faceDeg ?? 100) * Math.PI / 180);
   for (let i = 0; i < alive.length; i++) {
     const p = alive[i]; if (died.has(p.pid)) continue;
-    const px = p.segs[0][0], py = p.segs[0][1];                       // Step 1
+    const px = p.segs[0][0], py = p.segs[0][1];
     const hR1 = p.thick * SS_HB * T.hbs * T.hhbs;
     for (let j = i + 1; j < alive.length; j++) {
       const q = alive[j]; if (died.has(q.pid)) continue;
       const qx = q.segs[0][0], qy = q.segs[0][1];
       const hR2 = q.thick * SS_HB * T.hbs * T.hhbs;
-      const rr = (hR1 + hR2) * T.hbs;
+      const rr = hR1 + hR2; // body-contact distance; hhbs controls body size, no extra hbs factor
       const dx = qx - px, dy = qy - py, d2 = dx * dx + dy * dy;
-      if (d2 > rr * rr) continue;                                       // Step 2
+      if (d2 > rr * rr) continue;
       let pDot = 0, qDot = 0, dh = 0;
-      if (d2 > 0) {                                                      // Step 3
+      if (d2 > 0) {
         dh = Math.sqrt(d2);
         const pFace = p.circling ? p.angle : (p.faceAngle ?? p.angle);
         const qFace = q.circling ? q.angle : (q.faceAngle ?? q.angle);
         pDot = Math.cos(pFace) * (dx / dh) + Math.sin(pFace) * (dy / dh);
         qDot = Math.cos(qFace) * (-dx / dh) + Math.sin(qFace) * (-dy / dh);
       }
-      const pFacing = pDot >= _faceCos, qFacing = qDot >= _faceCos;    // Step 4
-      let loser, winner, reason;
-      if (pFacing && qFacing) {
-        // TYPE 1: mutual face-off → bigger wins; equal size → random
-        if      (p.ns > q.ns) { winner = p; loser = q; reason = 'T1-bigger'; }
-        else if (q.ns > p.ns) { winner = q; loser = p; reason = 'T1-bigger'; }
-        else                   { winner = Math.random() < 0.5 ? p : q; loser = winner === p ? q : p; reason = 'T1-tie'; }
-      } else {
-        // TYPE 2: grazing/circling → first-contact by approach component; smaller breaks ties
-        const pA = Math.max(0, pDot), qA = Math.max(0, qDot);
-        if      (pA > qA + 0.05) { winner = p; loser = q; reason = 'T2-approach'; }
-        else if (qA > pA + 0.05) { winner = q; loser = p; reason = 'T2-approach'; }
-        else if (p.ns <= q.ns)   { winner = p; loser = q; reason = 'T2-smaller'; }
-        else                     { winner = q; loser = p; reason = 'T2-smaller'; }
-      }
-      console.log(`[H2H] p=${p.pid} q=${q.pid} d=${dh.toFixed(1)} pDot=${pDot.toFixed(3)} qDot=${qDot.toFixed(3)} pFacing=${pFacing} qFacing=${qFacing} type=${pFacing&&qFacing?1:2} winner=${winner.pid} reason=${reason}`);
-      died.add(loser.pid); ssKill(loser, winner, lid, io);               // Step 6
+      if (pDot < _faceCos || qDot < _faceCos) continue;                 // gate fails → H2B
+      let winner, loser, reason;
+      if      (p.ns > q.ns) { winner = p; loser = q; reason = 'T1-bigger'; }
+      else if (q.ns > p.ns) { winner = q; loser = p; reason = 'T1-bigger'; }
+      else                   { winner = Math.random() < 0.5 ? p : q; loser = winner === p ? q : p; reason = 'T1-tie'; }
+      console.log(`[H2H] p=${p.pid} q=${q.pid} d=${dh.toFixed(1)} pDot=${pDot.toFixed(3)} qDot=${qDot.toFixed(3)} winner=${winner.pid} reason=${reason}`);
+      died.add(loser.pid); ssKill(loser, winner, lid, io);
     }
   }
 
@@ -497,7 +500,7 @@ function ssCheckCollisions(sg, lid, io) {
     const hhx = pp.segs[0][0], hhy = pp.segs[0][1];
     for (let j = 0; j < alive.length; j++) {
       const qq = alive[j]; if (qq.pid === pp.pid || died.has(qq.pid)) continue;
-      const bR = qq.thick * SS_HB * T.hbs;
+      const bR = qq.thick * SS_HB * T.hbs * T.hhbs; // body hurtbox uses hhbs — consistent with head hitbox
       const crr2 = (hR + bR) * (hR + bR);
       const skip = 1; // skip segs[0]=head; first check segs[1]≈11px (moneyslither: path[8]=12.8px)
       for (let k = skip; k < qq.segs.length; k++) {

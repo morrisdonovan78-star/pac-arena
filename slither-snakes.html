@@ -1357,6 +1357,8 @@ async function pkConnect(roomId,gameToken){
         }
         const s=SG.snakes.get(sd.id);
         if(!s)return;
+        // Don't reanimate a recently-killed snake (stale packet from before kill)
+        if(!s.alive&&_snakeDeathTs.has(sd.id)&&Date.now()-(_snakeDeathTs.get(sd.id)||0)<2000){_ssBuf.delete(sd.id);return;}
         s.alive=true;s.score=sd.score||0;s.boost=sd.boost||false;
         s.numSections=sd.ns||s.numSections;s.color=sd.color||s.color;s.name=sd.name||s.name;
         // Own snake: reconcile metadata + gently correct position if large drift
@@ -1409,7 +1411,7 @@ async function pkConnect(roomId,gameToken){
       if(reason==='io client disconnect')return;
       addToast('Connection lost — reconnecting…','#FFD700');
     });
-    _sio.on('reconnect',()=>{addToast('Reconnected!','#39FF14');});
+    _sio.on('reconnect',()=>{addToast('Reconnected!','#39FF14');if(!_guestInputLoop&&!isHost&&!_localDead&&SG&&!SG.over)startGuestLoop();});
 
     // Ping
     _pingInterval=setInterval(()=>{if(_sio)_sio.emit('ping_req',performance.now());},3000);
@@ -1665,9 +1667,10 @@ function addSnakePlayer(id,color,name){
   const existing=SG.snakes.get(id);
   if(existing&&existing.alive)return; // live snake — don't overwrite
   _snakesSpawnedFood.delete(id); // fresh spawn — allow guests to see it regardless of prior death
-  const pos=isHost?findSafeSpawn():[null,null];
+  _snakeDeathTs.delete(id); _snakeDeathPos.delete(id); // clear death guard so rejoining player is visible immediately
+  const pos=isHost?findSafeSpawn():[0,0];
   const s=makeSnake(id,color,name,pos[0],pos[1]);
-  // s.usd left null — seeded from first ssin so host uses guest's actual wallet value
+  if(!isHost)s.path=[]; // guests: don't show phantom body at wrong pos; ss-state seeds path at correct server position
   SG.snakes.set(id,s);
 }
 
@@ -1716,6 +1719,12 @@ function stopHostLoop(){if(_hostRaf){cancelAnimationFrame(_hostRaf);_hostRaf=nul
 // "frozen snakes gliding into walls" and "no dots" — there's always someone simulating.
 function _electHost(){
   if(isHost||!SG||SG.over)return;
+  // Live ss-* rooms: server is authoritative — don't stop ssin or start host loop.
+  // All we do is show a toast; the server game loop continues unaffected.
+  if(pkRoomId&&pkRoomId.startsWith('ss-')){
+    addToast('Host left — server running game','#FFD700');
+    return;
+  }
   isHost=true; _hostPid=myPid;
   _hostGraceTicks=15; // skip collision for ~500ms so dual-host ss packets can cross and demote
   if(!SG.food||!SG.food.length)SG.food=seedFoodLayout(); // ensure dots exist if we never synced
@@ -1725,7 +1734,7 @@ function _electHost(){
   if(_guestInputLoop){clearInterval(_guestInputLoop);_guestInputLoop=null;}
   _forceFoodSend=true;
   _lastTickTs=performance.now();
-  if(!pkRoomId||!pkRoomId.startsWith('ss-'))startHostLoop();
+  startHostLoop();
   addToast('👑 You are the host now','#FFD700');
 }
 function _demoteFromHost(){
@@ -2021,7 +2030,7 @@ function _practiceCheckCollisions(){
       const q=alive[j];if(died.has(q.id))continue;
       const qx=q.path[0].x,qy=q.path[0].y;
       const hR2=msThick(q)*SS_HB*T.hbs*T.hhbs;
-      const rr=(hR1+hR2)*T.hbs;
+      const rr=hR1+hR2; // body-contact distance; hhbs is now the body-size scale, no extra hbs factor
       const dx=qx-px,dy=qy-py,d2=dx*dx+dy*dy;
       if(d2>rr*rr)continue;                                                // Step 2
       let pDot=0,qDot=0,_dh=0;
@@ -2049,7 +2058,7 @@ function _practiceCheckCollisions(){
     for(let qi=0;qi<alive.length;qi++){
       if(pi===qi)continue;
       const qq=alive[qi];if(died.has(qq.id))continue;
-      const bR=msThick(qq)*SS_HB*T.hbs;
+      const bR=msThick(qq)*SS_HB*T.hbs*T.hhbs; // body hurtbox uses hhbs — consistent with head hitbox
       const crr2=(hHR+bR)*(hHR+bR);
       const qsegs=_segsCache.get(qq.id)||[];
       for(let k=1;k<qsegs.length;k++){
@@ -2085,6 +2094,7 @@ function eliminateSnake(id,killerId){
   _snakeDeathTs.set(snake.id,Date.now());
   _snakesSpawnedFood.add(snake.id);
   snake.path=[]; // vanish immediately
+  _ssBuf.delete(id); // clear stale interpolation buffer — prevents old position bleeding into rejoin
   const km=_playerMeta.get(killerId)||{};
   const vm=_playerMeta.get(id)||{};
   _killFeed.push({kName:(km.name||'ARENA').slice(0,10),kColor:km.color||'#FFD700',vName:(vm.name||'SNAKE').slice(0,10),vColor:vm.color||'#FF69B4',ts:Date.now()});
@@ -2288,7 +2298,7 @@ function startGuestLoop(){
     const _h0=_my0&&_my0.path&&_my0.path[0]||{x:0,y:0};
     _sio.emit('ssin',{id:myPid,angle:(_my0&&_my0.angle)||0,circle:false,boost:false,
       x:Math.round(_h0.x),y:Math.round(_h0.y),ns:(_my0&&_my0.numSections)||26,
-      color:(_my0&&_my0.color)||colorFromId(myPid),name:getMyName()});
+      color:(_my0&&_my0.color)||colorFromId(myPid),name:getMyName(),usd:_myUsd||0});
   }
   _guestInputLoop=setInterval(()=>{
     if(!SG||SG.over||!_sio||isSpectating||_localDead)return;
@@ -2299,7 +2309,7 @@ function startGuestLoop(){
     const h=my.path&&my.path[0]||{x:0,y:0};
     _sio.emit('ssin',{id:myPid,angle:my.angle,circle:!!_autoCircle,
       boost:canBoost,x:Math.round(h.x),y:Math.round(h.y),ns:my.numSections||26,
-      color:my.color||colorFromId(myPid)});
+      color:my.color||colorFromId(myPid),usd:_myUsd||0});
   },33); // match server tick rate
 }
 
@@ -2403,9 +2413,9 @@ function _drawTuningPreview(){
   const sp=dR*SEGMENT_SPACING;
   // Hitbox base = msThick (moneyslither formula), same as server sn.thick
   const tk=Math.max(10,(7.5+0.55*Math.sqrt(ns))*1.43);
-  const bRw=tk*SS_HB*_tuning.hbs;    // body hitbox radius (world px)
-  const hRw=bRw*_tuning.hhbs;        // head hitbox radius (world px)
-  const gapW=(hRw+hRw)*_tuning.hbs;  // H2H trigger distance (world px)
+  const bRw=tk*SS_HB*_tuning.hbs;    // body hitbox base (world px)
+  const hRw=bRw*_tuning.hhbs;        // body radius = hbs*hhbs (world px)
+  const gapW=hRw+hRw;               // H2H trigger = body contact (hhbs controls body size)
   const fRad=_tuning.faceDeg*Math.PI/180;
 
   // Scale: fit 3 body circles per side + gap, stay within canvas height
@@ -2464,7 +2474,7 @@ function _drawTuningPreview(){
   const _sd=document.getElementById('tun-stats');
   if(_sd){
     const _tk=Math.max(10,(7.5+0.55*Math.sqrt(ns))*1.43);
-    const _bR=_tk*SS_HB*_tuning.hbs,_hR=_bR*_tuning.hhbs,_h2h=(_hR+_hR)*_tuning.hbs;
+    const _bR=_tk*SS_HB*_tuning.hbs,_hR=_bR*_tuning.hhbs,_h2h=_hR+_hR; // H2H = body contact
     const _sp=dR*SEGMENT_SPACING;
     const _skip=1; // matches server: skip segs[0]=head, first check segs[1]≈11px
     const _h2b=(_hR+_bR).toFixed(1);
@@ -2871,17 +2881,20 @@ function rafDraw(ts){
           if(!ph||Math.hypot(ix-ph.x,iy-ph.y)>0.3){s.path.unshift({x:ix,y:iy});trimPath(s);}
         }
       }else if(buf&&buf.length===1){
-        // 1 snapshot — update state from snapshot; DO NOT dead-reckon.
-        // Dead-reckoning here causes a path U-turn (forward then back to snap pos)
-        // when the 2nd snapshot arrives and interpolation starts at frac=0.
+        // 1 snapshot — extrapolate forward from snapshot so snake appears + moves immediately.
+        // Without this, new snakes are frozen at their seed position until the 2nd packet.
         const snap=buf[0];
         s.angle=snap.angle;s.numSections=snap.ns;s.boost=snap.boost;
-        // Seed path if empty (revival/first appearance); otherwise keep makeSnake path
+        const _age=Math.min(Date.now()-snap.t,TICK_MS*4); // cap at 4 ticks to avoid huge leaps
+        const _extX=snap.x+Math.cos(snap.angle)*(snap.boost?BOOST_SPD:SNAKE_SPD)*(_age/TICK_MS);
+        const _extY=snap.y+Math.sin(snap.angle)*(snap.boost?BOOST_SPD:SNAKE_SPD)*(_age/TICK_MS);
         if(!s.path||!s.path.length){
           const _r=sectionRadius(s);
           const _pLen=Math.ceil(snap.ns*_r*SEGMENT_SPACING*2/SNAKE_SPD)+10;
           s.path=[];
-          for(let _i=0;_i<_pLen;_i++)s.path.push({x:snap.x-Math.cos(snap.angle)*_i*SNAKE_SPD,y:snap.y-Math.sin(snap.angle)*_i*SNAKE_SPD});
+          for(let _i=0;_i<_pLen;_i++)s.path.push({x:_extX-Math.cos(snap.angle)*_i*SNAKE_SPD,y:_extY-Math.sin(snap.angle)*_i*SNAKE_SPD});
+        }else if(Math.hypot(_extX-s.path[0].x,_extY-s.path[0].y)>0.5){
+          s.path.unshift({x:_extX,y:_extY});trimPath(s);
         }
       }else{
         // ── Dead-reckoning fallback (practice bots, no ss-state) ──────────────
@@ -3162,12 +3175,12 @@ function drawSnake(snake){
   if(_showHitboxes){
     const bR=msThick(snake)*SS_HB*_tuning.hbs;
     const hR=bR*_tuning.hhbs;
-    const h2hR=hR*2*_tuning.hbs;
+    const h2hR=hR; // H2H trigger = body radius (hhbs controls body size, no extra factor)
     ctx.save();
-    // Red head hitbox ring
+    // Red head hitbox ring (same as body width)
     ctx.strokeStyle='rgba(255,40,40,0.95)';ctx.lineWidth=2/_camZoom;
     ctx.beginPath();ctx.arc(h.x,h.y,hR,0,Math.PI*2);ctx.stroke();
-    // Gold H2H zone
+    // Gold H2H zone — now equals body radius (hhbs slider sets both)
     ctx.fillStyle='rgba(255,200,0,0.07)';ctx.beginPath();ctx.arc(h.x,h.y,h2hR,0,Math.PI*2);ctx.fill();
     ctx.strokeStyle='rgba(255,210,0,1.0)';ctx.lineWidth=2.5/_camZoom;
     ctx.beginPath();ctx.arc(h.x,h.y,h2hR,0,Math.PI*2);ctx.stroke();
