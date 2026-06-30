@@ -548,8 +548,8 @@ const _INTERP_DELAY=100; // ms: render this far behind the latest snapshot for s
 let _localDead=false;
 let _autoCircle=false; // toggle: snake auto-circles until toggled off (E key / L3 button)
 let _lastRoomId=null;
-let _tuning={hbs:1.07,hhbs:1.18,faceDeg:100,rule:'smallest_wins'};
-try{const _sv=localStorage.getItem('ss_tuning_v3');if(_sv&&localStorage.getItem('ss_owner')==='1')Object.assign(_tuning,JSON.parse(_sv));}catch(_){}
+let _tuning={hbs:1.07,hhbs:1.18,faceDeg:75,rule:'smallest_wins'};
+try{const _sv=localStorage.getItem('ss_tuning_v4');if(_sv&&localStorage.getItem('ss_owner')==='1')Object.assign(_tuning,JSON.parse(_sv));}catch(_){}
 let _showTuning=false;
 let _botCount=0,_isPractice=false;
 
@@ -2352,7 +2352,7 @@ function launchSnakeGame(){
   // Reload owner's saved tuning on every game start (covers rejoin without page reload).
   // Push to server regardless of isHost — in ss-* lobbies the owner isn't always amFirst.
   if(localStorage.getItem('ss_owner')==='1'){
-    try{const _sv=localStorage.getItem('ss_tuning_v3');if(_sv)Object.assign(_tuning,JSON.parse(_sv));}catch(_){}
+    try{const _sv=localStorage.getItem('ss_tuning_v4');if(_sv)Object.assign(_tuning,JSON.parse(_sv));}catch(_){}
     if(_sio)_sio.emit('ss-tune',_tuning);
   }
   rafHandle=requestAnimationFrame(rafDraw);
@@ -2380,7 +2380,7 @@ function _onTuning(){
   document.getElementById('tun-hhbs-val').textContent =_tuning.hhbs.toFixed(2)+'×';
   document.getElementById('tun-face-val').textContent =_tuning.faceDeg+'°';
   _drawTuningPreview();
-  try{localStorage.setItem('ss_tuning_v3',JSON.stringify(_tuning));}catch(_){}
+  try{localStorage.setItem('ss_tuning_v4',JSON.stringify(_tuning));}catch(_){}
   if(_sio)_sio.emit('ss-tune',_tuning);
 }
 function _syncTuningUI(){
@@ -2393,8 +2393,8 @@ function _syncTuningUI(){
   _drawTuningPreview();
 }
 function _resetTuning(){
-  _tuning={hbs:1.07,hhbs:1.18,faceDeg:100,rule:'smallest_wins'};
-  try{localStorage.removeItem('ss_tuning_v3');}catch(_){}
+  _tuning={hbs:1.07,hhbs:1.18,faceDeg:75,rule:'smallest_wins'};
+  try{localStorage.removeItem('ss_tuning_v4');}catch(_){}
   _syncTuningUI();
   if(_sio)_sio.emit('ss-tune',_tuning);
   addToast('Tuning reset to moneyslither defaults','#888');
@@ -2478,7 +2478,7 @@ function _drawTuningPreview(){
     const _sp=dR*SEGMENT_SPACING;
     const _skip=1; // matches server: skip segs[0]=head, first check segs[1]≈11px
     const _h2b=(_hR+_bR).toFixed(1);
-    const _isDefault=Math.abs(_tuning.hbs-1.07)<0.01&&Math.abs(_tuning.hhbs-1.18)<0.01&&_tuning.faceDeg===100&&_tuning.rule==='smallest_wins';
+    const _isDefault=Math.abs(_tuning.hbs-1.07)<0.01&&Math.abs(_tuning.hhbs-1.18)<0.01&&_tuning.faceDeg===75&&_tuning.rule==='smallest_wins';
     _sd.innerHTML='<div style="display:grid;grid-template-columns:1fr auto;gap:1px 8px;font-size:9px;padding:5px 2px 6px;border-top:1px solid #1a1a3a;color:#777;">'
       +(_isDefault?'<span colspan="2" style="grid-column:1/-1;color:#00cc66;text-align:center;padding-bottom:3px;font-size:8px;">✔ MONEYSLITHER DEFAULTS</span>':'<span colspan="2" style="grid-column:1/-1;color:#FF9900;text-align:center;padding-bottom:3px;font-size:8px;">⚠ CUSTOM (RESET to restore)</span>')
       +'<span>Body diameter</span><span style="color:#FF69B4">'+(dR*2).toFixed(1)+'px</span>'

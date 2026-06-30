@@ -267,7 +267,7 @@ function getSsGame(lid) {
   if (!ssGames.has(lid)) ssGames.set(lid, {
     snakes: new Map(), tickInterval: null, tick: 0,
     food: [], _foodDirty: true, _lastFoodSend: 0,
-    tuning: { hbs: SS_HBS, hhbs: SS_HHBS, faceDeg: 100, rule: 'smallest_wins' }
+    tuning: { hbs: SS_HBS, hhbs: SS_HHBS, faceDeg: 75, rule: 'smallest_wins' }
   });
   return ssGames.get(lid);
 }
@@ -462,7 +462,7 @@ function ssCheckCollisions(sg, lid, io) {
   // ── Head-to-head: MoneySlither pipeline. Both snakes must face each other within faceDeg.
   // Gate fails → pair falls through to H2B only (no TYPE-2 fallback).
   // Gate passes → bigger snake wins; equal size → random.
-  const _faceCos = Math.cos((T.faceDeg ?? 100) * Math.PI / 180);
+  const _faceCos = Math.cos((T.faceDeg ?? 75) * Math.PI / 180);
   for (let i = 0; i < alive.length; i++) {
     const p = alive[i]; if (died.has(p.pid)) continue;
     const px = p.segs[0][0], py = p.segs[0][1];
