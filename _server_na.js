@@ -154,6 +154,68 @@ const SS_SHED_NE_MS    = 4000;   // client SHED_NOEAT_MS
 const SS_FOOD_PICKUP_R      = 29;  // client FOOD_PICKUP_R
 const SS_KILL_FOOD_PICKUP_R = 42;  // client KILL_FOOD_PICKUP_R
 
+// ── Test lobby: deterministic bot scenarios ───────────────────────────────────
+const SS_TEST_SCENARIOS = {
+  'boost-cutoff': {
+    // pursuer heads east, leader heads south from (0,0). No parallel-chase phantom.
+    // At ~tick 4: pursuer(at ~-16,0) enters crr of leader crossing body at (0,0). pursuer dies.
+    bots: [
+      { id: 'bot-pursuer', color: '#FF4444', name: 'PURSUER',
+        x: -100, y: 0, angle: 0, ns: 24,
+        script: () => ({ angle: 0,           boost: true }) },
+      { id: 'bot-leader',  color: '#44FF44', name: 'LEADER',
+        x: 0, y: 0, angle: Math.PI / 2, ns: 24,
+        script: () => ({ angle: Math.PI / 2, boost: true }) }
+    ]
+  },
+  'bug-cutoff': {
+    // Same perpendicular geometry but leader spawned FIRST in Map insertion order.
+    // Tests eval-order sensitivity: if L->P fires before P->L, leader dies incorrectly.
+    // For this geometry L->P should not fire (leader moves south, away from pursuer path).
+    bots: [
+      { id: 'bot-leader',  color: '#44FF44', name: 'LEADER',
+        x: 0, y: 0, angle: Math.PI / 2, ns: 24,
+        script: () => ({ angle: Math.PI / 2, boost: true }) },
+      { id: 'bot-pursuer', color: '#FF4444', name: 'PURSUER',
+        x: -100, y: 0, angle: 0, ns: 24,
+        script: () => ({ angle: 0,           boost: true }) }
+    ]
+  },
+  'tight-cutoff': {
+    // Shorter gap — collision happens faster; stress-tests H2B at crr boundary.
+    bots: [
+      { id: 'bot-pursuer', color: '#FF4444', name: 'PURSUER',
+        x: 0,   y: 0, angle: 0, ns: 24,
+        script: ()  => ({ angle: 0,            boost: true }) },
+      { id: 'bot-leader',  color: '#44FF44', name: 'LEADER',
+        x: 30,  y: 0, angle: 0, ns: 24,
+        script: (t) => ({ angle: t < 3 ? 0 : -Math.PI / 2, boost: true }) }
+    ]
+  },
+  'head-on': {
+    // Pure head-on collision from opposite directions — tests H2H gate.
+    bots: [
+      { id: 'bot-left',  color: '#FF4444', name: 'BOT-L',
+        x: -150, y: 0, angle: 0,        ns: 24,
+        script: () => ({ angle: 0,        boost: false }) },
+      { id: 'bot-right', color: '#4444FF', name: 'BOT-R',
+        x:  150, y: 0, angle: Math.PI, ns: 24,
+        script: () => ({ angle: Math.PI, boost: false }) }
+    ]
+  },
+  'crossing': {
+    // Perpendicular paths — one snake going right, one going down; stresses H2B order.
+    bots: [
+      { id: 'bot-horiz', color: '#FF4444', name: 'HORIZ',
+        x: -200, y: 0,    angle: 0,           ns: 24,
+        script: () => ({ angle: 0,           boost: true }) },
+      { id: 'bot-vert',  color: '#4444FF', name: 'VERT',
+        x: 0,    y: -200, angle: Math.PI / 2, ns: 24,
+        script: () => ({ angle: Math.PI / 2, boost: true }) }
+    ]
+  }
+};
+
 function ssThick(n) {
   n = Math.max(1, Number(n) || 1);
   let t = 7.5 + 0.55 * Math.sqrt(n);
@@ -241,6 +303,27 @@ function ssSpawnSnake(pid, color, name, sg) {
   };
 }
 
+function ssSpawnBots(sg, scenario) {
+  const def = SS_TEST_SCENARIOS[scenario];
+  if (!def) throw new Error(`Unknown test scenario: ${scenario}`);
+  def.bots.forEach(bd => {
+    const path = [{ x: bd.x, y: bd.y }]; // single entry — no phantom body at spawn
+    const sn = {
+      pid: bd.id, color: bd.color, name: bd.name,
+      x: bd.x, y: bd.y, angle: bd.angle, targetAngle: bd.angle,
+      faceAngle: bd.angle, circling: false,
+      ns: bd.ns, thick: ssThick(bd.ns), path, segs: [],
+      _lastPathX: bd.x, _lastPathY: bd.y, _pathAcc: 0,
+      growQueue: 0, _boostDrainAcc: 0, _shed: 0,
+      alive: true, boost: false, score: 0, usd: 0,
+      lastTs: Date.now(),
+      bot: true, _botTick: 0, _botScript: bd.script
+    };
+    sg.snakes.set(bd.id, sn);
+    console.log(`[bot] spawned ${bd.id} at (${bd.x},${bd.y}) angle=${bd.angle.toFixed(3)}`);
+  });
+}
+
 function ssGetSegsFromPath(sn) {
   if (!sn.path || !sn.path.length) return [];
   const r = ssSectionRadius(sn.ns), spacing = r * 0.5;
@@ -268,7 +351,7 @@ const ssGames = new Map(); // lobbyId → { snakes: Map(pid→snake), tickInterv
 function getSsGame(lid) {
   if (!ssGames.has(lid)) ssGames.set(lid, {
     snakes: new Map(), tickInterval: null, tick: 0,
-    food: [], _foodDirty: true, _lastFoodSend: 0,
+    food: [], _foodDirty: true, _lastFoodSend: 0, _history: [],
     tuning: { hbs: SS_HBS, hhbs: SS_HHBS, faceDeg: 75, rule: 'smallest_wins' }
   });
   return ssGames.get(lid);
@@ -342,6 +425,19 @@ function ssTick(lid, io) {
   sg.tick = (sg.tick || 0) + 1;
   const now = Date.now();
   if (!sg.food || !sg.food.length) ssReconcileFood(sg);
+
+  // ── Drive bot inputs (before movement) ───────────────────────────────────
+  sg.snakes.forEach(sn => {
+    if (!sn.bot || !sn.alive || !sn._botScript) return;
+    sn.lastTs = Date.now();
+    const cmd = sn._botScript(sn._botTick, sn);
+    if (cmd) {
+      if (typeof cmd.angle === 'number') { sn.targetAngle = cmd.angle; sn.faceAngle = cmd.angle; }
+      sn.boost = !!cmd.boost && sn.ns > SS_BOOST_MIN;
+      sn.circling = !!cmd.circle;
+    }
+    sn._botTick++;
+  });
 
   // 1. Move all alive snakes
   sg.snakes.forEach(sn => {
@@ -424,8 +520,36 @@ function ssTick(lid, io) {
   // 3. Recompute segs from server path (used by ssCheckCollisions)
   sg.snakes.forEach(sn => { if (sn.alive) sn.segs = ssGetSegsFromPath(sn); });
 
+  // Tick snapshot for collision kill-trace (non-behavioral)
+  { if (!sg._history) sg._history = [];
+    const snap = { tk: sg.tick, t: Date.now(), sn: {} };
+    sg.snakes.forEach(sn => {
+      if (!sn.alive) return;
+      const p0 = sn.path && sn.path.length ? sn.path[0] : null;
+      snap.sn[sn.pid] = { x: +sn.x.toFixed(1), y: +sn.y.toFixed(1),
+        ang: +sn.angle.toFixed(3), face: sn.faceAngle != null ? +sn.faceAngle.toFixed(3) : null,
+        boost: !!sn.boost, ns: sn.ns, acc: +(sn._pathAcc||0).toFixed(3),
+        p0: p0 ? { x: +p0.x.toFixed(1), y: +p0.y.toFixed(1) } : null, plen: sn.path ? sn.path.length : 0 };
+    });
+    sg._history.push(snap); if (sg._history.length > 20) sg._history.shift(); }
+
   // 4. Collision check (H2H + H2B)
   ssCheckCollisions(sg, lid, io);
+
+  // Test lobby auto-reset: 2s after all bots dead, clear and re-spawn
+  if (sg._testScenario && !sg._resetPending) {
+    const allDead = [...sg.snakes.values()].every(sn => !sn.alive);
+    if (allDead) {
+      sg._resetPending = true;
+      setTimeout(() => {
+        const sg2 = ssGames.get(lid);
+        if (!sg2 || !sg2._testScenario) return;
+        sg2.snakes.clear(); sg2.food = []; sg2._foodDirty = true; sg2.tick = 0; sg2._history = []; sg2._resetPending = false;
+        ssSpawnBots(sg2, sg2._testScenario);
+        console.log(`[${lid}] test scenario auto-reset (${sg2._testScenario})`);
+      }, 2000);
+    }
+  }
 
   // 5. Broadcast state to all clients
   ssBroadcastState(sg, lid, io);
@@ -462,6 +586,8 @@ function ssCheckCollisions(sg, lid, io) {
   // Only snakes with HOST-supplied segs are collision-ready (segs[0] = head, segs[1+] = body)
   const alive = [...sg.snakes.values()].filter(s => s.alive && s.segs && s.segs.length > 1);
   const died = new Set();
+  const _evalOrder = alive.map(s => s.pid.slice(0, 8));
+  let _h2hKilled = false;
 
   // ── Head-to-head: MoneySlither pipeline. Both snakes must face each other within faceDeg.
   // Gate fails → pair falls through to H2B only (no TYPE-2 fallback).
@@ -491,8 +617,14 @@ function ssCheckCollisions(sg, lid, io) {
       if      (p.ns > q.ns) { winner = p; loser = q; reason = 'T1-bigger'; }
       else if (q.ns > p.ns) { winner = q; loser = p; reason = 'T1-bigger'; }
       else                   { winner = Math.random() < 0.5 ? p : q; loser = winner === p ? q : p; reason = 'T1-tie'; }
-      console.log(`[H2H] p=${p.pid} q=${q.pid} d=${dh.toFixed(1)} pDot=${pDot.toFixed(3)} qDot=${qDot.toFixed(3)} winner=${winner.pid} reason=${reason}`);
-      died.add(loser.pid); ssKill(loser, winner, lid, io);
+      const _h2h = { type:'H2H', tk:sg.tick, t:Date.now(), lid, evalOrder:_evalOrder,
+        p:{ pid:p.pid, x:px, y:py, ang:+p.angle.toFixed(3), face:p.faceAngle!=null?+p.faceAngle.toFixed(3):null, pDot:+pDot.toFixed(4) },
+        q:{ pid:q.pid, x:qx, y:qy, ang:+q.angle.toFixed(3), face:q.faceAngle!=null?+q.faceAngle.toFixed(3):null, qDot:+qDot.toFixed(4) },
+        d:+dh.toFixed(2), rr:+rr.toFixed(2), faceCos:+_faceCos.toFixed(4), winner:winner.pid, loser:loser.pid, reason };
+      console.log('[KILL_TRACE] ' + JSON.stringify(_h2h));
+      const _hh = (sg._history||[]).slice(-10).map(s => { const o={tk:s.tk}; if(s.sn[p.pid]) o[p.pid.slice(0,8)]=s.sn[p.pid]; if(s.sn[q.pid]) o[q.pid.slice(0,8)]=s.sn[q.pid]; return o; });
+      console.log('[KILL_HIST] ' + JSON.stringify({ loser:loser.pid, tks:_hh }));
+      _h2hKilled = true; died.add(loser.pid); ssKill(loser, winner, lid, io);
     }
   }
 
@@ -516,6 +648,15 @@ function ssCheckCollisions(sg, lid, io) {
         const pt = qpath[idx] || qpath[qpath.length - 1];
         const sdx = hhx - pt.x, sdy = hhy - pt.y;
         if (sdx * sdx + sdy * sdy <= crr2) {
+          const _sd = Math.sqrt(sdx*sdx+sdy*sdy), _crr = Math.sqrt(crr2);
+          const _vh = qq.segs&&qq.segs[0]?{x:qq.segs[0][0],y:qq.segs[0][1]}:null;
+          const _h2b = { type:'H2B', tk:sg.tick, t:Date.now(), lid, evalOrder:_evalOrder, h2hKilledFirst:_h2hKilled,
+            att:{ pid:pp.pid, hx:hhx, hy:hhy, ang:+pp.angle.toFixed(3), face:pp.faceAngle!=null?+pp.faceAngle.toFixed(3):null, boost:!!pp.boost, ns:pp.ns },
+            vic:{ pid:qq.pid, hx:_vh?_vh.x:null, hy:_vh?_vh.y:null, ang:+qq.angle.toFixed(3), boost:!!qq.boost, ns:qq.ns },
+            k, idx, bodyPt:{ x:+pt.x.toFixed(2), y:+pt.y.toFixed(2) }, dist:+_sd.toFixed(3), crr:+_crr.toFixed(3) };
+          console.log('[KILL_TRACE] ' + JSON.stringify(_h2b));
+          const _hb = (sg._history||[]).slice(-10).map(s => { const o={tk:s.tk}; if(s.sn[pp.pid]) o[pp.pid.slice(0,8)]=s.sn[pp.pid]; if(s.sn[qq.pid]) o[qq.pid.slice(0,8)]=s.sn[qq.pid]; return o; });
+          console.log('[KILL_HIST] ' + JSON.stringify({ attacker:pp.pid, victim:qq.pid, tks:_hb }));
           died.add(pp.pid);
           ssKill(pp, qq, lid, io);
           break;
@@ -762,11 +903,24 @@ io.on('connection', socket => {
 
   // Reconnect: if pid already in room, just update socketId and keep all game state
   let player;
+  const existingWasAlive = existing ? existing.alive : true;
   if (existing) {
     existing.socketId = socket.id;
     // Came back within grace window — cancel pending removal, resume same spot + score
     if (existing.dcTimer) { clearTimeout(existing.dcTimer); existing.dcTimer = null; }
     existing.disconnected = false;
+    // Was dead when they left — other clients already removed them (lives=0 broadcast).
+    // Give a fresh spawn and mark alive so: (a) tick() accepts their input again,
+    // (b) others get a 'join' announcement so they re-add the player.
+    if (!existing.alive) {
+      const spawn = nextSpawn();
+      existing.x = spawn.x; existing.y = spawn.y;
+      existing.prevX = spawn.x; existing.prevY = spawn.y;
+      existing.dx = 0; existing.dy = 0; existing.nx = 0; existing.ny = 0;
+      existing.sc = 0; existing.alive = true; existing.mc = 0;
+      existing.pow = false; existing.pt = 0; existing.pep = false; existing.pet = 0;
+      existing.held = ['cherry', 'pepper'];
+    }
     player = existing;
   } else {
     const spawn = nextSpawn();
@@ -796,8 +950,8 @@ io.on('connection', socket => {
     }))
   });
 
-  // Only announce to others if this is a fresh join (not a reconnect)
-  if (!existing) {
+  // Announce to others if: fresh join OR was-dead reconnect (others deleted them on lives=0)
+  if (!existing || !existingWasAlive) {
     socket.to(lobbyId).emit('join', {
       id: pid, name: player.name, color: player.color,
       x: player.x, y: player.y, num: player.num, sol: player.sol
@@ -999,6 +1153,58 @@ app.post('/admin/broadcast', requireAdmin, express.json(), (req, res) => {
   else          { io.emit('admin-broadcast', { message }); }
   res.json({ ok: true });
 });
+// ── Test lobby endpoints (no auth — local/diagnostic use only) ───────────────
+app.get('/ss-test', (req, res) => {
+  const scenario = req.query.scenario || 'boost-cutoff';
+  if (!SS_TEST_SCENARIOS[scenario])
+    return res.status(400).json({ error: 'unknown scenario', available: Object.keys(SS_TEST_SCENARIOS) });
+  const lid = `ss-test-${scenario}`;
+  const sg = getSsGame(lid);
+  if (sg.snakes.size === 0) {
+    sg._testScenario = scenario;
+    ssSpawnBots(sg, scenario);
+    if (!sg.tickInterval) {
+      sg.tickInterval = setInterval(() => ssTick(lid, io), TICK_MS);
+      console.log(`[${lid}] test lobby started (${scenario})`);
+    }
+  }
+  res.json({ lid, scenario, tick: sg.tick,
+    snakes: [...sg.snakes.values()].map(sn => ({
+      pid: sn.pid, alive: sn.alive, bot: !!sn.bot,
+      x: Math.round(sn.x), y: Math.round(sn.y),
+      angle: +sn.angle.toFixed(3), faceAngle: sn.faceAngle != null ? +sn.faceAngle.toFixed(3) : null,
+      boost: sn.boost, ns: sn.ns, botTick: sn._botTick
+    }))
+  });
+});
+
+app.get('/ss-test/reset', (req, res) => {
+  const scenario = req.query.scenario || 'boost-cutoff';
+  const lid = `ss-test-${scenario}`;
+  const sg = ssGames.get(lid);
+  if (!sg) return res.status(404).json({ error: 'lobby not found — call /ss-test first' });
+  sg.snakes.clear(); sg.food = []; sg._foodDirty = true; sg.tick = 0; sg._history = []; sg._resetPending = false;
+  sg._testScenario = scenario;
+  ssSpawnBots(sg, scenario);
+  console.log(`[${lid}] test lobby manually reset (${scenario})`);
+  res.json({ ok: true, lid, scenario });
+});
+
+app.get('/ss-test/status', (req, res) => {
+  const scenario = req.query.scenario || 'boost-cutoff';
+  const lid = `ss-test-${scenario}`;
+  const sg = ssGames.get(lid);
+  if (!sg) return res.status(404).json({ error: 'lobby not found' });
+  res.json({ lid, tick: sg.tick, resetPending: !!sg._resetPending,
+    snakes: [...sg.snakes.values()].map(sn => ({
+      pid: sn.pid, alive: sn.alive,
+      x: Math.round(sn.x), y: Math.round(sn.y),
+      angle: +sn.angle.toFixed(3), faceAngle: sn.faceAngle != null ? +sn.faceAngle.toFixed(3) : null,
+      boost: sn.boost, ns: sn.ns, botTick: sn._botTick, pathLen: sn.path ? sn.path.length : 0
+    }))
+  });
+});
+
 httpServer.listen(PORT, () => {
   console.log(`PAC ARENA game server listening on :${PORT}`);
 });

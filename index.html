@@ -425,7 +425,7 @@ body{touch-action:manipulation;}
     <div id="login-buttons">
       <div id="step-email">
         <div style="text-align:left;margin-bottom:1rem;">
-          <label style="display:block;font-family:'Press Start 2P',monospace;font-size:7px;color:var(--muted);margin-bottom:6px;">YOUR EMAIL</label>
+          <label for="inp-email" style="display:block;font-family:'Press Start 2P',monospace;font-size:7px;color:var(--muted);margin-bottom:6px;">YOUR EMAIL</label>
           <input id="inp-email" type="email" placeholder="you@example.com" style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-family:'Exo 2',sans-serif;font-size:15px;color:var(--txt);outline:none;" onkeydown="if(event.key==='Enter')sendCode()"/>
         </div>
         <button class="btn btn-y" id="btn-send" onclick="sendCode()">SEND LOGIN CODE →</button>
@@ -722,14 +722,14 @@ body{touch-action:manipulation;}
       <span style="font-size:10px;opacity:.7;">Enter your Phantom / external wallet address below.</span>
     </div>
     <div style="margin-bottom:.75rem;text-align:left;">
-      <label style="display:block;font-family:'Press Start 2P',monospace;font-size:7px;color:var(--muted);margin-bottom:6px;">DESTINATION WALLET</label>
+      <label for="co-dest" style="display:block;font-family:'Press Start 2P',monospace;font-size:7px;color:var(--muted);margin-bottom:6px;">DESTINATION WALLET</label>
       <div style="display:flex;gap:8px;">
         <input id="co-dest" type="text" placeholder="Paste Phantom / external wallet address" style="flex:1;min-width:0;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-family:'Exo 2',sans-serif;font-size:13px;color:var(--txt);outline:none;"/>
         <button class="copy-btn" onclick="navigator.clipboard.readText().then(t=>{const i=document.getElementById('co-dest');i.value=t.trim();i.style.borderColor='var(--g)';setTimeout(()=>i.style.borderColor='var(--border)',1200);}).catch(()=>{})" style="padding:0 14px;white-space:nowrap;">📋 PASTE</button>
       </div>
     </div>
     <div style="margin-bottom:.5rem;text-align:left;">
-      <label style="display:block;font-family:'Press Start 2P',monospace;font-size:7px;color:var(--muted);margin-bottom:6px;">AMOUNT ($USD)</label>
+      <label for="co-amt" style="display:block;font-family:'Press Start 2P',monospace;font-size:7px;color:var(--muted);margin-bottom:6px;">AMOUNT ($USD)</label>
       <div style="display:flex;gap:8px;">
         <input id="co-amt" type="number" placeholder="0.00" min="0.01" step="0.01" style="flex:1;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-family:'Exo 2',sans-serif;font-size:15px;color:var(--txt);outline:none;" oninput="onCashoutAmtChange()"/>
         <button class="copy-btn" onclick="setMaxCashout()" style="padding:0 16px;">MAX</button>
