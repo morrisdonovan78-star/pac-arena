@@ -364,22 +364,17 @@ function ssTick(lid, io) {
     const ny = sn.y + Math.sin(sn.angle) * spd;
     if (nx * nx + ny * ny >= SS_ARENA_R * SS_ARENA_R) { ssKill(sn, null, lid, io); return; }
     sn.x = nx; sn.y = ny;
-    // Record path at SS_POINT_DIST (1.6px) granularity — MoneySlither exact.
-    // Accumulate movement distance; unshift a new entry every POINT_DIST px.
+    // Record path at SS_POINT_DIST (1.6px) — MoneySlither exact.
+    // dist = spd (movement this tick = |new_head - old_head|, not dp from _lastPathX).
+    // Matches MS: _pathAcc += dist; while >= POINT_DIST: advance _last, insert.
     if (!sn.path) sn.path = [];
-    const dxp = nx - (sn._lastPathX ?? nx), dyp = ny - (sn._lastPathY ?? ny);
-    const dp = Math.hypot(dxp, dyp);
-    if (dp > 0) {
-      sn._pathAcc = (sn._pathAcc ?? 0) + dp;
-      const upx = dxp / dp, upy = dyp / dp;
-      let remaining = sn._pathAcc;
-      while (remaining >= SS_POINT_DIST) {
-        sn._lastPathX = (sn._lastPathX ?? nx) + upx * SS_POINT_DIST;
-        sn._lastPathY = (sn._lastPathY ?? ny) + upy * SS_POINT_DIST;
-        sn.path.unshift({ x: sn._lastPathX, y: sn._lastPathY });
-        remaining -= SS_POINT_DIST;
-      }
-      sn._pathAcc = remaining;
+    const upx = Math.cos(sn.angle), upy = Math.sin(sn.angle);
+    sn._pathAcc = (sn._pathAcc ?? 0) + spd;
+    while (sn._pathAcc >= SS_POINT_DIST) {
+      sn._lastPathX = (sn._lastPathX ?? nx) + upx * SS_POINT_DIST;
+      sn._lastPathY = (sn._lastPathY ?? ny) + upy * SS_POINT_DIST;
+      sn.path.unshift({ x: sn._lastPathX, y: sn._lastPathY });
+      sn._pathAcc -= SS_POINT_DIST;
     }
     // Trim: MoneySlither uses count-based trim (entries are fixed 1.6px apart)
     const maxPath = Math.max(800, sn.ns * SS_SEG_STEP + 200);
