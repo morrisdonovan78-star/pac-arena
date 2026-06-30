@@ -135,7 +135,8 @@ const SS_HB       = 0.95;    // HITBOX_BASE
 const SS_HBS      = 1.07;    // combatHitboxScale
 const SS_HHBS     = 1.18;    // combatHeadHitboxScale
 const SS_FACE     = Math.cos(75 * Math.PI / 180); // cos(75°) ≈ 0.259, facing gate threshold
-const SS_SEG_STEP = 4;       // path indices between checked body segments (SEGMENT_SPACING_TICKS)
+const SS_POINT_DIST = 1.6;   // path recording granularity in px (MoneySlither POINT_DIST)
+const SS_SEG_STEP = 4;       // path stride for H2B body samples (MoneySlither SEGMENT_SPACING_TICKS)
 const SS_MIN_SIZE = 40;
 
 // Server-authoritative physics constants (must match client exactly)
@@ -225,15 +226,16 @@ function ssSpawnSnake(pid, color, name, sg) {
   }
   const face = Math.atan2(-sy, -sx);
   const ns = SS_INIT_NS;
-  const initR = ssSectionRadius(ns);
-  const pathLen = Math.ceil(ns * initR * 0.5 * 2 / SS_SPD) + 10;
+  // MoneySlither: path entries at POINT_DIST=1.6px, maxPath=max(800, numSegments*SEGMENT_SPACING_TICKS+200)
+  const maxPath = Math.max(800, ns * SS_SEG_STEP + 200);
   const path = [];
-  for (let i = 0; i < pathLen; i++)
-    path.push({ x: sx - Math.cos(face) * i * SS_SPD, y: sy - Math.sin(face) * i * SS_SPD });
+  for (let i = 0; i < maxPath; i++)
+    path.push({ x: sx - Math.cos(face) * i * SS_POINT_DIST, y: sy - Math.sin(face) * i * SS_POINT_DIST });
   return {
     pid, color: color || '#FFD700', name: name || 'SNAKE',
     x: sx, y: sy, angle: face, targetAngle: face, circling: false,
     ns, thick: ssThick(ns), path, segs: [],
+    _lastPathX: sx, _lastPathY: sy, _pathAcc: 0,
     growQueue: 0, _boostDrainAcc: 0, _shed: 0,
     alive: true, boost: false, score: 0, usd: 0, lastTs: Date.now()
   };
@@ -362,19 +364,26 @@ function ssTick(lid, io) {
     const ny = sn.y + Math.sin(sn.angle) * spd;
     if (nx * nx + ny * ny >= SS_ARENA_R * SS_ARENA_R) { ssKill(sn, null, lid, io); return; }
     sn.x = nx; sn.y = ny;
+    // Record path at SS_POINT_DIST (1.6px) granularity — MoneySlither exact.
+    // Accumulate movement distance; unshift a new entry every POINT_DIST px.
     if (!sn.path) sn.path = [];
-    sn.path.unshift({ x: nx, y: ny });
-
-    // Trim path to the exact arc length needed by ssGetSegsFromPath (maxSegs * spacing + 1 buffer)
-    const rr = ssSectionRadius(sn.ns);
-    const spacing = rr * 0.5;
-    const maxSegs = sn.ns + Math.ceil((4 * rr + 80) / spacing) + 2;
-    const keepLen = maxSegs * spacing + spacing;
-    let cum = 0;
-    for (let i = 0; i + 1 < sn.path.length; i++) {
-      cum += Math.hypot(sn.path[i + 1].x - sn.path[i].x, sn.path[i + 1].y - sn.path[i].y);
-      if (cum >= keepLen) { sn.path.length = i + 2; break; }
+    const dxp = nx - (sn._lastPathX ?? nx), dyp = ny - (sn._lastPathY ?? ny);
+    const dp = Math.hypot(dxp, dyp);
+    if (dp > 0) {
+      sn._pathAcc = (sn._pathAcc ?? 0) + dp;
+      const upx = dxp / dp, upy = dyp / dp;
+      let remaining = sn._pathAcc;
+      while (remaining >= SS_POINT_DIST) {
+        sn._lastPathX = (sn._lastPathX ?? nx) + upx * SS_POINT_DIST;
+        sn._lastPathY = (sn._lastPathY ?? ny) + upy * SS_POINT_DIST;
+        sn.path.unshift({ x: sn._lastPathX, y: sn._lastPathY });
+        remaining -= SS_POINT_DIST;
+      }
+      sn._pathAcc = remaining;
     }
+    // Trim: MoneySlither uses count-based trim (entries are fixed 1.6px apart)
+    const maxPath = Math.max(800, sn.ns * SS_SEG_STEP + 200);
+    while (sn.path.length > maxPath) sn.path.pop();
 
     // Apply growth queue
     while ((sn.growQueue || 0) > 0 && sn.ns < SS_MAX_NS) { sn.growQueue--; sn.ns++; sn.thick = ssThick(sn.ns); }
@@ -492,20 +501,25 @@ function ssCheckCollisions(sg, lid, io) {
     }
   }
 
-  // ── Head-to-body: moneyslither uses path index k=2 (≈12.8px from head) as first check.
-  // Our segs are spaced ~11px apart, so skip=1 (segs[1]≈11px) matches that intent.
+  // ── Head-to-body: MoneySlither exact source —
+  //   var idx = k * SEGMENT_SPACING_TICKS;
+  //   var seg = sqq.path[idx] || sqq.path[sqq.path.length - 1];
+  // k=2..numSegments, SEGMENT_SPACING_TICKS=4, POINT_DIST=1.6px → path[8]=12.8px first check.
   for (let i = 0; i < alive.length; i++) {
     const pp = alive[i]; if (died.has(pp.pid)) continue;
     const hR = pp.thick * SS_HB * T.hbs * T.hhbs;
     const hhx = pp.segs[0][0], hhy = pp.segs[0][1];
     for (let j = 0; j < alive.length; j++) {
       const qq = alive[j]; if (qq.pid === pp.pid || died.has(qq.pid)) continue;
-      const bR = qq.thick * SS_HB * T.hbs; // MoneySlither exact: bodyR = thick * HITBOX_BASE * combatHBS (no hhbs)
+      const bR = qq.thick * SS_HB * T.hbs;
       const crr2 = (hR + bR) * (hR + bR);
-      const skip = 1; // skip segs[0]=head; first check segs[1]≈11px (moneyslither: path[8]=12.8px)
-      for (let k = skip; k < qq.segs.length; k++) {
-        const seg = qq.segs[k];
-        const sdx = hhx - seg[0], sdy = hhy - seg[1];
+      const qpath = qq.path;
+      if (!qpath || qpath.length === 0) continue;
+      const collLim = Math.min(qq.ns, 1200);
+      for (let k = 2; k < collLim; k++) {
+        const idx = k * SS_SEG_STEP;
+        const pt = qpath[idx] || qpath[qpath.length - 1];
+        const sdx = hhx - pt.x, sdy = hhy - pt.y;
         if (sdx * sdx + sdy * sdy <= crr2) {
           died.add(pp.pid);
           ssKill(pp, qq, lid, io);
