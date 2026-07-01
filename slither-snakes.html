@@ -1346,13 +1346,21 @@ async function pkConnect(roomId,gameToken){
           let ba=null,bb=null;                                     // snapshots bracketing what's displayed
           if(kbuf&&kbuf.length>=2){ba=kbuf[0];bb=kbuf[kbuf.length-1];for(let bi=1;bi<kbuf.length;bi++){if(kbuf[bi].t>=renderT){ba=kbuf[bi-1];bb=kbuf[bi];break;}}}
           const off=(rp,sp)=>(rp&&sp)?{dx:+(rp.x-sp.x).toFixed(1),dy:+(rp.y-sp.y).toFixed(1),dist:+Math.hypot(rp.x-sp.x,rp.y-sp.y).toFixed(1)}:null;
+          // [COLLISION_SNAPSHOT] rendered body polyline (decimated) actually drawn this frame
+          const _poly=(sn,n,stride)=>{ if(!sn||!sn.path||!sn.path.length)return null; const o=[]; const st=Math.max(1,stride|0);
+            for(let i=0;i<sn.path.length&&o.length<n;i+=st)o.push({x:+sn.path[i].x.toFixed(1),y:+sn.path[i].y.toFixed(1)}); return o; };
           const report={
             role:data.id===myPid?'VICTIM':'KILLER',
-            renderTs:nowT, interpDelayMs:_INTERP_DELAY, renderT, lastServerTick:SG.tick, rttMs:(typeof _ssRtt==='number'?_ssRtt:null),
+            renderTs:nowT, renderFrameTs:nowT, interpDelayMs:_INTERP_DELAY, renderT, lastServerTick:SG.tick, rttMs:(typeof _ssRtt==='number'?_ssRtt:null),
             renderedVictimHead:vh?{x:+vh.x.toFixed(1),y:+vh.y.toFixed(1)}:null,
             renderedKillerHead:kh?{x:+kh.x.toFixed(1),y:+kh.y.toFixed(1)}:null,
+            renderedKillerBody:_poly(kil,80,2),        // the bot body the player SAW (ran into)
+            renderedVictimBody:_poly(vic,80,2),        // the player's own drawn body
             displayedKillerSnapshot:ba&&bb?{aT:ba.t,bT:bb.t,ageMs:nowT-bb.t}:null,
             latestKillerSnapshot:kLatest?{ageMs:nowT-kLatest.t,x:+kLatest.x.toFixed(1),y:+kLatest.y.toFixed(1)}:null,
+            // shared key: server death tick <-> the render frame + the snapshot ticks it was built from
+            tickMapping:{ serverDeathTick:D.tick, clientLastServerTick:SG.tick, renderFrameTs:nowT, renderT, interpDelayMs:_INTERP_DELAY,
+              displayedSnapshotTicks:(ba&&bb)?{aTick:(ba.tick!=null?ba.tick:null),bTick:(bb.tick!=null?bb.tick:null),aT:ba.t,bT:bb.t}:null },
             offset:{killer_rendered_vs_server:off(kh,D.killerHead),
                     victim_rendered_vs_server:off(vh,D.victimHead),
                     killer_latestSnapshot_vs_server:off(kLatest,D.killerHead)}
@@ -1380,7 +1388,7 @@ async function pkConnect(roomId,gameToken){
         // Buffer snapshots (keep ~400ms worth at 30fps)
         if(!_ssBuf.has(sd.id))_ssBuf.set(sd.id,[]);
         const buf=_ssBuf.get(sd.id);
-        buf.push({x:sd.x,y:sd.y,angle:sd.angle,ns:sd.ns,boost:sd.boost,score:sd.score||0,usd:sd.usd||0,t:pktT});
+        buf.push({x:sd.x,y:sd.y,angle:sd.angle,ns:sd.ns,boost:sd.boost,score:sd.score||0,usd:sd.usd||0,t:pktT,tick:(typeof d.tick==='number'?d.tick:null)});
         while(buf.length>12)buf.shift();
         _playerMeta.set(sd.id,{color:sd.color,name:sd.name});
         // Ensure local snake object exists

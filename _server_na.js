@@ -3,6 +3,37 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const crypto = require('crypto');
+const fs = require('fs');
+
+// ── Death-replay system (instrumentation only; no gameplay effect) ────────────
+// Rolling per-tick authoritative buffer lives in sg._history. On each snake death
+// a full replay (server frames + collision eval + all H2H/H2B calcs, later merged
+// with the client render/interp/network report) is saved to disk + an in-memory
+// ring, retrievable via /ss-replay/*. Replayed offline through PAC + MoneySlither.
+const SS_REPLAY_DIR = '/opt/pac-arena/replays';
+const SS_REPLAY_HISTORY_TICKS = 160;   // ~5.3s @ 30 TPS of authoritative state
+const _ssReplays = [];                  // in-memory ring of recent replays
+try { fs.mkdirSync(SS_REPLAY_DIR, { recursive: true }); } catch (e) {}
+
+function ssSaveReplay(lid, victim, killer, diag) {
+  const sg = ssGames.get(lid);
+  const frames = sg && sg._history ? sg._history.slice() : [];
+  const rp = {
+    id: diag.replayId,
+    meta: { lid, victimId: victim.pid, killerId: killer ? killer.pid : null,
+            stage: diag.stage, tick: diag.tick, t: diag.t, captured: Date.now() },
+    diag,                 // collision eval + all H2H/H2B calcs (dots, gate, dist, crr, seg)
+    frames,               // per-tick authoritative state (x,y,angle,tgt,face,boost,ns) for ~5s
+    client: null          // filled in by ss-death-report from the victim's browser
+  };
+  _ssReplays.push(rp); while (_ssReplays.length > 30) _ssReplays.shift();
+  try {
+    fs.writeFileSync(`${SS_REPLAY_DIR}/${rp.id}.json`, JSON.stringify(rp));
+    const files = fs.readdirSync(SS_REPLAY_DIR).filter(f => f.endsWith('.json')).sort();
+    while (files.length > 80) { try { fs.unlinkSync(`${SS_REPLAY_DIR}/${files.shift()}`); } catch (e) {} }
+  } catch (e) { console.warn('[REPLAY] write failed: ' + e.message); }
+  console.log(`[REPLAY] saved ${rp.id} (${diag.stage}, victim=${victim.pid.slice(0,8)}, frames=${frames.length})`);
+}
 
 const PORT = process.env.PORT || 3001;
 const GAME_SECRET = (process.env.GAME_SECRET || '').trim();
@@ -150,6 +181,20 @@ const SS_BOOST_DRAIN_T = 8;      // client BOOST_DRAIN
 const SS_INIT_NS       = 24;     // client INIT_SECTIONS
 const SS_MIN_NS        = 8;      // client MIN_SECTIONS
 const SS_MAX_NS        = 300;    // client MAX_SECTIONS
+
+// ── MoneySlither-exact 60-TPS simulation (ported verbatim from client.js) ─────
+// The authoritative sim now runs at 60 Hz via SS_SUBSTEPS sub-steps per 30 Hz ssTick;
+// network broadcast stays 30 Hz. Body size is continuous (`size`), ns/thickness derived.
+const SS_DT            = 1 / 60;   // MoneySlither DT (TICK_RATE=60)
+const SS_SUBSTEPS      = 2;        // 60 Hz sim ÷ 30 Hz ssTick
+const SS_BASE_SPEED    = 288;      // px/s
+const SS_BOOST_SPEED   = 630;      // px/s
+const SS_BOOST_ACCEL   = 4.5;      // boostAmount ramp /s
+const SS_TURN_PER_SEC  = 8.1;      // rad/s
+const SS_BOOST_BURN    = 0.108;    // size burn fraction /s while boosting
+const SS_START_SIZE    = 100;      // size for a fresh snake (→ ns 26)
+function ssSegForSize(size){ const sz=Math.max(SS_MIN_SIZE, Number(size)||SS_MIN_SIZE); let seg = 8 + (sz-40)*(26-8)/(100-40); if(sz>100) seg = 26 + (sz-100)*0.08; return Math.max(8, Math.round(seg)); }
+function ssSizeFromNs(n){ n=Math.max(SS_MIN_NS, n); return n<=26 ? 40 + (n-8)*(100-40)/(26-8) : 100 + (n-26)/0.08; }
 const SS_SHED_NE_MS    = 4000;   // client SHED_NOEAT_MS
 const SS_FOOD_PICKUP_R      = 29;  // client FOOD_PICKUP_R
 const SS_KILL_FOOD_PICKUP_R = 42;  // client KILL_FOOD_PICKUP_R
@@ -157,28 +202,27 @@ const SS_KILL_FOOD_PICKUP_R = 42;  // client KILL_FOOD_PICKUP_R
 // ── Test lobby: deterministic bot scenarios ───────────────────────────────────
 const SS_TEST_SCENARIOS = {
   'boost-cutoff': {
-    // pursuer heads east, leader heads south from (0,0). No parallel-chase phantom.
-    // At ~tick 4: pursuer(at ~-16,0) enters crr of leader crossing body at (0,0). pursuer dies.
+    // Cut-off geometry: pursuer east (boost) from (-63,0); leader south (no boost) from (0,-19.2).
+    // Pursuer(east) first in Map order. Observe which stage (H2H vs H2B) resolves the kill.
     bots: [
       { id: 'bot-pursuer', color: '#FF4444', name: 'PURSUER',
-        x: -100, y: 0, angle: 0, ns: 24,
-        script: () => ({ angle: 0,           boost: true }) },
+        x: -63, y: 0, angle: 0, ns: 24,
+        script: () => ({ angle: 0, boost: true }) },
       { id: 'bot-leader',  color: '#44FF44', name: 'LEADER',
-        x: 0, y: 0, angle: Math.PI / 2, ns: 24,
-        script: () => ({ angle: Math.PI / 2, boost: true }) }
+        x: 0, y: -19.2, angle: Math.PI / 2, ns: 24,
+        script: () => ({ angle: Math.PI / 2, boost: false }) }
     ]
   },
   'bug-cutoff': {
-    // Same perpendicular geometry but leader spawned FIRST in Map insertion order.
-    // Tests eval-order sensitivity: if L->P fires before P->L, leader dies incorrectly.
-    // For this geometry L->P should not fire (leader moves south, away from pursuer path).
+    // SAME geometry but LEADER is first in Map insertion order (eval-order probe).
+    // With MoneySlither-exact single-pass H2B: if outcome differs from boost-cutoff, eval order matters.
     bots: [
       { id: 'bot-leader',  color: '#44FF44', name: 'LEADER',
-        x: 0, y: 0, angle: Math.PI / 2, ns: 24,
-        script: () => ({ angle: Math.PI / 2, boost: true }) },
+        x: 0, y: -19.2, angle: Math.PI / 2, ns: 24,
+        script: () => ({ angle: Math.PI / 2, boost: false }) },
       { id: 'bot-pursuer', color: '#FF4444', name: 'PURSUER',
-        x: -100, y: 0, angle: 0, ns: 24,
-        script: () => ({ angle: 0,           boost: true }) }
+        x: -63, y: 0, angle: 0, ns: 24,
+        script: () => ({ angle: 0, boost: true }) }
     ]
   },
   'tight-cutoff': {
@@ -296,9 +340,9 @@ function ssSpawnSnake(pid, color, name, sg) {
   return {
     pid, color: color || '#FFD700', name: name || 'SNAKE',
     x: sx, y: sy, angle: face, targetAngle: face, circling: false,
-    ns, thick: ssThick(ns), path, segs: [],
-    _lastPathX: sx, _lastPathY: sy, _pathAcc: 0,
-    growQueue: 0, _boostDrainAcc: 0, _shed: 0,
+    size: ssSizeFromNs(ns), ns, thick: ssThick(ns), path,
+    boostAmount: 0, _lastPathX: sx, _lastPathY: sy, _pathAcc: 0,
+    growQueue: 0, _shed: 0,
     alive: true, boost: false, score: 0, usd: 0, lastTs: Date.now()
   };
 }
@@ -312,9 +356,9 @@ function ssSpawnBots(sg, scenario) {
       pid: bd.id, color: bd.color, name: bd.name,
       x: bd.x, y: bd.y, angle: bd.angle, targetAngle: bd.angle,
       faceAngle: bd.angle, circling: false,
-      ns: bd.ns, thick: ssThick(bd.ns), path, segs: [],
-      _lastPathX: bd.x, _lastPathY: bd.y, _pathAcc: 0,
-      growQueue: 0, _boostDrainAcc: 0, _shed: 0,
+      size: ssSizeFromNs(bd.ns), ns: bd.ns, thick: ssThick(bd.ns), path,
+      boostAmount: 0, _lastPathX: bd.x, _lastPathY: bd.y, _pathAcc: 0,
+      growQueue: 0, _shed: 0,
       alive: true, boost: false, score: 0, usd: 0,
       lastTs: Date.now(),
       bot: true, _botTick: 0, _botScript: bd.script
@@ -371,7 +415,7 @@ function ssHandleInput(lid, pid, d, io) {
   if (!sn || (!sn.alive && (!sn._killedAt || Date.now() - sn._killedAt > 2000))) {
     // First input OR dead snake rejoin (2s cooldown prevents revival from in-flight packets)
     sn = ssSpawnSnake(pid, (sn && sn.color) || d.color || '#FFD700', (sn && sn.name) || d.name || 'SNAKE', sg);
-    if (d.ns && d.ns > SS_INIT_NS) { sn.ns = Math.min(SS_MAX_NS, d.ns); sn.thick = ssThick(sn.ns); }
+    if (d.ns && d.ns > SS_INIT_NS) { sn.ns = Math.min(SS_MAX_NS, d.ns); sn.size = ssSizeFromNs(sn.ns); sn.thick = ssThick(sn.ns); }
     if (d.usd != null && typeof d.usd === 'number' && sn.usd === 0) sn.usd = Math.max(0, d.usd);
     sg.snakes.set(pid, sn);
     if (!sg.food || !sg.food.length) ssReconcileFood(sg);
@@ -419,6 +463,70 @@ function ssPlayerLeft(lid, pid, io) {
   }, DISCONNECT_GRACE_MS);
 }
 
+// ── MoneySlither stepMovement port — ONE 60 Hz sub-step (verbatim from client.js) ──
+// Continuous `size` is authoritative; ns/thickness derived. Chord-based path sampling.
+function ssStepMovement(sn, sg, lid, io, now) {
+  // stepTurning: angle += sign(diff)*min(|diff|, TURN_SPEED_PER_SEC*DT)
+  if (sn.circling) {
+    sn.angle += SS_TURN_PER_SEC * SS_DT;
+  } else if (typeof sn.targetAngle === 'number') {
+    const diff = ssAngleDiff(sn.targetAngle, sn.angle);
+    sn.angle += Math.sign(diff) * Math.min(Math.abs(diff), SS_TURN_PER_SEC * SS_DT);
+  }
+  while (sn.angle >  Math.PI) sn.angle -= 2 * Math.PI;
+  while (sn.angle < -Math.PI) sn.angle += 2 * Math.PI;
+
+  // Boost ramp: speed = BASE + (BOOST-BASE)*boostAmount
+  if (sn.boost && sn.size > SS_MIN_SIZE) sn.boostAmount = Math.min(1, (sn.boostAmount || 0) + SS_BOOST_ACCEL * SS_DT);
+  else                                   sn.boostAmount = Math.max(0, (sn.boostAmount || 0) - SS_BOOST_ACCEL * SS_DT);
+  const speed = SS_BASE_SPEED + (SS_BOOST_SPEED - SS_BASE_SPEED) * sn.boostAmount;
+
+  // Advance head
+  sn.x += Math.cos(sn.angle) * speed * SS_DT;
+  sn.y += Math.sin(sn.angle) * speed * SS_DT;
+  if (sn.x * sn.x + sn.y * sn.y >= SS_ARENA_R * SS_ARENA_R) { ssKill(sn, null, lid, io); return; }
+
+  // Distance-sampled path: _pathAcc += chord distance; advance _lastPath along the chord
+  const dxp = sn.x - sn._lastPathX, dyp = sn.y - sn._lastPathY, d = Math.sqrt(dxp*dxp + dyp*dyp);
+  if (d > 0) {
+    sn._pathAcc = (sn._pathAcc || 0) + d;
+    const ux = dxp / d, uy = dyp / d;
+    while (sn._pathAcc >= SS_POINT_DIST) {
+      sn._lastPathX += ux * SS_POINT_DIST; sn._lastPathY += uy * SS_POINT_DIST;
+      sn.path.unshift({ x: sn._lastPathX, y: sn._lastPathY });
+      sn._pathAcc -= SS_POINT_DIST;
+    }
+  }
+  const maxPath = Math.max(800, sn.ns * SS_SEG_STEP + 200);
+  while (sn.path.length > maxPath) sn.path.pop();
+
+  // Growth: drain growQueue (each unit = +1 segment worth of size) — preserves food economy
+  while ((sn.growQueue || 0) > 0 && sn.ns < SS_MAX_NS) {
+    sn.growQueue--;
+    sn.size += (ssSizeFromNs(sn.ns + 1) - ssSizeFromNs(sn.ns));
+    sn.ns = ssSegForSize(sn.size);
+  }
+
+  // Boost burn: size -= size*BURN*DT (continuous) + shed a pellet per whole segment lost
+  if (sn.boost) {
+    if (sn.size <= SS_MIN_SIZE) { sn.boost = false; }
+    else {
+      const beforeNs = sn.ns;
+      sn.size = Math.max(SS_MIN_SIZE, sn.size - sn.size * SS_BOOST_BURN * SS_DT);
+      sn.ns = ssSegForSize(sn.size);
+      sn._shed = (sn._shed || 0) + (beforeNs - sn.ns);
+      while (sn._shed >= SS_FOOD_GROW) {
+        sn._shed -= SS_FOOD_GROW;
+        const tail = sn.path[sn.path.length - 1] || { x: sn.x, y: sn.y };
+        sg.food.push(ssMakeFood(tail.x + (Math.random()-0.5)*6, tail.y + (Math.random()-0.5)*6, 0, 0, sn.pid, now + SS_SHED_NE_MS));
+        sg._foodDirty = true;
+      }
+    }
+  }
+  sn.thick = ssThick(sn.ns);
+  if (sn.ns < SS_MIN_NS) { ssKill(sn, null, lid, io); }
+}
+
 function ssTick(lid, io) {
   const sg = ssGames.get(lid);
   if (!sg) return;
@@ -439,64 +547,13 @@ function ssTick(lid, io) {
     sn._botTick++;
   });
 
-  // 1. Move all alive snakes
-  sg.snakes.forEach(sn => {
-    if (!sn.alive) return;
-    if (now - sn.lastTs > SS_GHOST_MS) { ssKill(sn, null, lid, io); return; }
-
-    // Turn toward target angle (or circle)
-    if (sn.circling) {
-      sn.angle += SS_MAX_TURN;
-    } else if (typeof sn.targetAngle === 'number') {
-      const delta = ssAngleDiff(sn.targetAngle, sn.angle);
-      sn.angle += Math.max(-SS_MAX_TURN, Math.min(SS_MAX_TURN, delta));
-    }
-    while (sn.angle >  Math.PI) sn.angle -= 2 * Math.PI;
-    while (sn.angle < -Math.PI) sn.angle += 2 * Math.PI;
-
-    // Advance head
-    const spd = (sn.boost && sn.ns > SS_BOOST_MIN) ? SS_BSPD : SS_SPD;
-    const nx = sn.x + Math.cos(sn.angle) * spd;
-    const ny = sn.y + Math.sin(sn.angle) * spd;
-    if (nx * nx + ny * ny >= SS_ARENA_R * SS_ARENA_R) { ssKill(sn, null, lid, io); return; }
-    sn.x = nx; sn.y = ny;
-    // Record path at SS_POINT_DIST (1.6px) — MoneySlither exact.
-    // dist = spd (movement this tick = |new_head - old_head|, not dp from _lastPathX).
-    // Matches MS: _pathAcc += dist; while >= POINT_DIST: advance _last, insert.
-    if (!sn.path) sn.path = [];
-    const upx = Math.cos(sn.angle), upy = Math.sin(sn.angle);
-    sn._pathAcc = (sn._pathAcc ?? 0) + spd;
-    while (sn._pathAcc >= SS_POINT_DIST) {
-      sn._lastPathX = (sn._lastPathX ?? nx) + upx * SS_POINT_DIST;
-      sn._lastPathY = (sn._lastPathY ?? ny) + upy * SS_POINT_DIST;
-      sn.path.unshift({ x: sn._lastPathX, y: sn._lastPathY });
-      sn._pathAcc -= SS_POINT_DIST;
-    }
-    // Trim: MoneySlither uses count-based trim (entries are fixed 1.6px apart)
-    const maxPath = Math.max(800, sn.ns * SS_SEG_STEP + 200);
-    while (sn.path.length > maxPath) sn.path.pop();
-
-    // Apply growth queue
-    while ((sn.growQueue || 0) > 0 && sn.ns < SS_MAX_NS) { sn.growQueue--; sn.ns++; sn.thick = ssThick(sn.ns); }
-
-    // Boost drain + shed pellets
-    if (sn.boost && sn.ns > SS_BOOST_MIN) {
-      sn._boostDrainAcc = (sn._boostDrainAcc || 0) + SS_BOOST_DRAIN_A;
-      while (sn._boostDrainAcc >= SS_BOOST_DRAIN_T) {
-        sn._boostDrainAcc -= SS_BOOST_DRAIN_T;
-        sn.ns = Math.max(SS_BOOST_MIN, sn.ns - 1); sn.thick = ssThick(sn.ns);
-        sn._shed = (sn._shed || 0) + 1;
-        if (sn._shed >= SS_FOOD_GROW) {
-          sn._shed -= SS_FOOD_GROW;
-          const tail = sn.path[sn.path.length - 1] || { x: sn.x, y: sn.y };
-          sg.food.push(ssMakeFood(tail.x + (Math.random()-0.5)*6, tail.y + (Math.random()-0.5)*6, 0, 0, sn.pid, now + SS_SHED_NE_MS));
-          sg._foodDirty = true;
-        }
-      }
-    } else { sn._boostDrainAcc = 0; }
-
-    if (sn.ns < SS_MIN_NS) { ssKill(sn, null, lid, io); }
-  });
+  // 1. Ghost timeout (network check, 30 Hz), then run the 60 Hz authoritative sim:
+  //    SS_SUBSTEPS × (move every snake one 1/60 step, then check collisions).
+  sg.snakes.forEach(sn => { if (sn.alive && now - sn.lastTs > SS_GHOST_MS) ssKill(sn, null, lid, io); });
+  for (let _sub = 0; _sub < SS_SUBSTEPS; _sub++) {
+    sg.snakes.forEach(sn => { if (sn.alive) ssStepMovement(sn, sg, lid, io, now); });
+    ssCheckCollisions(sg, lid, io);
+  }
 
   // 2. Food pickup — exact head position, no guessing
   sg.snakes.forEach(sn => {
@@ -517,9 +574,6 @@ function ssTick(lid, io) {
   });
   ssReconcileFood(sg);
 
-  // 3. Recompute segs from server path (used by ssCheckCollisions)
-  sg.snakes.forEach(sn => { if (sn.alive) sn.segs = ssGetSegsFromPath(sn); });
-
   // Tick snapshot for collision kill-trace (non-behavioral)
   { if (!sg._history) sg._history = [];
     const snap = { tk: sg.tick, t: Date.now(), sn: {} };
@@ -528,13 +582,13 @@ function ssTick(lid, io) {
       const p0 = sn.path && sn.path.length ? sn.path[0] : null;
       snap.sn[sn.pid] = { x: +sn.x.toFixed(1), y: +sn.y.toFixed(1),
         ang: +sn.angle.toFixed(3), face: sn.faceAngle != null ? +sn.faceAngle.toFixed(3) : null,
+        tgt: sn.targetAngle != null ? +sn.targetAngle.toFixed(3) : null, circ: !!sn.circling,
         boost: !!sn.boost, ns: sn.ns, acc: +(sn._pathAcc||0).toFixed(3),
         p0: p0 ? { x: +p0.x.toFixed(1), y: +p0.y.toFixed(1) } : null, plen: sn.path ? sn.path.length : 0 };
     });
-    sg._history.push(snap); if (sg._history.length > 20) sg._history.shift(); }
+    sg._history.push(snap); if (sg._history.length > SS_REPLAY_HISTORY_TICKS) sg._history.shift(); }
 
-  // 4. Collision check (H2H + H2B)
-  ssCheckCollisions(sg, lid, io);
+  // (Collision now runs inside the 60 Hz sub-step loop above.)
 
   // Test lobby auto-reset: 2s after all bots dead, clear and re-spawn
   if (sg._testScenario && !sg._resetPending) {
@@ -581,10 +635,43 @@ function ssBroadcastState(sg, lid, io) {
   io.to(lid).emit('ss-state', pkt);
 }
 
+// Instrumentation helper (read-only; does NOT affect collision outcome):
+// runs the exact H2B head-in-body scan for `att` head against `vic` body, returns hit or null.
+function ssScanHeadInBody(attHeadX, attHeadY, attThick, vic, T) {
+  const hR = attThick * SS_HB * T.hbs * T.hhbs;
+  const bR = vic.thick * SS_HB * T.hbs;
+  const crr2 = (hR + bR) * (hR + bR);
+  const vpath = vic.path;
+  if (!vpath || vpath.length === 0) return null;
+  const collLim = Math.min(vic.ns, 1200);
+  for (let k = 2; k < collLim; k++) {
+    const idx = k * SS_SEG_STEP;
+    const pt = vpath[idx] || vpath[vpath.length - 1];
+    const sdx = attHeadX - pt.x, sdy = attHeadY - pt.y;
+    if (sdx * sdx + sdy * sdy <= crr2) {
+      return { k, idx, dist: +Math.sqrt(sdx*sdx+sdy*sdy).toFixed(2), crr: +Math.sqrt(crr2).toFixed(2),
+               bodyPt: { x: +pt.x.toFixed(1), y: +pt.y.toFixed(1) } };
+    }
+  }
+  return null;
+}
+
+// [COLLISION_SNAPSHOT] Decimated tail of a path from the head end (instrumentation only;
+// never touches gameplay). Captures the actual authoritative body geometry at death time.
+function ssPathTail(path, n, stride) {
+  if (!path || !path.length) return [];
+  const out = [];
+  const st = Math.max(1, stride | 0);
+  for (let i = 0; i < path.length && out.length < n; i += st) {
+    out.push({ x: +path[i].x.toFixed(1), y: +path[i].y.toFixed(1) });
+  }
+  return out;
+}
+
 function ssCheckCollisions(sg, lid, io) {
   const T = sg.tuning;
-  // Only snakes with HOST-supplied segs are collision-ready (segs[0] = head, segs[1+] = body)
-  const alive = [...sg.snakes.values()].filter(s => s.alive && s.segs && s.segs.length > 1);
+  // MoneySlither: collide on the exact head (s.x,s.y) against the raw 1.6px path — no segs.
+  const alive = [...sg.snakes.values()].filter(s => s.alive && s.path && s.path.length > 1);
   const died = new Set();
   const _evalOrder = alive.map(s => s.pid.slice(0, 8));
   let _h2hKilled = false;
@@ -595,11 +682,11 @@ function ssCheckCollisions(sg, lid, io) {
   const _faceCos = Math.cos((T.faceDeg ?? 75) * Math.PI / 180);
   for (let i = 0; i < alive.length; i++) {
     const p = alive[i]; if (died.has(p.pid)) continue;
-    const px = p.segs[0][0], py = p.segs[0][1];
+    const px = p.x, py = p.y;                       // MoneySlither: exact head (sp.x, sp.y)
     const hR1 = p.thick * SS_HB * T.hbs * T.hhbs;
     for (let j = i + 1; j < alive.length; j++) {
       const q = alive[j]; if (died.has(q.pid)) continue;
-      const qx = q.segs[0][0], qy = q.segs[0][1];
+      const qx = q.x, qy = q.y;
       const hR2 = q.thick * SS_HB * T.hbs * T.hhbs;
       const rr = (hR1 + hR2) * T.hbs; // MoneySlither exact: (headR1+headR2) * combatHitboxScale
       const dx = qx - px, dy = qy - py, d2 = dx * dx + dy * dy;
@@ -607,16 +694,21 @@ function ssCheckCollisions(sg, lid, io) {
       let pDot = 0, qDot = 0, dh = 0;
       if (d2 > 0) {
         dh = Math.sqrt(d2);
-        const pFace = p.circling ? p.angle : (p.faceAngle ?? p.angle);
-        const qFace = q.circling ? q.angle : (q.faceAngle ?? q.angle);
+        // MoneySlither client.js:842-845 uses sp.angle (the simulated HEADING) for the
+        // facing gate — NOT a client-reported aim. Using faceAngle (the player's aim, which
+        // leads the heading mid-turn) made PAC fire H2H where MoneySlither falls to H2B,
+        // killing a boosting (smaller) leader in a cut-off instead of the pursuer. Proven
+        // via parity harness: faceAngle→107/2304 wrong outcomes, angle→0 residual.
+        const pFace = p.angle;
+        const qFace = q.angle;
         pDot = Math.cos(pFace) * (dx / dh) + Math.sin(pFace) * (dy / dh);
         qDot = Math.cos(qFace) * (-dx / dh) + Math.sin(qFace) * (-dy / dh);
       }
       if (pDot < _faceCos || qDot < _faceCos) continue;                 // gate fails → H2B
-      let winner, loser, reason;
-      if      (p.ns > q.ns) { winner = p; loser = q; reason = 'T1-bigger'; }
-      else if (q.ns > p.ns) { winner = q; loser = p; reason = 'T1-bigger'; }
-      else                   { winner = Math.random() < 0.5 ? p : q; loser = winner === p ? q : p; reason = 'T1-tie'; }
+      let winner, loser, reason;   // MoneySlither smallest_wins: bigger SIZE wins; equal → random
+      if      (p.size > q.size) { winner = p; loser = q; reason = 'T1-bigger'; }
+      else if (q.size > p.size) { winner = q; loser = p; reason = 'T1-bigger'; }
+      else                      { winner = Math.random() < 0.5 ? p : q; loser = winner === p ? q : p; reason = 'T1-tie'; }
       const _h2h = { type:'H2H', tk:sg.tick, t:Date.now(), lid, evalOrder:_evalOrder,
         p:{ pid:p.pid, x:px, y:py, ang:+p.angle.toFixed(3), face:p.faceAngle!=null?+p.faceAngle.toFixed(3):null, pDot:+pDot.toFixed(4) },
         q:{ pid:q.pid, x:qx, y:qy, ang:+q.angle.toFixed(3), face:q.faceAngle!=null?+q.faceAngle.toFixed(3):null, qDot:+qDot.toFixed(4) },
@@ -624,7 +716,23 @@ function ssCheckCollisions(sg, lid, io) {
       console.log('[KILL_TRACE] ' + JSON.stringify(_h2h));
       const _hh = (sg._history||[]).slice(-10).map(s => { const o={tk:s.tk}; if(s.sn[p.pid]) o[p.pid.slice(0,8)]=s.sn[p.pid]; if(s.sn[q.pid]) o[q.pid.slice(0,8)]=s.sn[q.pid]; return o; });
       console.log('[KILL_HIST] ' + JSON.stringify({ loser:loser.pid, tks:_hh }));
-      _h2hKilled = true; died.add(loser.pid); ssKill(loser, winner, lid, io);
+      _h2hKilled = true; died.add(loser.pid);
+      ssKill(loser, winner, lid, io, {
+        stage:'H2H', tick:sg.tick, t:Date.now(), killerId:winner.pid, victimId:loser.pid,
+        killerHead: winner===p?{x:px,y:py}:{x:qx,y:qy},
+        victimHead: loser===p?{x:px,y:py}:{x:qx,y:qy},
+        victimAngle:+loser.angle.toFixed(3), killerAngle:+winner.angle.toFixed(3),
+        victimTarget:loser.targetAngle!=null?+loser.targetAngle.toFixed(3):null, killerTarget:winner.targetAngle!=null?+winner.targetAngle.toFixed(3):null,
+        victimFace:loser.faceAngle!=null?+loser.faceAngle.toFixed(3):null, killerFace:winner.faceAngle!=null?+winner.faceAngle.toFixed(3):null,
+        victimBoost:!!loser.boost, killerBoost:!!winner.boost, victimNs:loser.ns, killerNs:winner.ns,
+        pDot:+pDot.toFixed(4), qDot:+qDot.toFixed(4), faceCos:+_faceCos.toFixed(4), reason,
+        aliveOrder:_evalOrder, gateUsesField:'angle',
+        collisionPoint:{x:+((px+qx)/2).toFixed(1),y:+((py+qy)/2).toFixed(1)},
+        collisionSnapshot:{ pHead:{x:+px.toFixed(1),y:+py.toFixed(1)}, qHead:{x:+qx.toFixed(1),y:+qy.toFixed(1)},
+          winnerId:winner.pid, loserId:loser.pid,
+          pPathLen:p.path?p.path.length:0, qPathLen:q.path?q.path.length:0,
+          pPathTail:ssPathTail(p.path, 80, 2), qPathTail:ssPathTail(q.path, 80, 2) },
+        dist:+dh.toFixed(2), crr:+rr.toFixed(2) });
     }
   }
 
@@ -632,10 +740,11 @@ function ssCheckCollisions(sg, lid, io) {
   //   var idx = k * SEGMENT_SPACING_TICKS;
   //   var seg = sqq.path[idx] || sqq.path[sqq.path.length - 1];
   // k=2..numSegments, SEGMENT_SPACING_TICKS=4, POINT_DIST=1.6px → path[8]=12.8px first check.
+  // Single-pass, order-dependent, NO tiebreaker — matches MoneySlither client.js exactly.
   for (let i = 0; i < alive.length; i++) {
     const pp = alive[i]; if (died.has(pp.pid)) continue;
     const hR = pp.thick * SS_HB * T.hbs * T.hhbs;
-    const hhx = pp.segs[0][0], hhy = pp.segs[0][1];
+    const hhx = pp.x, hhy = pp.y;                   // MoneySlither: exact head (spp.x, spp.y)
     for (let j = 0; j < alive.length; j++) {
       const qq = alive[j]; if (qq.pid === pp.pid || died.has(qq.pid)) continue;
       const bR = qq.thick * SS_HB * T.hbs;
@@ -649,7 +758,7 @@ function ssCheckCollisions(sg, lid, io) {
         const sdx = hhx - pt.x, sdy = hhy - pt.y;
         if (sdx * sdx + sdy * sdy <= crr2) {
           const _sd = Math.sqrt(sdx*sdx+sdy*sdy), _crr = Math.sqrt(crr2);
-          const _vh = qq.segs&&qq.segs[0]?{x:qq.segs[0][0],y:qq.segs[0][1]}:null;
+          const _vh = { x: qq.x, y: qq.y };   // killer exact head
           const _h2b = { type:'H2B', tk:sg.tick, t:Date.now(), lid, evalOrder:_evalOrder, h2hKilledFirst:_h2hKilled,
             att:{ pid:pp.pid, hx:hhx, hy:hhy, ang:+pp.angle.toFixed(3), face:pp.faceAngle!=null?+pp.faceAngle.toFixed(3):null, boost:!!pp.boost, ns:pp.ns },
             vic:{ pid:qq.pid, hx:_vh?_vh.x:null, hy:_vh?_vh.y:null, ang:+qq.angle.toFixed(3), boost:!!qq.boost, ns:qq.ns },
@@ -658,7 +767,45 @@ function ssCheckCollisions(sg, lid, io) {
           const _hb = (sg._history||[]).slice(-10).map(s => { const o={tk:s.tk}; if(s.sn[pp.pid]) o[pp.pid.slice(0,8)]=s.sn[pp.pid]; if(s.sn[qq.pid]) o[qq.pid.slice(0,8)]=s.sn[qq.pid]; return o; });
           console.log('[KILL_HIST] ' + JSON.stringify({ attacker:pp.pid, victim:qq.pid, tks:_hb }));
           died.add(pp.pid);
-          ssKill(pp, qq, lid, io);
+          // ── Bidirectional / eval-order instrumentation (read-only; does not change outcome) ──
+          // Reverse scan: is the KILLER's (qq) head also inside the VICTIM's (pp) body this tick?
+          const _rev = _vh ? ssScanHeadInBody(_vh.x, _vh.y, qq.thick, pp, T) : null;
+          const _bidir = !!_rev;
+          // [COLLISION_SNAPSHOT] exact coords the H2B loop tested on the killer's (qq) body,
+          // k=2..kHit, plus the decimated body path the player ran into (instrumentation only).
+          const _tested = [];
+          for (let _kk = 2; _kk <= k; _kk++) {
+            const _ii = _kk * SS_SEG_STEP;
+            const _sp = qpath[_ii] || qpath[qpath.length - 1];
+            _tested.push({ k:_kk, idx:_ii, x:+_sp.x.toFixed(1), y:+_sp.y.toFixed(1),
+                           dist:+Math.hypot(hhx - _sp.x, hhy - _sp.y).toFixed(2) });
+          }
+          const _collSnap = {
+            kHit:k, idxHit:idx, crr:+_crr.toFixed(2),
+            bodyOwnerId:qq.pid, attackerId:pp.pid,        // player head (attacker) ran into bot body (owner)
+            attackerHead:{x:+hhx.toFixed(1),y:+hhy.toFixed(1)},
+            bodyOwnerHead:_vh?{x:+_vh.x.toFixed(1),y:+_vh.y.toFixed(1)}:null,
+            bodyPathLen:qpath.length,
+            bodyPathTail:ssPathTail(qpath, 80, 2),        // decimated authoritative body from head end
+            testedSegments:_tested                        // every path[k*4] tested until the hit
+          };
+          ssKill(pp, qq, lid, io, {
+            stage:'H2B', tick:sg.tick, t:Date.now(), killerId:qq.pid, victimId:pp.pid,
+            collisionSnapshot:_collSnap,
+            killerHead:_vh?{x:+_vh.x.toFixed(1),y:+_vh.y.toFixed(1)}:null,
+            victimHead:{x:+hhx.toFixed(1),y:+hhy.toFixed(1)},
+            victimAngle:+pp.angle.toFixed(3), killerAngle:+qq.angle.toFixed(3),
+            victimTarget:pp.targetAngle!=null?+pp.targetAngle.toFixed(3):null, killerTarget:qq.targetAngle!=null?+qq.targetAngle.toFixed(3):null,
+            victimFace:pp.faceAngle!=null?+pp.faceAngle.toFixed(3):null, killerFace:qq.faceAngle!=null?+qq.faceAngle.toFixed(3):null,
+            victimBoost:!!pp.boost, killerBoost:!!qq.boost, victimNs:pp.ns, killerNs:qq.ns,
+            collisionPoint:{x:+pt.x.toFixed(2),y:+pt.y.toFixed(2)}, k, idx,
+            dist:+_sd.toFixed(2), crr:+_crr.toFixed(2),
+            aliveOrder:_evalOrder, evaluatedFirst:'victim(attacker head-in-body found first)',
+            bidirectional:_bidir,
+            reverseHeadInBody:_rev,                                   // killer head into victim body, or null
+            reverseOrderWouldKill:_bidir ? qq.pid : pp.pid,          // who dies if alive-array reversed
+            evalOrderDecidedVictim:_bidir                           // true => order determined who died
+          });
           break;
         }
       }
@@ -667,17 +814,23 @@ function ssCheckCollisions(sg, lid, io) {
   }
 }
 
-function ssKill(victim, killer, lid, io) {
+function ssKill(victim, killer, lid, io, diag) {
   if (!victim.alive) return;
   victim.alive = false;
   victim._killedAt = Date.now();
   console.log(`[${lid}] KILL: ${victim.pid.slice(0,8)} by ${killer ? killer.pid.slice(0,8) : 'wall/size'}`);
+  // ── DEATH_FRAME instrumentation + replay capture (logging only; no gameplay effect) ──
+  if (diag) {
+    diag.replayId = 'rp_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    console.log('[DEATH_FRAME_SRV] ' + JSON.stringify(diag));
+    try { ssSaveReplay(lid, victim, killer, diag); } catch (e) { console.warn('[REPLAY] ' + e.message); }
+  }
   // Spawn kill food before clearing path
   const sg = ssGames.get(lid);
   if (sg) { if (!sg.food) sg.food = []; ssSpawnKillFood(sg, victim); sg._foodDirty = true; }
   victim.segs = [];
   victim.path = [];
-  io.to(lid).emit('elim', { id: victim.pid, killerId: killer ? killer.pid : null });
+  io.to(lid).emit('elim', { id: victim.pid, killerId: killer ? killer.pid : null, diag: diag || null });
 }
 
 function getOrCreateRoom(lobbyId) {
@@ -1033,6 +1186,19 @@ io.on('connection', socket => {
     socket.emit('voice-ack', { relayCount });
   });
 
+  // ── Lightweight RTT probe for death-replay network timing ──
+  socket.on('ss-ping', (d) => { socket.emit('ss-pong', d); });
+
+  // ── Death-replay: merge the victim's client render/interp/network report ──
+  socket.on('ss-death-report', (d) => {
+    if (!d || !d.replayId || !d.client) return;
+    const r = _ssReplays.find(x => x.id === d.replayId);
+    if (!r) return;
+    r.client = d.client;   // render ts, interp ts, rendered positions, offsets, snapshot ages, RTT
+    try { fs.writeFileSync(`${SS_REPLAY_DIR}/${r.id}.json`, JSON.stringify(r)); } catch (e) {}
+    console.log(`[REPLAY] client report merged into ${r.id}`);
+  });
+
   // ── Snake relay (ss-* rooms) ─────────────────────────────────
   socket.on('ss', (d) => {
     // Server is now authoritative for ss-* lobbies — ignore HOST-originated ss packets.
@@ -1203,6 +1369,22 @@ app.get('/ss-test/status', (req, res) => {
       boost: sn.boost, ns: sn.ns, botTick: sn._botTick, pathLen: sn.path ? sn.path.length : 0
     }))
   });
+});
+
+// ── Death-replay retrieval (instrumentation) ──────────────────────────────────
+app.get('/ss-replay/list', (_, res) => {
+  res.json(_ssReplays.slice().reverse().map(r => ({ id: r.id, ...r.meta, frames: r.frames.length, hasClient: !!r.client })));
+});
+app.get('/ss-replay/latest', (_, res) => {
+  const r = _ssReplays[_ssReplays.length - 1];
+  if (!r) return res.status(404).json({ error: 'no replays captured yet' });
+  res.json(r);
+});
+app.get('/ss-replay/:id', (req, res) => {
+  let r = _ssReplays.find(x => x.id === req.params.id);
+  if (!r) { try { r = JSON.parse(fs.readFileSync(`${SS_REPLAY_DIR}/${req.params.id}.json`, 'utf8')); } catch (e) {} }
+  if (!r) return res.status(404).json({ error: 'replay not found' });
+  res.json(r);
 });
 
 httpServer.listen(PORT, () => {
