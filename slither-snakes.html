@@ -2853,6 +2853,32 @@ document.addEventListener('keydown',function(e){
   if((e.key==='t'||e.key==='T')&&!e.repeat&&localStorage.getItem('ss_owner')==='1')_toggleTuning();
 });
 
+// Local-player prediction — MoneySlither-exact 60 Hz sub-steps (boost ramp + chord speed),
+// so the local snake tracks the server's authoritative sim (no boost rubber-band).
+const _MS_TURN = 8.1, _MS_BASE = 288, _MS_BOOST = 630, _MS_ACCEL = 4.5;
+function _ssPredictLocal(my, dtMs){
+  if(my._ba == null) my._ba = 0;
+  const boostGate = my.numSections > BOOST_MIN;
+  my._pAcc60 = (my._pAcc60 || 0) + Math.min(dtMs, 80);
+  const stepMs = 1000/60, DT = 1/60;
+  while(my._pAcc60 >= stepMs){
+    my._pAcc60 -= stepMs;
+    if(_autoCircle){ my.angle += _MS_TURN * DT; }
+    else { const d = angleDiff(targetAngleToMouse(my), my.angle); my.angle += Math.sign(d) * Math.min(Math.abs(d), _MS_TURN * DT); }
+    while(my.angle >  Math.PI) my.angle -= 2*Math.PI;
+    while(my.angle < -Math.PI) my.angle += 2*Math.PI;
+    my.boost = (_mouseBoost || _padBoost) && boostGate;
+    if(my.boost) my._ba = Math.min(1, my._ba + _MS_ACCEL * DT);
+    else         my._ba = Math.max(0, my._ba - _MS_ACCEL * DT);
+    const speed = _MS_BASE + (_MS_BOOST - _MS_BASE) * my._ba;
+    const h = my.path[0];
+    my.path.unshift({ x: h.x + Math.cos(my.angle) * speed * DT, y: h.y + Math.sin(my.angle) * speed * DT });
+    trimPath(my);
+    const nh = my.path[0];
+    if(nh.x*nh.x + nh.y*nh.y >= ARENA_R*ARENA_R && !_localDead) eliminateSnake(myPid, null);
+  }
+}
+
 // ══ RENDERING ════════════════════════════════════════════════
 
 function rafDraw(ts){
@@ -2862,23 +2888,13 @@ function rafDraw(ts){
 
   if(_pendingState){applyRemoteState(_pendingState);_pendingState=null;}
 
-  // Guest: smooth delta-time prediction between server updates
+  // Guest: MoneySlither-exact 60 Hz sub-step prediction between server updates
   if(!isHost&&SG&&!SG.over&&!_localDead){
     const my=SG.snakes.get(myPid);
     if(my&&my.alive&&my.path.length){
       const dt=Math.min(_guestPredTs?ts-_guestPredTs:TICK_MS,80);
       _guestPredTs=ts;
-      const frac=dt/TICK_MS;
-      // Scale turn and speed proportionally to frame time
-      if(_autoCircle){my.angle+=MAX_TURN*frac;}else{const da=angleDiff(targetAngleToMouse(my),my.angle);my.angle+=Math.max(-MAX_TURN*frac,Math.min(MAX_TURN*frac,da));}
-      // damnbruh: no boost below minimum size
-      my.boost=(_mouseBoost||_padBoost)&&my.numSections>BOOST_MIN;
-      const spd=(my.boost?BOOST_SPD:SNAKE_SPD)*frac;
-      const h=my.path[0];
-      my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
-      trimPath(my);
-      const nh=my.path[0];
-      if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead)eliminateSnake(myPid,null);
+      _ssPredictLocal(my, dt);
     }
   }
 
@@ -2950,21 +2966,13 @@ function rafDraw(ts){
     });
   }
 
-  // Host: per-frame smooth movement for own snake (same approach as guest prediction)
+  // Host: MoneySlither-exact 60 Hz sub-step prediction for own snake
   if(isHost&&SG&&!SG.over&&!_localDead){
     const my=SG.snakes.get(myPid);
     if(my&&my.alive&&my.path.length){
       const dt=Math.min(_hostPredTs?ts-_hostPredTs:TICK_MS,80);
       _hostPredTs=ts;
-      const frac=dt/TICK_MS;
-      if(_autoCircle){my.angle+=MAX_TURN*frac;}else{const da=angleDiff(targetAngleToMouse(my),my.angle);my.angle+=Math.max(-MAX_TURN*frac,Math.min(MAX_TURN*frac,da));}
-      my.boost=(_mouseBoost||_padBoost)&&my.numSections>BOOST_MIN;
-      const spd=(my.boost?BOOST_SPD:SNAKE_SPD)*frac;
-      const h=my.path[0];
-      my.path.unshift({x:h.x+Math.cos(my.angle)*spd,y:h.y+Math.sin(my.angle)*spd});
-      trimPath(my);
-      const nh=my.path[0];
-      if(nh.x*nh.x+nh.y*nh.y>=ARENA_R*ARENA_R&&!_localDead)eliminateSnake(myPid,null);
+      _ssPredictLocal(my, dt);
     }
   }
 
