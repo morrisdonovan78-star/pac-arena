@@ -1353,7 +1353,8 @@ async function pkConnect(roomId,gameToken){
           const nowT=Date.now(), renderT=nowT-_INTERP_DELAY, D=data.diag;
           const vic=SG.snakes.get(data.id), kil=data.killerId?SG.snakes.get(data.killerId):null;
           const vh=vic&&vic.path&&vic.path[0]?vic.path[0]:null;   // rendered victim head
-          const kh=kil&&kil.path&&kil.path[0]?kil.path[0]:null;   // rendered killer head (interp-delayed)
+          const kh=kil&&kil.path&&kil.path[0]?kil.path[0]:null;   // interp head (path[0]) — INTERP_DELAY signal
+          const kdh=kil?(kil._exHead||(kil.path&&kil.path[0])||null):null;   // ACTUAL drawn head (_exHead||path[0]) — extrapolation signal
           const kbuf=data.killerId?_ssBuf.get(data.killerId):null;
           const kLatest=kbuf&&kbuf.length?kbuf[kbuf.length-1]:null;
           let ba=null,bb=null;                                     // snapshots bracketing what's displayed
@@ -1366,7 +1367,8 @@ async function pkConnect(roomId,gameToken){
             role:data.id===myPid?'VICTIM':'KILLER',
             renderTs:nowT, renderFrameTs:nowT, interpDelayMs:_INTERP_DELAY, renderT, lastServerTick:SG.tick, rttMs:(typeof _ssRtt==='number'?_ssRtt:null),
             renderedVictimHead:vh?{x:+vh.x.toFixed(1),y:+vh.y.toFixed(1)}:null,
-            renderedKillerHead:kh?{x:+kh.x.toFixed(1),y:+kh.y.toFixed(1)}:null,
+            renderedKillerHead:kh?{x:+kh.x.toFixed(1),y:+kh.y.toFixed(1)}:null,   // interp head (path[0])
+            drawnKillerHead:kdh?{x:+kdh.x.toFixed(1),y:+kdh.y.toFixed(1)}:null,   // actual drawn head (_exHead||path[0])
             renderedKillerBody:_poly(kil,80,2),        // the bot body the player SAW (ran into)
             renderedVictimBody:_poly(vic,80,2),        // the player's own drawn body
             displayedKillerSnapshot:ba&&bb?{aT:ba.t,bT:bb.t,ageMs:nowT-bb.t}:null,
@@ -1374,7 +1376,8 @@ async function pkConnect(roomId,gameToken){
             // shared key: server death tick <-> the render frame + the snapshot ticks it was built from
             tickMapping:{ serverDeathTick:D.tick, clientLastServerTick:SG.tick, renderFrameTs:nowT, renderT, interpDelayMs:_INTERP_DELAY,
               displayedSnapshotTicks:(ba&&bb)?{aTick:(ba.tick!=null?ba.tick:null),bTick:(bb.tick!=null?bb.tick:null),aT:ba.t,bT:bb.t}:null },
-            offset:{killer_rendered_vs_server:off(kh,D.killerHead),
+            offset:{killer_rendered_vs_server:off(kh,D.killerHead),   // interp head vs server (INTERP lag component)
+                    killer_drawn_vs_server:off(kdh,D.killerHead),     // ACTUAL drawn head vs server (extrapolation/render-to-authority)
                     victim_rendered_vs_server:off(vh,D.victimHead),
                     killer_latestSnapshot_vs_server:off(kLatest,D.killerHead)}
           };
