@@ -150,6 +150,22 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
 .mm-ico{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:30px;}
 #boost-hint{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);font-family:'Press Start 2P',monospace;font-size:8px;color:rgba(57,255,20,0.5);pointer-events:none;z-index:100;}
 #minimap{position:fixed;bottom:14px;right:14px;border-radius:50%;border:2px solid rgba(0,255,255,0.4);background:rgba(0,0,0,0.7);z-index:100;}
+/* ── Mobile touch controls (coarse-pointer devices only) ── */
+#m-joy{position:fixed;left:20px;bottom:20px;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,0.05);border:2px solid rgba(57,255,20,0.3);z-index:150;display:none;touch-action:none;}
+#m-joy-knob{position:absolute;left:50%;top:50%;width:52px;height:52px;border-radius:50%;background:rgba(57,255,20,0.25);border:2px solid rgba(57,255,20,0.6);transform:translate(-50%,-50%);pointer-events:none;}
+#m-cashout{position:fixed;right:14px;bottom:210px;z-index:150;display:none;align-items:center;justify-content:center;min-width:118px;height:46px;border:1px solid rgba(255,215,0,0.55);border-radius:12px;background:rgba(7,7,15,0.85);color:var(--y);font-family:'Press Start 2P',monospace;font-size:8px;letter-spacing:1px;touch-action:none;overflow:hidden;-webkit-user-select:none;user-select:none;}
+#m-cashout .mco-fill{position:absolute;left:0;top:0;bottom:0;width:0;background:rgba(255,215,0,0.3);}
+#m-cashout.holding .mco-fill{width:100%;transition:width 1s linear;}
+#m-cashout .mco-txt{position:relative;pointer-events:none;}
+#m-zoom-wrap{position:fixed;left:10px;top:64px;width:44px;height:150px;z-index:150;display:none;flex-direction:column;align-items:center;justify-content:space-between;background:rgba(7,7,15,0.6);border:1px solid rgba(0,255,255,0.3);border-radius:22px;padding:7px 0;touch-action:none;}
+.m-zlab{font-family:'Press Start 2P',monospace;font-size:9px;color:var(--c);pointer-events:none;line-height:1;}
+#m-zoom-box{position:relative;width:30px;height:96px;}
+#m-zoom{position:absolute;left:50%;top:50%;width:96px;height:30px;transform:translate(-50%,-50%) rotate(-90deg);-webkit-appearance:none;appearance:none;background:transparent;touch-action:none;margin:0;}
+#m-zoom::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:rgba(0,255,255,0.35);}
+#m-zoom::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;border-radius:50%;background:var(--c);margin-top:-10px;box-shadow:0 0 8px rgba(0,255,255,0.5);}
+#m-zoom::-moz-range-track{height:6px;border-radius:3px;background:rgba(0,255,255,0.35);}
+#m-zoom::-moz-range-thumb{width:26px;height:26px;border:none;border-radius:50%;background:var(--c);}
+body.mctl #voice-speakers{left:150px;}
 </style>
 </head>
 <body>
@@ -371,6 +387,14 @@ html,body{background:#07070f;color:var(--txt);font-family:'Exo 2',sans-serif;min
     <div style="font-family:'Press Start 2P',monospace;font-size:7px;color:rgba(255,255,255,0.35);letter-spacing:2px;">SYNCING WITH HOST</div>
   </div>
   <div id="boost-hint">HOLD CLICK TO BOOST 🔥</div>
+  <!-- Mobile touch controls: joystick (steer), hold button (cashout), vertical slider (zoom) -->
+  <div id="m-joy"><div id="m-joy-knob"></div></div>
+  <button id="m-cashout"><div class="mco-fill"></div><span class="mco-txt">💰 CASH OUT</span></button>
+  <div id="m-zoom-wrap">
+    <span class="m-zlab">+</span>
+    <div id="m-zoom-box"><input id="m-zoom" type="range" min="-2" max="2" step="0.05" value="0"/></div>
+    <span class="m-zlab">−</span>
+  </div>
   <div id="bot-bar" style="display:none;position:fixed;bottom:72px;left:12px;z-index:200;flex-direction:column;gap:5px;">
     <button onclick="spawnBotSnake('circle')" style="padding:7px 10px;background:#0055AA;border:none;color:#fff;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:6px;letter-spacing:1px;opacity:0.9;">⭕ CIRCLE</button>
     <button onclick="spawnBotSnake('fight')" style="padding:7px 10px;background:#AA3300;border:none;color:#fff;font-family:Orbitron,sans-serif;font-size:9px;cursor:pointer;border-radius:6px;letter-spacing:1px;opacity:0.9;">⚔ FIGHTER</button>
@@ -521,6 +545,7 @@ let rafHandle=null,_hostRaf=null,_lastTickTs=0,_hostGraceTicks=0;
 let _bgPump=null,_bgLastTs=0,_bgSuppressSend=false;
 let _camX=0,_camY=0,_camZoom=0.6,_zoomOffset=0;
 let _mouseX=0,_mouseY=0,_mouseBoost=false,_padBoost=false,_cashoutTimer=null,_showHitboxes=false,_myEyeAngle=null;
+let _mobileCtl=false,_joyTouchId=null,_mobileWired=false;
 let _pendingState=null;
 let _gpadLastBtn=[],_gpadNavTs=0;
 const GPAD_DEADZONE=0.2,GPAD_NAV_MS=180;
@@ -2418,6 +2443,17 @@ function launchSnakeGame(){
   // Host migration only applies in practice mode; live games use server authority
   if(_isPractice)_hostWatch=setInterval(_checkHost,300);
   const _vb=document.getElementById('voice-btn');if(_vb)_vb.style.display='flex';
+  // Mobile touch controls: joystick (steer), hold-button (cashout), slider (zoom)
+  _mobileCtl=!!(window.matchMedia&&matchMedia('(pointer:coarse)').matches);
+  if(_mobileCtl){
+    _wireMobileCtl();
+    _showMobileCtl('game');
+    document.body.classList.add('mctl');
+    const _bh=document.getElementById('boost-hint');if(_bh)_bh.textContent='HOLD SCREEN TO BOOST 🔥';
+    const _zs=document.getElementById('m-zoom');if(_zs)_zs.value=_zoomOffset;
+  }else{
+    _showMobileCtl(false);
+  }
   const _bb=document.getElementById('bot-bar');if(_bb)_bb.style.display=(_isPractice&&localStorage.getItem('ss_owner')==='1')?'flex':'none';
   if(_firstRemoteSync){const _jo=document.getElementById('join-sync');if(_jo)_jo.style.display='flex';}
 }
@@ -2617,7 +2653,8 @@ function onWheel(e){
   const step=Math.max(-0.2,Math.min(0.2,e.deltaY*0.0015));
   _zoomOffset=Math.max(-2.0,Math.min(2.0,_zoomOffset-step));
 }
-function onTouchMove(e){e.preventDefault();if(e.touches.length){_mouseX=e.touches[0].clientX;_mouseY=e.touches[0].clientY;}}
+// When mobile controls are up, the joystick owns steering — canvas touches are boost-only.
+function onTouchMove(e){e.preventDefault();if(_mobileCtl)return;if(e.touches.length){_mouseX=e.touches[0].clientX;_mouseY=e.touches[0].clientY;}}
 function onGameKey(e){
   if(e.repeat)return;
   if(e.key===' '||e.key==='Shift')_mouseBoost=true;
@@ -2646,6 +2683,64 @@ function toggleAutoCircle(){
   addToast(_autoCircle?'⭕ Auto-circle ON (E / L3 to stop)':'Auto-circle OFF','#00FFFF');
 }
 
+// ── Mobile touch controls ────────────────────────────────────
+// mode: 'game' = joystick + cashout + zoom, 'spec' = zoom only (spectating), false = hide all
+function _showMobileCtl(mode){
+  const j=document.getElementById('m-joy'),c=document.getElementById('m-cashout'),z=document.getElementById('m-zoom-wrap');
+  if(j)j.style.display=mode==='game'?'block':'none';
+  if(c)c.style.display=mode==='game'?'flex':'none';
+  if(z)z.style.display=mode?'flex':'none';
+}
+function _wireMobileCtl(){
+  if(_mobileWired)return;_mobileWired=true;
+  const joy=document.getElementById('m-joy'),knob=document.getElementById('m-joy-knob');
+  const co=document.getElementById('m-cashout'),zs=document.getElementById('m-zoom');
+  const KNOB_MAX=34; // px the knob can travel from center (60px base radius − 26px knob radius)
+  function knobTo(dx,dy){knob.style.transform='translate(calc(-50% + '+dx.toFixed(1)+'px), calc(-50% + '+dy.toFixed(1)+'px))';}
+  function joySteer(t){
+    const r=joy.getBoundingClientRect();
+    const dx=t.clientX-(r.left+r.width/2),dy=t.clientY-(r.top+r.height/2);
+    const m=Math.hypot(dx,dy);
+    if(m<8)return; // deadzone — ignore jitter around center so the snake doesn't twitch
+    const k=Math.min(m,KNOB_MAX)/m;
+    knobTo(dx*k,dy*k);
+    // Same mapping as the gamepad stick: project an aim point out from screen center
+    if(canvas){
+      const cx=canvas.width/2,cy=canvas.height/2,ar=Math.min(cx,cy)*0.8;
+      _mouseX=cx+(dx/m)*ar;_mouseY=cy+(dy/m)*ar;
+    }
+  }
+  joy.addEventListener('touchstart',e=>{e.preventDefault();const t=e.changedTouches[0];_joyTouchId=t.identifier;joySteer(t);},{passive:false});
+  // Track the joystick finger at document level so steering keeps working when it drifts off the base
+  document.addEventListener('touchmove',e=>{
+    if(_joyTouchId===null)return;
+    for(const t of e.changedTouches)if(t.identifier===_joyTouchId){e.preventDefault();joySteer(t);break;}
+  },{passive:false});
+  const joyEnd=e=>{
+    if(_joyTouchId===null)return;
+    for(const t of e.changedTouches)if(t.identifier===_joyTouchId){_joyTouchId=null;knobTo(0,0);break;}
+  };
+  document.addEventListener('touchend',joyEnd);
+  document.addEventListener('touchcancel',joyEnd);
+  // Cashout: hold 1s, release to cancel — same timer and guards as the Q key / gamepad B
+  co.addEventListener('touchstart',e=>{
+    e.preventDefault();
+    if(SG&&!SG.over&&!_localDead&&!_cashoutTimer){
+      co.classList.add('holding');
+      addToast('HOLD to cash out… release to cancel','#FFD700');
+      _cashoutTimer=setTimeout(()=>{_cashoutTimer=null;co.classList.remove('holding');endSnakeGame('cashout',null);},1000);
+    }
+  },{passive:false});
+  const coEnd=e=>{
+    e.preventDefault();co.classList.remove('holding');
+    if(_cashoutTimer){clearTimeout(_cashoutTimer);_cashoutTimer=null;addToast('Cashout cancelled','#888');}
+  };
+  co.addEventListener('touchend',coEnd,{passive:false});
+  co.addEventListener('touchcancel',coEnd,{passive:false});
+  // Zoom slider → _zoomOffset; rafDraw re-clamps to the visible range
+  zs.addEventListener('input',()=>{_zoomOffset=parseFloat(zs.value)||0;});
+}
+
 async function endSnakeGame(reason,killerId){
   if(!SG||SG.over)return;
   // Spectating host can still receive 'over'/'gameover' to fully shut down
@@ -2670,6 +2765,7 @@ async function endSnakeGame(reason,killerId){
     if(_sb)_sb.style.display='flex';
     const _srb=document.getElementById('spec-rejoin-btn');
     if(_srb)_srb.style.display='';
+    if(_mobileCtl)_showMobileCtl('spec'); // spectating: keep zoom, drop joystick/cashout
     if(isHost&&SG&&pkRoomId)saveKillFood(); // persist SOL pellets immediately in case of crash/disconnect
     if(ST.lobbyUsd>0)(async()=>{try{await refreshBal();}catch(_){}})();
     return;
@@ -2748,6 +2844,7 @@ function enterSpectate(){
   if(bar)bar.style.display='flex';
   const srb=document.getElementById('spec-rejoin-btn');
   if(srb)srb.style.display='';
+  if(_mobileCtl)_showMobileCtl('spec');
   go('scr-game');
   if(!rafHandle)rafHandle=requestAnimationFrame(rafDraw);
 }
