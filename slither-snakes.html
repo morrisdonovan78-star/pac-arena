@@ -2925,6 +2925,7 @@ function rafDraw(ts){
     SG.snakes.forEach(s=>{
       if(s.id===myPid||!s.alive)return;
       const buf=_ssBuf.get(s.id);
+      s._exHead=null; // reset each frame; only the interpolation branch (extrap on) sets it
       if(buf&&buf.length>=2){
         // ── Snapshot interpolation (server-authoritative live game) ──────────────
         const latest=buf[buf.length-1];
@@ -2940,16 +2941,11 @@ function rafDraw(ts){
         let ix=a.x+(b.x-a.x)*frac,iy=a.y+(b.y-a.y)*frac;
         s.angle=a.angle+da*frac;
         s.numSections=b.ns;s.boost=b.boost;
-        // ── Bounded remote-head extrapolation (VISUAL ONLY; no collision/server effect) ──
-        // The newest snapshot is one 30 Hz broadcast (~33 ms) stale, so the drawn head trails
-        // server truth (measured B ~14-21 px). Advance the rendered head forward along the
-        // newest snapshot's own heading by that snapshot's age, HARD-CAPPED at one tick of
-        // motion so it can never over-run. Collision + body path are untouched.
-        const _snapAge=Math.min(Math.max(0,Date.now()-latest.t),TICK_MS);
-        const _exSpd=(latest.boost?BOOST_SPD:SNAKE_SPD)*(_snapAge/TICK_MS);
-        // TEST TOGGLE: set window._EXTRAP_OFF=true in console to disable extrapolation (visual head only).
-        if(!window._EXTRAP_OFF){ ix+=Math.cos(latest.angle)*_exSpd; iy+=Math.sin(latest.angle)*_exSpd; }
-        // Seed path if empty (revival after death or first appearance without makeSnake)
+        // Seed path if empty (revival after death or first appearance without makeSnake).
+        // s.path stores ONLY the interpolated head (ix,iy) — deterministic given the snapshots,
+        // so every client reconstructs identical body geometry. Extrapolation is applied to the
+        // transient rendered head (s._exHead) below and is NEVER written into s.path, so
+        // trimPath / getBodyPoints / collision / body generation stay on the interpolated path.
         if(!s.path||!s.path.length){
           const _r=sectionRadius(s);
           const _pLen=Math.ceil(s.numSections*_r*SEGMENT_SPACING*2/SNAKE_SPD)+10;
@@ -2959,6 +2955,18 @@ function rafDraw(ts){
           // Accumulate interpolated head position into path for body rendering
           const ph=s.path[0];
           if(!ph||Math.hypot(ix-ph.x,iy-ph.y)>0.3){s.path.unshift({x:ix,y:iy});trimPath(s);}
+        }
+        // ── Bounded remote-head extrapolation (RENDERED HEAD ONLY; never written to s.path) ──
+        // The newest snapshot is one 30 Hz broadcast (~33 ms) stale, so the drawn head trails
+        // server truth. Advance ONLY the transient rendered head (s._exHead) forward along the
+        // newest snapshot's heading by that snapshot's age, HARD-CAPPED at one tick of motion.
+        // s.path, trimPath, getBodyPoints, collision and body generation are untouched.
+        // TEST TOGGLE: window._EXTRAP_OFF=true disables it (head falls back to interpolated path[0]).
+        if(window._EXTRAP_OFF){ s._exHead=null; }
+        else{
+          const _snapAge=Math.min(Math.max(0,Date.now()-latest.t),TICK_MS);
+          const _exSpd=(latest.boost?BOOST_SPD:SNAKE_SPD)*(_snapAge/TICK_MS);
+          s._exHead={x:ix+Math.cos(latest.angle)*_exSpd,y:iy+Math.sin(latest.angle)*_exSpd};
         }
       }else if(buf&&buf.length===1){
         // 1 snapshot — extrapolate forward from snapshot so snake appears + moves immediately.
@@ -3183,6 +3191,9 @@ function drawSnake(snake){
   if(!snake.path||snake.path.length<2)return;
   const bPts=getBodyPoints(snake);
   if(bPts.length<2)return;
+  // Rendered head only: draw the head end at the extrapolated position (remote snakes).
+  // Replaces the transient array slot with s._exHead — does NOT mutate snake.path[0].
+  if(snake._exHead)bPts[0]=snake._exHead;
   const r=sectionRadius(snake); // damnbruh visual radius
   const col=snake.color;
   const n=bPts.length;
@@ -3289,7 +3300,7 @@ function _drawBodyCircle(x,y,r,col){
 }
 
 function _drawHeadCircle(snake,r){
-  const h=snake.path[0]; if(!h)return;
+  const h=snake._exHead||snake.path[0]; if(!h)return;
   const angle=snake.angle;
   ctx.save();
   ctx.translate(h.x,h.y);
