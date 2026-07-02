@@ -544,7 +544,12 @@ let _foodSendCounter=0;
 let _forceFoodSend=false;
 let _firstRemoteSync=false;
 const _ssBuf=new Map(); // id → [{x,y,angle,ns,boost,score,usd,t}] — server snapshot buffer
-const _INTERP_DELAY=100; // ms: render this far behind the latest snapshot for smooth motion
+const _INTERP_DELAY=50; // ms: render this far behind the latest snapshot for smooth motion.
+// Was 100ms (≈3 snapshots @30Hz). Halved to 50ms to cut the render lag that draws remote
+// snakes ~30–63px behind their server-authoritative collision position (Category A: server
+// collides but client renders the body outside the zone). Still bracketed by the 12-snapshot
+// buffer under this game's ~8–12ms direct-connection latency; the existing frac-cap(1.5)
+// extrapolation covers rare packet-loss underruns → no rubber-band, no desync.
 let _ssRtt=null; // rolling RTT (ms) from ss-ping/ss-pong, for death-replay network timing
 let _localDead=false;
 let _autoCircle=false; // toggle: snake auto-circles until toggled off (E key / L3 button)
@@ -553,6 +558,9 @@ let _tuning={hbs:1.07,hhbs:1.18,faceDeg:75,rule:'smallest_wins'};
 try{const _sv=localStorage.getItem('ss_tuning_v4');if(_sv&&localStorage.getItem('ss_owner')==='1')Object.assign(_tuning,JSON.parse(_sv));}catch(_){}
 let _showTuning=false;
 let _botCount=0,_isPractice=false;
+// Parity-test: drive practice bots through the real ss-state→_ssBuf→interp→extrap render
+// pipeline instead of local dead-reckoning. Toggle verbose logging with window._SS_PARITY_LOG=true.
+let _botParityFrame=0;
 
 function getRpc(){return '/api/rpc';} // proxy through Vercel to avoid 403 from public RPCs
 function getSioUrl(){return GAME_SERVERS[GAME_SERVER].url;}
@@ -929,6 +937,14 @@ function doLogout(){
 }
 
 // ── Privy email auth ─────────────────────────────────────────
+// Coerce a Privy error body into a readable string — Privy sometimes returns
+// error/cause as a nested object, which naive concat renders as "[object Object]".
+function _pErr(d){
+  if(d==null) return 'unknown error';
+  let m = d.cause ?? d.error ?? d.message ?? d.detail ?? d;
+  if(m && typeof m==='object') m = m.message ?? m.error ?? m.cause ?? m.code ?? JSON.stringify(m);
+  return String(m).slice(0,160);
+}
 async function privyCall(path,body){
   const PRIVY_APP_ID='cmq1eo6uz004b0cl8pvk7aakk';
   const target='https://auth.privy.io/api/v1'+path;
@@ -939,20 +955,20 @@ async function privyCall(path,body){
   try{
     const r=await fetch('/api/privy?path='+encodeURIComponent(path),opts);
     const d=await r.json().catch(()=>({}));
-    if(!r.ok) throw new Error('Privy '+(d.cause||d.error||d.message||r.status));
+    if(!r.ok) throw new Error('Privy '+r.status+': '+_pErr(d));
     return d;
   }catch(e){if(e.message.startsWith('Privy'))throw e;}
   // 2. Local dev proxy (server.py)
   try{
     const r=await fetch('http://localhost:8080/privy-proxy?path='+encodeURIComponent(path),opts);
     const d=await r.json().catch(()=>({}));
-    if(!r.ok) throw new Error('Privy '+(d.cause||d.error||d.message||r.status));
+    if(!r.ok) throw new Error('Privy '+r.status+': '+_pErr(d));
     return d;
   }catch(e){if(e.message.startsWith('Privy'))throw e;}
   // 3. Direct (if Privy CORS allows)
   const r=await fetch(target,opts);
   const d=await r.json().catch(()=>({}));
-  if(!r.ok) throw new Error('Privy '+(d.cause||d.error||d.message||r.status));
+  if(!r.ok) throw new Error('Privy '+r.status+': '+_pErr(d));
   return d;
 }
 
@@ -1827,7 +1843,7 @@ function _bgSimStep(){
   // U-turn (same zigzag as the main interpolation bug) when the tab returns to focus.
   if(_isPractice){
     SG.snakes.forEach(s=>{
-      if(s.id===myPid||!s.alive||!s.path.length)return;
+      if(s.id===myPid||!s.alive||!s.path.length||s._synthetic)return; // synthetic bots move via ss-state pipeline
       const spd=s.boost?BOOST_SPD:SNAKE_SPD;
       const h=s.path[0];
       s.path.unshift({x:h.x+Math.cos(s.angle)*spd,y:h.y+Math.sin(s.angle)*spd});
@@ -1882,6 +1898,23 @@ function _getSegsFromPath(snake){
   return pts;
 }
 
+// Parity-test synthetic "server": advance a bot's AUTHORITATIVE head one 30 Hz tick and push a
+// mock ss-state snapshot into _ssBuf — byte-shape identical to the real ss-state insert (see the
+// `_sio.on('ss-state')` handler). The bot then renders through the exact remote pipeline
+// (interpolation + bounded extrapolation) instead of local dead-reckoning.
+function _botEmitSnapshot(s,id){
+  const auth=s._auth; if(!auth)return;
+  const spd=s.boost?BOOST_SPD:SNAKE_SPD;
+  auth.angle=s.angle; auth.ns=s.numSections; auth.boost=!!s.boost;
+  auth.x+=Math.cos(auth.angle)*spd; auth.y+=Math.sin(auth.angle)*spd;
+  if(!_ssBuf.has(id))_ssBuf.set(id,[]);
+  const buf=_ssBuf.get(id);
+  buf.push({x:auth.x,y:auth.y,angle:auth.angle,ns:auth.ns,boost:auth.boost,score:s.score||0,usd:s.usd||0,t:Date.now(),tick:SG?SG.tick:0});
+  while(buf.length>12)buf.shift();
+  if(window._SS_PARITY_LOG&&(buf.length<=2||(SG&&SG.tick%30===0)))
+    console.log('[BOT_SS_EMIT]',id,'buf='+buf.length,'auth=('+auth.x.toFixed(1)+','+auth.y.toFixed(1)+') t='+Date.now());
+}
+
 function snakeTick(){
   if(!SG||SG.over)return;
   SG.tick++;
@@ -1889,7 +1922,7 @@ function snakeTick(){
   // Bot AI — angle-only; position/movement comes from rafDraw dead-reckoning (same as all remote snakes)
   SG.snakes.forEach((s,id)=>{
     if(!id.startsWith('bot-')||!s.alive)return;
-    const h=s.path[0];
+    const h=s._auth||s.path[0];   // parity: steer from AUTHORITATIVE head, not the interp-lagged render head
     if(s.botMode==='fight'){
       // ── Find nearest human target ──
       let nearest=null,nearestD=Infinity,nearestSnake=null;
@@ -1941,7 +1974,9 @@ function snakeTick(){
         s.angle+=MAX_TURN; // no target: orbit
       }
     }
-    // circle mode: angle updated per-frame in rafDraw (s.botCircle=true) — same smoothness as player
+    else if(s.botCircle){ s.angle+=MAX_TURN; }   // circle steering now per-tick (parity: was per-frame in rafDraw)
+    // ── Synthetic authoritative advance + mock ss-state emit (parity-test pipeline) ──
+    if(s._synthetic)_botEmitSnapshot(s,id);
   });
 
   // Apply guest inputs + ghost-snake cleanup
@@ -2582,6 +2617,11 @@ function spawnBotSnake(mode){
     const _bpLen=Math.ceil(bs.numSections*_br*SEGMENT_SPACING*2/SNAKE_SPD)+10;
     const _bh=bs.path[0]||{x:0,y:0};
     bs.path=Array.from({length:_bpLen},(_,i)=>({x:_bh.x-Math.cos(bs.angle)*i*SNAKE_SPD,y:_bh.y-Math.sin(bs.angle)*i*SNAKE_SPD}));
+    // Parity-test: mark synthetic + seed authoritative head. This bot is now driven by mock
+    // ss-state packets (see _botEmitSnapshot) so it flows through the SAME remote pipeline as
+    // network players: ss-state → _ssBuf → interpolation → bounded extrapolation → render.
+    bs._synthetic=true;
+    bs._auth={x:_bh.x,y:_bh.y,angle:bs.angle,boost:false,ns:bs.numSections};
   }
   addToast('Bot '+_botCount+' ('+mode+') spawned','#FF6600');
 }
@@ -2916,6 +2956,9 @@ function rafDraw(ts){
         // ── Snapshot interpolation (server-authoritative live game) ──────────────
         const latest=buf[buf.length-1];
         if(Date.now()-latest.t>800){s.alive=false;s.path=[];_ssBuf.delete(s.id);return;}
+        // Parity-test log throttle: ~1 line/sec per synthetic bot
+        const _pl=window._SS_PARITY_LOG&&s._synthetic&&(((performance.now()/1000)|0)!==s._plSec);
+        if(_pl)s._plSec=(performance.now()/1000)|0;
         // Find two snapshots bracketing _renderT
         let a=buf[0],b=latest;
         for(let bi=1;bi<buf.length;bi++){if(buf[bi].t>=_renderT){a=buf[bi-1];b=buf[bi];break;}}
@@ -2924,9 +2967,29 @@ function rafDraw(ts){
         // Angle shortest-arc lerp
         let da=b.angle-a.angle;
         while(da>Math.PI)da-=Math.PI*2;while(da<-Math.PI)da+=Math.PI*2;
-        const ix=a.x+(b.x-a.x)*frac,iy=a.y+(b.y-a.y)*frac;
+        let ix=a.x+(b.x-a.x)*frac,iy=a.y+(b.y-a.y)*frac;
         s.angle=a.angle+da*frac;
         s.numSections=b.ns;s.boost=b.boost;
+        if(_pl)console.log('[BOT_INTERP]',s.id,'buf='+buf.length,'frac='+frac.toFixed(2),'interpHead=('+ix.toFixed(1)+','+iy.toFixed(1)+')');
+        // ── Bounded remote-head extrapolation (VISUAL ONLY; no collision/server effect) ──
+        // The newest snapshot is one 30 Hz broadcast (~33 ms) stale, so the drawn head trails
+        // server truth (measured B ~14-21 px). Advance the rendered head forward along the
+        // newest snapshot's own heading by that snapshot's age, HARD-CAPPED at one tick of
+        // motion so it can never over-run. Collision + body path are untouched.
+        const _snapAge=Math.min(Math.max(0,Date.now()-latest.t),TICK_MS);
+        const _exSpd=(latest.boost?BOOST_SPD:SNAKE_SPD)*(_snapAge/TICK_MS);
+        // TEST TOGGLE: set window._EXTRAP_OFF=true in console to disable extrapolation (visual head only).
+        if(!window._EXTRAP_OFF){ ix+=Math.cos(latest.angle)*_exSpd; iy+=Math.sin(latest.angle)*_exSpd; }
+        if(_pl)console.log('[BOT_EXTRAP]',s.id,'snapAge='+_snapAge.toFixed(0)+'ms','exSpd='+_exSpd.toFixed(2),'renderHead=('+ix.toFixed(1)+','+iy.toFixed(1)+')');
+        // Parity measurement capture: per-frame pipeline-stage snapshot (S=latest snapshot,
+        // I=interp head pre-extrap, R=rendered head post-extrap, A=authoritative truth).
+        if(window._SS_CAP&&s._synthetic&&window._SS_CAP.length<20000){
+          window._SS_CAP.push({id:s.id,t:Date.now(),snapAge:_snapAge,frac:frac,boost:!!latest.boost,
+            Sx:latest.x,Sy:latest.y,
+            Ix:ix-Math.cos(latest.angle)*_exSpd,Iy:iy-Math.sin(latest.angle)*_exSpd,
+            Rx:ix,Ry:iy,
+            Ax:(s._auth?s._auth.x:null),Ay:(s._auth?s._auth.y:null)});
+        }
         // Seed path if empty (revival after death or first appearance without makeSnake)
         if(!s.path||!s.path.length){
           const _r=sectionRadius(s);

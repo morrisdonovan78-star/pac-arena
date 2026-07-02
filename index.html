@@ -1038,6 +1038,15 @@ function changeRegion(r){
 // ═══════════════════════════════════════════════════════════
 // PRIVY API — OTP login only (wallet is created client-side)
 // ═══════════════════════════════════════════════════════════
+// Coerce a Privy error body into a readable string. Privy sometimes returns
+// `error`/`cause` as a nested object, which naive string concat renders as the
+// useless "[object Object]" — this always yields a human-readable message.
+function pErr(d){
+  if(d==null) return 'unknown error';
+  let m = d.cause ?? d.error ?? d.message ?? d.detail ?? d;
+  if(m && typeof m==='object') m = m.message ?? m.error ?? m.cause ?? m.code ?? JSON.stringify(m);
+  return String(m).slice(0,160);
+}
 async function pFetch(path, body, jwt){
   const target = 'https://auth.privy.io/api/v1'+path;
   const h = {
@@ -1051,7 +1060,7 @@ async function pFetch(path, body, jwt){
   try{
     const r0=await fetch('/api/privy?path='+encodeURIComponent(path),opts);
     const d0=await r0.json().catch(()=>({}));
-    if(!r0.ok) throw new Error('Privy '+r0.status+': '+(d0.cause||d0.error||d0.message||JSON.stringify(d0).slice(0,120)));
+    if(!r0.ok) throw new Error('Privy '+r0.status+': '+pErr(d0));
     return d0;
   }catch(e0){
     if(e0.message.startsWith('Privy')) throw e0;
@@ -1061,7 +1070,7 @@ async function pFetch(path, body, jwt){
   try{
     const r=await fetch(target,opts);
     const d=await r.json().catch(()=>({}));
-    if(!r.ok) throw new Error('Privy '+r.status+': '+(d.cause||d.error||d.message||JSON.stringify(d).slice(0,120)));
+    if(!r.ok) throw new Error('Privy '+r.status+': '+pErr(d));
     return d;
   }catch(e){
     if(e.message.startsWith('Privy')) throw e;
@@ -1069,7 +1078,7 @@ async function pFetch(path, body, jwt){
     try{
       const r2=await fetch('http://localhost:8080/privy-proxy?path='+encodeURIComponent(path),opts);
       const d2=await r2.json().catch(()=>({}));
-      if(!r2.ok) throw new Error('Privy '+r2.status+': '+(d2.cause||d2.error||d2.message||JSON.stringify(d2).slice(0,120)));
+      if(!r2.ok) throw new Error('Privy '+r2.status+': '+pErr(d2));
       return d2;
     }catch(e2){
       if(e2.message.startsWith('Privy')) throw e2;
@@ -1077,7 +1086,7 @@ async function pFetch(path, body, jwt){
       const url='https://corsproxy.io/?'+encodeURIComponent(target);
       const r3=await fetch(url,opts);
       const d3=await r3.json().catch(()=>({}));
-      if(!r3.ok) throw new Error('Privy '+r3.status+': '+(d3.cause||d3.error||d3.message||JSON.stringify(d3).slice(0,120)));
+      if(!r3.ok) throw new Error('Privy '+r3.status+': '+pErr(d3));
       return d3;
     }
   }
